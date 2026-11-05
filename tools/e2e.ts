@@ -94,6 +94,28 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   });
   await page.keyboard.up("g");
   logs.push(`[${tag}] held key: ${JSON.stringify(held)}`);
+  // beatbox: preset, play, playhead + level from telemetry, a pad, stop
+  await page.getByRole("radio", { name: "Beatbox" }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Breakbeat" }).click();
+  await page.getByRole("button", { name: "Play beat" }).click();
+  const beatSamples: { step: number; rms: number }[] = [];
+  for (let i = 0; i < 8; i++) {
+    await page.waitForTimeout(250);
+    beatSamples.push(
+      await page.evaluate(() => {
+        // @ts-expect-error debug handle
+        const t = window.__chimeraEngine?.latest;
+        return { step: t?.beatStep ?? -2, rms: t?.t?.outRms ?? -1 };
+      }),
+    );
+  }
+  await page.screenshot({ path: `${outDir}/${tag}-6-beatbox.png`, fullPage: tag !== "desktop" });
+  logs.push(`[${tag}] beatbox steps ${beatSamples.map((b) => b.step).join(",")} rms ${beatSamples.map((b) => b.rms.toFixed(3)).join(",")}`);
+  await page.locator(".pad").first().dispatchEvent("pointerdown");
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Stop" }).click();
+  await page.waitForTimeout(300);
   // back to the human voice
   await page.getByRole("radio", { name: "Play" }).click();
   await page.waitForTimeout(600);
@@ -110,4 +132,4 @@ await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
-console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to/i.test(l)).slice(0, 40).join("\n"));
+console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox/i.test(l)).slice(0, 40).join("\n"));

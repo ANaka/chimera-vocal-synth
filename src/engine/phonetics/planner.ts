@@ -125,26 +125,7 @@ export function planUtterance(input: Segment[], o: PlanOptions): Plan {
     const prevVowel = i > 0 && !!segs[i - 1].vowel;
     const nextVowel = i < segs.length - 1 && !!segs[i + 1].vowel;
     const prevSeg = i > 0 ? segs[i - 1] : null;
-    const addOral = (tg: Partial<HumanArtic>, a: number, b: number, speed: number, label: string) => {
-      const dom: Partial<HumanArtic> = {};
-      const sec: Partial<HumanArtic> = {};
-      for (const [k, v] of Object.entries(tg) as [keyof HumanArtic, number][]) (def.dominant.includes(k) ? dom : sec)[k] = v;
-      // the dorsum is heavy: its releases are slower than tip and lip releases
-      const bodyOnly = def.dominant.every((k) => k === "tbX" || k === "tbY" || k === "root");
-      const sp = bodyOnly ? 1 + (speed - 1) * 0.35 : speed;
-      // articulators need ~10–15 ms to climb out of the overshoot (contact) target, so the
-      // gesture releases early and the acoustic release lands on the planned boundary
-      // measured movement latencies (closure lag / release lag) per articulator class, so the
-      // acoustic closure and release land on the planned segment boundaries
-      const closing = def.manner === "stop" || def.manner === "nasal" || def.manner === "affricate";
-      const lipsOnly = def.dominant.every((k) => k === "lipAp" || k === "labiodental");
-      const lead = closing ? (bodyOnly ? 0.034 : lipsOnly ? 0.019 : 0.02) : 0;
-      // a consonant must own its constriction articulators (Task-Dynamics style): at strength 40
-      // the overlapping vowel contributes ~2 %, so closures seal instead of being diluted
-      const early = closing ? (bodyOnly ? 0.024 : lipsOnly ? 0.022 : 0.031) : 0.008;
-      if (Object.keys(dom).length) gestures.push({ t0: a - early, t1: Math.max(a + 0.01, b - lead), rampIn: 0.03, rampOut: bodyOnly ? 0.03 : 0.018, strength: 40, targets: dom, speed: sp, releaseHold: 0.045, label });
-      if (Object.keys(sec).length) gestures.push({ t0: a, t1: b, rampIn: 0.05, rampOut: 0.05, strength: 2.2, targets: sec, label });
-    };
+    const addOral = (tg: Partial<HumanArtic>, a: number, b: number, speed: number, label: string) => gestures.push(...oralGestures(def, tg, a, b, speed, label));
     switch (def.manner) {
       case "stop":
       case "nasal":
@@ -221,6 +202,33 @@ export function planUtterance(input: Segment[], o: PlanOptions): Plan {
     gestures.push({ t0, t1, rampIn: 0.06, rampOut: 0.06, strength: s.f0 ? 6 : 1, targets: { f0: target }, label: "pitch" });
   });
   return { gestures, segments: planned, end };
+}
+
+/**
+ * Oral gestures for one consonant constriction held acoustically from `a` to `b` (closure to
+ * release): a dominant gesture on the consonant's own articulators and a weak one on the rest.
+ * Movement latencies are compensated so the acoustic closure and release land on a and b.
+ */
+export function oralGestures(def: PhonemeDef, tg: Partial<HumanArtic>, a: number, b: number, speed: number, label: string): Gesture[] {
+  const out: Gesture[] = [];
+  const dom: Partial<HumanArtic> = {};
+  const sec: Partial<HumanArtic> = {};
+  for (const [k, v] of Object.entries(tg) as [keyof HumanArtic, number][]) (def.dominant.includes(k) ? dom : sec)[k] = v;
+  // the dorsum is heavy: its releases are slower than tip and lip releases
+  const bodyOnly = def.dominant.every((k) => k === "tbX" || k === "tbY" || k === "root");
+  const sp = bodyOnly ? 1 + (speed - 1) * 0.35 : speed;
+  // articulators need ~10–15 ms to climb out of the overshoot (contact) target, so the
+  // gesture releases early and the acoustic release lands on the planned boundary:
+  // measured movement latencies (closure lag / release lag) per articulator class
+  const closing = def.manner === "stop" || def.manner === "nasal" || def.manner === "affricate";
+  const lipsOnly = def.dominant.every((k) => k === "lipAp" || k === "labiodental");
+  const lead = closing ? (bodyOnly ? 0.034 : lipsOnly ? 0.019 : 0.02) : 0;
+  // a consonant must own its constriction articulators (Task-Dynamics style): at strength 40
+  // the overlapping vowel contributes ~2 %, so closures seal instead of being diluted
+  const early = closing ? (bodyOnly ? 0.024 : lipsOnly ? 0.022 : 0.031) : 0.008;
+  if (Object.keys(dom).length) out.push({ t0: a - early, t1: Math.max(a + 0.01, b - lead), rampIn: 0.03, rampOut: bodyOnly ? 0.03 : 0.018, strength: 40, targets: dom, speed: sp, releaseHold: 0.045, label });
+  if (Object.keys(sec).length) out.push({ t0: a, t1: b, rampIn: 0.05, rampOut: 0.05, strength: 2.2, targets: sec, label });
+  return out;
 }
 
 /** Plan consecutive phrases (each with its own breath group and intonation) from t0. */

@@ -291,7 +291,9 @@ export class HumanVoice {
     // a negative breath gesture (ingressive: inward K snares, gasps) overrides the performer's breath
     const scoreBreath = breathVal * breathAct;
     const gateGoal = scoreBreath < 0 ? scoreBreath : Math.max(this.gateTarget, scoreBreath);
-    const tau = gateGoal > this.gate ? 0.025 : 0.07;
+    // a score shapes its own breath ramps (beatbox hits end their breath abruptly); the slow
+    // release is for the performer's note-offs
+    const tau = gateGoal > this.gate ? 0.025 : breathAct > 0 ? 0.02 : 0.07;
     this.gate += (gateGoal - this.gate) * (1 - Math.exp(-dt / tau));
     this.pLung = this.source.pressure * CM_H2O * this.gate;
     // pitch glide

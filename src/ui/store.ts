@@ -5,10 +5,20 @@ import { NEUTRAL, restTip, type HumanArtic } from "../engine/anatomy/human.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 import { creatureById } from "../engine/creatures/index.ts";
 import type { ParamDef } from "../engine/creatures/types.ts";
+import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../engine/phonetics/beatbox.ts";
 
 export const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
 
-export type Mode = "play" | "speak" | "bestiary";
+export type Mode = "play" | "speak" | "bestiary" | "beatbox";
+
+export interface BeatState {
+  steps: (BeatStep | null)[];
+  bpm: number;
+  swing: number;
+  playing: boolean;
+  /** preset the pattern came from (null once edited) */
+  preset: string | null;
+}
 
 export interface ViewOptions {
   pressure: boolean;
@@ -41,6 +51,19 @@ interface State {
   /** what the keys do in the bestiary: hold the voice at a pitch (null) or trigger this call */
   keyCall: string | null;
   setKeyCall: (id: string | null) => void;
+  beat: BeatState;
+  /** close-mic sound (proximity bass + compression) in beatbox mode */
+  mic: boolean;
+  /** hum note for new hum steps: follows the last key played */
+  bassNote: number;
+  setBeatSteps: (steps: (BeatStep | null)[], preset?: string | null) => void;
+  /** one sound per step: set it, or clear the step if that sound is already there */
+  toggleBeatStep: (i: number, id: string) => void;
+  setBeatTempo: (v: { bpm?: number; swing?: number }) => void;
+  setBeatPlaying: (on: boolean) => void;
+  loadBeatPreset: (name: string) => void;
+  beatHit: (id: string) => void;
+  setMic: (on: boolean) => void;
   start: () => Promise<void>;
   setBody: (b: BodyName) => void;
   setSource: (v: Partial<VoiceSource>) => void;
@@ -74,6 +97,8 @@ function updateGate(s: { hold: boolean; heldNotes: number[]; mode: Mode; keyCall
 
 let startPromise: Promise<void> | null = null;
 
+const FIRST_BEAT = BEAT_PRESETS[0];
+
 export const useStore = create<State>((set, get) => ({
   started: false,
   starting: false,
@@ -101,6 +126,16 @@ export const useStore = create<State>((set, get) => ({
       const s = get();
       engine.setCreature(m === "bestiary" ? s.creature : "human", s.cparams[s.creature]);
     }
+    if (prev === "beatbox") {
+      get().setBeatPlaying(false);
+      engine.setMic(false);
+    }
+    if (m === "beatbox") {
+      // a beatboxer waits with the jaw nearly closed; the sounds bring their own breath
+      set({ hold: false });
+      get().setArtic(beatReady(get().body));
+      engine.setMic(get().mic);
+    }
     updateGate(get());
   },
   creature: "songbird",
@@ -109,6 +144,53 @@ export const useStore = create<State>((set, get) => ({
   setKeyCall: (id) => {
     set({ keyCall: id, heldNotes: [] });
     updateGate(get());
+  },
+  beat: { steps: parseBeat(FIRST_BEAT.text), bpm: FIRST_BEAT.bpm, swing: FIRST_BEAT.swing, playing: false, preset: FIRST_BEAT.name },
+  mic: true,
+  bassNote: BASS_NOTE,
+  setBeatSteps: (steps, preset = null) => {
+    set((s) => ({ beat: { ...s.beat, steps, preset } }));
+    engine.setBeat({ steps });
+  },
+  toggleBeatStep: (i, id) => {
+    const steps = get().beat.steps.slice();
+    steps[i] = steps[i]?.id === id ? null : id === "m" ? { id, note: get().bassNote } : { id };
+    get().setBeatSteps(steps);
+  },
+  setBeatTempo: (v) => {
+    set((s) => ({ beat: { ...s.beat, ...v } }));
+    engine.setBeat(v);
+  },
+  setBeatPlaying: (on) => {
+    if (on === get().beat.playing) return;
+    set((s) => ({ beat: { ...s.beat, playing: on } }));
+    if (!on) {
+      engine.setBeat({ playing: false });
+      return;
+    }
+    void get()
+      .start()
+      .then(() => {
+        const b = get().beat;
+        if (get().started && b.playing) engine.setBeat({ steps: b.steps, bpm: b.bpm, swing: b.swing, playing: true });
+      });
+  },
+  loadBeatPreset: (name) => {
+    const p = BEAT_PRESETS.find((x) => x.name === name);
+    if (!p) return;
+    get().setBeatSteps(parseBeat(p.text), p.name);
+    get().setBeatTempo({ bpm: p.bpm, swing: p.swing });
+  },
+  beatHit: (id) => {
+    void get()
+      .start()
+      .then(() => {
+        if (get().started) engine.beatHit(id, id === "m" ? get().bassNote : undefined);
+      });
+  },
+  setMic: (on) => {
+    set({ mic: on });
+    if (get().mode === "beatbox") engine.setMic(on);
   },
   setCreature: (id) => {
     if (id === get().creature) return;
@@ -142,6 +224,10 @@ export const useStore = create<State>((set, get) => ({
         engine.setSource(s.source);
         engine.setArtic(s.artic, s.tipFree);
         if (s.mode === "bestiary") engine.setCreature(s.creature, s.cparams[s.creature]);
+        if (s.mode === "beatbox") {
+          engine.setMic(s.mic);
+          engine.setBeat({ steps: s.beat.steps, bpm: s.beat.bpm, swing: s.beat.swing, playing: s.beat.playing });
+        }
         updateGate(s);
         set({ started: true, starting: false });
       } catch (e) {
@@ -182,6 +268,11 @@ export const useStore = create<State>((set, get) => ({
       const f = pp ? creatureKeyHz(midi, pp) : undefined;
       if (s.keyCall) s.playCall(s.keyCall, f);
       else if (pp && f) s.setCParam(pp.key, f);
+    } else if (s.mode === "beatbox") {
+      // keys hum a bass note under the beat (lips shut, nose open); new hum steps take it too
+      set({ bassNote: midi });
+      if (held.length === 1) s.setArtic({ lipAp: -0.25, velum: 0.9 });
+      s.setSource({ f0: midiToHz(midi) });
     } else s.setSource({ f0: midiToHz(midi) });
     updateGate(get());
   },
@@ -189,6 +280,7 @@ export const useStore = create<State>((set, get) => ({
     const held = get().heldNotes.filter((n) => n !== midi);
     set({ heldNotes: held });
     const s = get();
+    if (s.mode === "beatbox" && !held.length) s.setArtic({ lipAp: beatReady(s.body).lipAp, velum: 0 });
     if (held.length) {
       // fall back to the most recent note still held (legato)
       const last = held[held.length - 1];

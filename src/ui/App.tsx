@@ -17,6 +17,7 @@ import { Spectrogram } from "./components/Spectrogram.tsx";
 import { Scope } from "./components/Scope.tsx";
 import { CreatureTubes } from "./components/CreatureTubes.tsx";
 import { creatureById } from "../engine/creatures/index.ts";
+import { BeatboxPanel, BeatOverlay } from "./components/BeatboxPanel.tsx";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
@@ -49,6 +50,7 @@ function TopBar() {
           { value: "play", label: "Play" },
           { value: "speak", label: "Speak" },
           { value: "bestiary", label: "Bestiary" },
+          { value: "beatbox", label: "Beatbox" },
         ]}
       />
       {mode !== "bestiary" && (
@@ -102,30 +104,32 @@ function StartPrompt() {
   const err = useStore((s) => s.startError);
   const start = useStore((s) => s.start);
   const setHold = useStore((s) => s.setHold);
-  const bestiary = useStore((s) => s.mode === "bestiary");
+  const mode = useStore((s) => s.mode);
   const playCall = useStore((s) => s.playCall);
   const creature = useStore((s) => s.creature);
+  const setBeatPlaying = useStore((s) => s.setBeatPlaying);
   if (started) return null;
+  const copy = {
+    bestiary: ["Each animal's sound comes from a simulation of its own sound source and airway.", "Start and hear a call", "Then play its calls, or hold the keys to sustain it at a pitch."],
+    beatbox: ["Every drum here is a mouth sound: lips, tongue and larynx pushing, sealing and sucking air.", "Start the beat", "Then edit the pattern, tap the pads, or hum a bass note on the keys."],
+  }[mode as "bestiary" | "beatbox"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
   return (
     <div className="start-prompt">
-      <p>{bestiary ? "Each animal's sound comes from a simulation of its own sound source and airway." : "Every sound here is produced by simulating air moving through a throat, mouth and nose."}</p>
+      <p>{copy[0]}</p>
       <button
         className="primary large"
         disabled={starting}
         onClick={async () => {
           await start();
           const first = creatureById(creature)?.calls[0];
-          if (bestiary && first) playCall(first.id);
-          else if (!bestiary) setHold(true);
+          if (mode === "bestiary" && first) playCall(first.id);
+          else if (mode === "beatbox") setBeatPlaying(true);
+          else setHold(true);
         }}
       >
-        {starting ? "Starting…" : bestiary ? "Start and hear a call" : "Breathe in and start"}
+        {starting ? "Starting…" : copy[1]}
       </button>
-      {err ? (
-        <p className="error">Audio could not start: {err}. Reload the page and try again.</p>
-      ) : (
-        <p className="hint">{bestiary ? "Then play its calls, or hold the keys to sustain it at a pitch." : "Then drag the tongue, lips or jaw, or play the keys."}</p>
-      )}
+      {err ? <p className="error">Audio could not start: {err}. Reload the page and try again.</p> : <p className="hint">{copy[2]}</p>}
     </div>
   );
 }
@@ -134,6 +138,7 @@ function Deck() {
   const mode = useStore((s) => s.mode);
   if (mode === "speak") return <SpeakPanel />;
   if (mode === "bestiary") return <BestiaryPanel />;
+  if (mode === "beatbox") return <BeatboxPanel />;
   return (
     <>
       <section className="deck">
@@ -152,8 +157,25 @@ function Deck() {
 }
 
 function Instruments() {
-  const bestiary = useStore((s) => s.mode === "bestiary");
-  if (bestiary)
+  const mode = useStore((s) => s.mode);
+  if (mode === "beatbox")
+    return (
+      <aside className="instruments">
+        <figure className="instrument">
+          <figcaption>Tube, glottis to lips</figcaption>
+          <TubeView />
+        </figure>
+        <figure className="instrument">
+          <figcaption>Spectrogram</figcaption>
+          <Spectrogram />
+        </figure>
+        <figure className="instrument">
+          <figcaption>Vocal folds, slowed down</figcaption>
+          <Stroboscope />
+        </figure>
+      </aside>
+    );
+  if (mode === "bestiary")
     return (
       <aside className="instruments">
         <figure className="instrument">
@@ -189,10 +211,12 @@ function Instruments() {
 }
 
 function Viewport() {
-  const bestiary = useStore((s) => s.mode === "bestiary");
+  const mode = useStore((s) => s.mode);
+  const bestiary = mode === "bestiary";
   return (
     <section className="viewport" aria-label={bestiary ? "Live creature airway" : "Live vocal tract"}>
       {bestiary ? <CreatureView /> : <AnatomyView />}
+      {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
       <ViewToggles />
     </section>

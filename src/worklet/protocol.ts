@@ -4,6 +4,7 @@ import type { VoiceSource, VoiceTelemetry } from "../engine/voice/humanVoice.ts"
 import type { Segment, PlannedSegment } from "../engine/phonetics/planner.ts";
 import type { Gesture } from "../engine/control/score.ts";
 import type { CreatureTelemetry } from "../engine/creatures/voice.ts";
+import type { BeatStep } from "../engine/phonetics/beatbox.ts";
 
 export interface PhraseMsg {
   segments: Segment[];
@@ -26,7 +27,11 @@ export type ToWorklet =
   | { type: "creature"; id: string; params?: Record<string, number> }
   | { type: "cparams"; values: Record<string, number> }
   | { type: "call"; id: string; pitch?: number; amp?: number }
-  | { type: "stopCall" };
+  | { type: "stopCall" }
+  /** beatbox sequencer: any subset of its state */
+  | { type: "beat"; steps?: (BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }
+  /** play one beatbox sound as soon as the mouth can make it */
+  | { type: "beatHit"; id: string; note?: number; accent?: number };
 
 export interface TelemetryMessage {
   type: "telemetry";
@@ -36,6 +41,8 @@ export interface TelemetryMessage {
   body: BodyName;
   nPh: number;
   nOr: number;
+  /** beatbox step under the playhead (−1 when the sequencer is stopped) */
+  beatStep: number;
 }
 
 export interface PlannedMessage {

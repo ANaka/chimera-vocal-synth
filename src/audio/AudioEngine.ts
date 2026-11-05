@@ -18,6 +18,9 @@ export class AudioEngine {
   /** long time-domain window for the waveform scope */
   analyserScope: AnalyserNode | null = null;
   private master: GainNode | null = null;
+  /** "close mic" chain: proximity bass, presence, compression (beatboxers cup the mic) */
+  private micIn: AudioNode | null = null;
+  private micOn = false;
   latest: TelemetryMessage | null = null;
   latestCreature: CreatureTelemetryMessage | null = null;
   /** load of the most recent telemetry of either kind */
@@ -65,7 +68,27 @@ export class AudioEngine {
     const scope = ctx.createAnalyser();
     scope.fftSize = 16384;
     this.analyserScope = scope;
-    node.connect(master);
+    // close-mic chain: proximity effect (low shelf), presence peak, fast compressor, make-up
+    const shelf = ctx.createBiquadFilter();
+    shelf.type = "lowshelf";
+    shelf.frequency.value = 120;
+    shelf.gain.value = 9;
+    const presence = ctx.createBiquadFilter();
+    presence.type = "peaking";
+    presence.frequency.value = 3500;
+    presence.Q.value = 0.8;
+    presence.gain.value = 3;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -28;
+    comp.knee.value = 8;
+    comp.ratio.value = 5;
+    comp.attack.value = 0.002;
+    comp.release.value = 0.12;
+    const makeup = ctx.createGain();
+    makeup.gain.value = 2.2;
+    shelf.connect(presence).connect(comp).connect(makeup).connect(master);
+    this.micIn = shelf;
+    node.connect(this.micOn ? shelf : master);
     master.connect(ctx.destination);
     master.connect(analyser);
     master.connect(fast);
@@ -142,6 +165,23 @@ export class AudioEngine {
 
   private send(m: ToWorklet): void {
     this.node?.port.postMessage(m);
+  }
+
+  /** Route the voice through the close-mic chain (on) or straight to the output (off). */
+  setMic(on: boolean): void {
+    if (on === this.micOn) return;
+    this.micOn = on;
+    if (!this.node || !this.master || !this.micIn) return;
+    this.node.disconnect();
+    this.node.connect(on ? this.micIn : this.master);
+  }
+
+  setBeat(m: { steps?: import("../engine/phonetics/beatbox.ts").BeatStep[] | (import("../engine/phonetics/beatbox.ts").BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }): void {
+    this.send({ type: "beat", ...m });
+  }
+
+  beatHit(id: string, note?: number, accent?: number): void {
+    this.send({ type: "beatHit", id, note, accent });
   }
 
   setVolume(v: number): void {

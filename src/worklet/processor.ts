@@ -7,6 +7,7 @@ import { BODY_MALE, BODY_FEMALE, BODY_CHILD, type HumanBody } from "../engine/an
 import type { ToWorklet, FromWorklet, BodyName } from "./protocol.ts";
 import { CreatureVoice } from "../engine/creatures/voice.ts";
 import { creatureById } from "../engine/creatures/index.ts";
+import { BeatPlayer } from "../engine/control/beatPlayer.ts";
 
 // Minimal AudioWorkletGlobalScope typings
 declare const sampleRate: number;
@@ -32,6 +33,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   private pendingCreatureParams: Record<string, number> = {};
   private pendingCall: { id: string; pitch?: number; amp?: number } | null = null;
   private gateLevel = 0;
+  private beat = new BeatPlayer();
 
   constructor() {
     super();
@@ -102,6 +104,23 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "stopSpeech":
         this.voice.cancelScore();
         break;
+      case "beat": {
+        const b = this.beat;
+        if (m.steps) b.steps = m.steps.slice(0, 128);
+        if (m.bpm !== undefined || m.swing !== undefined) b.setTempo(m.bpm ?? b.bpm, m.swing ?? b.swing);
+        if (m.playing === true && !b.playing) b.start(this.voice.clock);
+        if (m.playing === false && b.playing) {
+          b.stop();
+          // hits already scheduled within the horizon would still sound
+          this.voice.cancelScore();
+        }
+        break;
+      }
+      case "beatHit": {
+        const hit = this.voice.clock + BeatPlayer.leadIn(m.id, this.body);
+        this.voice.schedule(this.beat.gestures({ id: m.id, note: m.note, accent: m.accent }, hit, 0.18));
+        break;
+      }
     }
   }
 
@@ -114,6 +133,9 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       this.body = this.pendingBody;
       this.pendingBody = null;
       this.voice = this.makeVoice(this.body);
+      // the new voice's clock starts at zero: keep the beat's phase across the switch
+      this.beat.body = this.body;
+      this.beat.rebase(this.voice.clock - prev.clock);
       this.voice.setSource({ ...prev.source, f0: DEFAULT_F0[this.body] });
       this.voice.setArticulation({ ...prev.artic.target }, prev.artic.tipFree);
       this.voice.setGate(prev.gate > 0.5 ? 1 : 0);
@@ -136,6 +158,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
     }
     const ch0 = out[0];
+    if (!this.creature) this.beat.tick(this.voice.clock, (gs) => this.voice.schedule(gs));
     const t0 = Date.now();
     try {
       if (this.creature) this.creature.render(ch0, 0, ch0.length);
@@ -150,7 +173,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     this.load += 0.05 * (dt / budget - this.load);
     if (this.telemetryOn && ++this.blocks % 6 === 0) {
       if (this.creature) this.post({ type: "ctelemetry", t: this.creature.telemetry(), load: this.load });
-      else this.post({ type: "telemetry", t: this.voice.telemetry(), load: this.load, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+      else this.post({ type: "telemetry", t: this.voice.telemetry(), load: this.load, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, beatStep: this.beat.stepAt(this.voice.clock) });
     }
     return true;
   }
