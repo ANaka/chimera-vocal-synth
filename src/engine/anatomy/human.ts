@@ -365,16 +365,23 @@ export class HumanVocalTract {
     // pharyngeal rays (a pocket makes ray crossings flip discontinuously)
     const inner = new Polyline();
     inner.push(epiBase).push(epiTip);
+    // The wall leaves the epiglottis tip upward, for where the tongue's back (root, then the
+    // dorsum arc) first rises above it: with the tongue low and the larynx high the whole root
+    // can sit below the tip, and a wall coming back down from it made the tip a peak that a
+    // horizontal ray measured past (to the root) or not (to the epiglottis) — a jump.
     const yRoot = epiTip.y + 0.05 * k;
-    let rootStart = root.findIndex((q) => q.y > yRoot);
-    if (rootStart < 0) rootStart = root.length - 1;
-    else if (rootStart > 0) {
+    const back = [...root, ...arcPts.slice(1)];
+    let start = back.findIndex((q) => q.y > yRoot);
+    if (start < 0) start = back.length - 1;
+    else if (start > 0) {
       // start exactly at that height, not at the next sample point (which jumped along the root)
-      const a = root[rootStart - 1], b = root[rootStart];
+      const a = back[start - 1], b = back[start];
       inner.push(lerpV(a, b, clamp((yRoot - a.y) / Math.max(1e-9, b.y - a.y), 0, 1)));
     }
-    for (let i = rootStart; i < root.length; i++) inner.push(root[i]);
-    inner.append(arcPts, true);
+    if (start < root.length) {
+      for (let i = start; i < root.length; i++) inner.push(root[i]);
+      inner.append(arcPts, true);
+    } else inner.append(arcPts.slice(start - root.length + 1), true);
     inner.append(blade, true);
     inner.append(under, true);
     inner.append(floor, true);

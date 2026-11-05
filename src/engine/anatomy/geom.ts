@@ -64,16 +64,27 @@ export function rayPolyline(ox: number, oy: number, dx: number, dy: number, pl: 
   let n = 0;
   const xs = pl.xs, ys = pl.ys;
   for (let i = 0; i < xs.length - 1; i++) {
-    const ax = xs[i], ay = ys[i];
-    const ex = xs[i + 1] - ax, ey = ys[i + 1] - ay;
-    const den = dx * ey - dy * ex;
-    if (Math.abs(den) < 1e-12) continue;
-    const wx = ax - ox, wy = ay - oy;
-    const t = (wx * ey - wy * ex) / den;
-    const u = (wx * dy - wy * dx) / den;
-    if (u >= 0 && u < 1 && t >= tMin && t <= tMax) out[n++] = t;
+    const t = crossingT(ox, oy, dx, dy, xs[i], ys[i], xs[i + 1], ys[i + 1]);
+    if (t >= tMin && t <= tMax && n < out.length) out[n++] = t;
   }
   return n;
+}
+
+/**
+ * Where segment A→B crosses the line through o along d (as t along d), or NaN. A segment
+ * crosses only if its ends lie on different sides of the line, a point on the line counting as
+ * the positive side: a polyline passing through a vertex then crosses once, and one that only
+ * touches the line at a vertex crosses twice at the same t or not at all (a half-open rule on
+ * the segment parameter kept one crossing of such a touch, an unmatched entry or exit).
+ */
+function crossingT(ox: number, oy: number, dx: number, dy: number, ax: number, ay: number, bx: number, by: number): number {
+  const sa = dx * (ay - oy) - dy * (ax - ox) >= 0;
+  const sb = dx * (by - oy) - dy * (bx - ox) >= 0;
+  if (sa === sb) return NaN;
+  const ex = bx - ax, ey = by - ay;
+  const den = dx * ey - dy * ex;
+  if (Math.abs(den) < 1e-15) return NaN;
+  return ((ax - ox) * ey - (ay - oy) * ex) / den;
 }
 
 /**
@@ -84,16 +95,11 @@ export function rayCrossings(ox: number, oy: number, dx: number, dy: number, pl:
   let n = 0;
   const xs = pl.xs, ys = pl.ys;
   for (let i = 0; i < xs.length - 1; i++) {
-    const ax = xs[i], ay = ys[i];
-    const ex = xs[i + 1] - ax, ey = ys[i + 1] - ay;
-    const den = dx * ey - dy * ex;
-    if (Math.abs(den) < 1e-12) continue;
-    const wx = ax - ox, wy = ay - oy;
-    const t = (wx * ey - wy * ex) / den;
-    const u = (wx * dy - wy * dx) / den;
-    if (u >= 0 && u < 1 && t >= tMin && t <= tMax && n < outT.length) {
+    const t = crossingT(ox, oy, dx, dy, xs[i], ys[i], xs[i + 1], ys[i + 1]);
+    if (t >= tMin && t <= tMax && n < outT.length) {
       outT[n] = t;
-      exit[n] = den < 0 ? 1 : 0;
+      // leaving the tissue (on the polyline's right) for the air: the ray turns left across it
+      exit[n] = dx * (ys[i + 1] - ys[i]) - dy * (xs[i + 1] - xs[i]) < 0 ? 1 : 0;
       n++;
     }
   }
