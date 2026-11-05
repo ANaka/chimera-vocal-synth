@@ -4,6 +4,7 @@
 //! WAVs: `bun tools/spectrogram.ts in.wav out.png [title] [maxFreq] [windowMs]`.
 
 mod calibrate;
+mod compare;
 mod diagnose;
 mod js;
 mod render;
@@ -22,6 +23,7 @@ usage: chimera <command> [args] [--float]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child] [out]
   diagnose       [outdir]
+  compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
   calibrate vowels     [male|female|child|all] [--out file]
   calibrate consonants [--out file]
 
@@ -91,6 +93,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 _ => Err(format!("unknown render kind {kind:?}\n\n{USAGE}")),
             }
         }
+        ["compare", "csd", ..] => compare::csd(&ctx, &args[2..]),
         ["diagnose", ..] => diagnose::run(&ctx, &args[1..]),
         ["calibrate", "vowels", ..] => calibrate::vowels(&args[2..]),
         ["calibrate", "consonants", ..] => calibrate::consonants(&args[2..]),

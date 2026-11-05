@@ -151,3 +151,120 @@ fn calibrate_vowels_reproduces_the_committed_table() {
         differing.len()
     );
 }
+
+/// A tiny dataset in CSD's layout: two phrases (a gap between) and a melisma, with a stereo
+/// 16-bit 44.1 kHz "singer" that is a pure tone at each note's pitch.
+fn mini_csd(dir: &str, syllables: [&str; 4]) {
+    let notes = [
+        (0.3, 0.8, 69.0),
+        (0.8, 1.3, 69.0),
+        (1.3, 1.8, 71.0),
+        (2.1, 2.7, 72.0),
+    ];
+    std::fs::create_dir_all(format!("{dir}/english/csv")).unwrap();
+    std::fs::create_dir_all(format!("{dir}/english/wav")).unwrap();
+    let mut csv = String::from("start,end,pitch,syllable\r\n");
+    for ((a, b, m), s) in notes.iter().zip(syllables) {
+        csv += &format!("{a:.4},{b:.4},{m},{s}\r\n");
+    }
+    std::fs::write(format!("{dir}/english/csv/x01a.csv"), csv).unwrap();
+    let fs = 44100.0;
+    let n = (3.0 * fs) as usize;
+    let mut data = Vec::with_capacity(n * 4);
+    for i in 0..n {
+        let t = i as f64 / fs;
+        let v = notes
+            .iter()
+            .find(|(a, b, _)| t >= *a && t < *b)
+            .map_or(0.0, |(_, _, m)| {
+                let hz = 440.0 * 2f64.powf((m - 69.0) / 12.0);
+                0.3 * (2.0 * std::f64::consts::PI * hz * t).sin()
+            });
+        let s = ((v * 32767.0).round() as i16).to_le_bytes();
+        data.extend_from_slice(&s);
+        data.extend_from_slice(&s);
+    }
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    for v in [1u16, 2] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&44100u32.to_le_bytes());
+    b.extend_from_slice(&(44100u32 * 4).to_le_bytes());
+    for v in [4u16, 16] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    b.extend_from_slice(&data);
+    std::fs::write(format!("{dir}/english/wav/x01a.wav"), b).unwrap();
+}
+
+#[test]
+fn compare_csd_sings_the_annotation_on_the_recordings_timeline() {
+    let dir = tmp("csd-mini");
+    let out = tmp("csd-mini-out");
+    mini_csd(&dir, ["l_ii", "ii", "d_ou", "m_ai_n"]);
+    let stdout = chimera(&[
+        "compare", "csd", &dir, &out, "--songs", "x01a", "--jobs", "1",
+    ]);
+    assert!(stdout.contains("x01a    4 notes"), "{stdout}");
+
+    // the render has the recording's length (3 s at 48 kHz, 16-bit mono)
+    let synth = std::fs::metadata(format!("{out}/x01a-synth.wav"))
+        .unwrap()
+        .len();
+    assert_eq!(synth, 44 + 3 * 48000 * 2);
+
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{out}/report.json")).unwrap())
+            .unwrap();
+    let notes = report["songs"][0]["notes"].as_array().unwrap();
+    let ipa: Vec<&str> = notes.iter().map(|n| n["ipa"].as_str().unwrap()).collect();
+    assert_eq!(ipa, ["li", "i", "doʊ", "maɪn"]);
+    let flag = |k: &str| {
+        notes
+            .iter()
+            .map(|n| n[k].as_bool().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(flag("melisma"), [false, true, false, false]);
+    assert_eq!(flag("phraseStart"), [true, false, false, true]);
+    // the "singer" is a pure tone on the score, so its pitch error is ~0
+    for n in notes {
+        let c = n["human"]["cents"].as_f64().unwrap();
+        assert!(c.abs() < 3.0, "{n}");
+    }
+    // the synth sings every note near its pitch
+    for n in notes {
+        let c = n["synth"]["cents"].as_f64().unwrap();
+        assert!(c.abs() < 60.0, "{n}");
+    }
+    assert!(
+        std::fs::read_to_string(format!("{out}/report.md"))
+            .unwrap()
+            .contains("| measure |")
+    );
+}
+
+#[test]
+fn compare_csd_refuses_an_unmapped_phoneme() {
+    let dir = tmp("csd-bad");
+    mini_csd(&dir, ["l_ii", "ii", "d_qq", "m_ai_n"]);
+    let out = Command::new(env!("CARGO_BIN_EXE_chimera"))
+        .args([
+            "compare",
+            "csd",
+            &dir,
+            &tmp("csd-bad-out"),
+            "--songs",
+            "x01a",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unmapped CSD phonemes: qq"));
+}
