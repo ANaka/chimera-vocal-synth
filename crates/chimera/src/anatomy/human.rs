@@ -425,6 +425,62 @@ struct Scratch {
     outline: Polyline,
 }
 
+/// Room reserved in every point buffer: the outlines' lengths vary with the posture (how much of
+/// the pharyngeal wall and tongue root they take), and reserving the most they can hold up front
+/// keeps a voice from allocating the first time it meets a new posture.
+const POINTS: usize = 256;
+
+impl Scratch {
+    fn new() -> Scratch {
+        let pts = || Vec::with_capacity(POINTS);
+        let line = || Polyline::with_capacity(POINTS);
+        Scratch {
+            tmp: vec![0.0; MAX_CROSS],
+            cross_t: vec![0.0; MAX_CROSS],
+            cross_exit: vec![false; MAX_CROSS],
+            vel: pts(),
+            vel_oral: pts(),
+            vel_nasal: pts(),
+            outer: line(),
+            inner: line(),
+            upper_lip_in: pts(),
+            lower_lip_in: pts(),
+            lip_out: pts(),
+            root: pts(),
+            arc_pts: pts(),
+            blade: pts(),
+            under: pts(),
+            back: pts(),
+            roof: line(),
+            cum: Vec::with_capacity(POINTS),
+            tip_pts: pts(),
+            outline: line(),
+        }
+    }
+}
+
+impl HumanFrame {
+    /// A frame with room for any posture's outlines (see [`HumanVocalTract::compute`]).
+    pub fn with_capacity() -> HumanFrame {
+        let pts = || Vec::with_capacity(POINTS);
+        HumanFrame {
+            outer: pts(),
+            inner: pts(),
+            tongue: pts(),
+            velum: pts(),
+            upper_lip: pts(),
+            lower_lip: pts(),
+            upper_teeth: pts(),
+            lower_teeth: pts(),
+            jaw_bone: pts(),
+            epiglottis: pts(),
+            nasal_cavity: pts(),
+            grid: Vec::with_capacity(64),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HumanVocalTract {
     pub body: HumanBody,
@@ -459,7 +515,7 @@ impl HumanVocalTract {
             polar_c: v(0.0, 0.0),
             polar_c2: v(0.0, 0.0),
             nasal_cavity: Vec::new(),
-            sc: Scratch { tmp: vec![0.0; MAX_CROSS], cross_t: vec![0.0; MAX_CROSS], cross_exit: vec![false; MAX_CROSS], ..Default::default() },
+            sc: Scratch::new(),
             contact_tip: 1.0,
             contact_body: 1.0,
             contact_tip_n: v(0.0, -1.0),

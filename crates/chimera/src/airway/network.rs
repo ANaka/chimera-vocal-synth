@@ -550,9 +550,6 @@ impl AirwayNetwork {
         for &k in &self.pending_fixed {
             self.fixed[k] = true;
         }
-        // the step's branch loop indexes nodes without bounds checks: every endpoint must exist
-        assert!(self.b_a.iter().chain(&self.b_b).all(|&k| k < n), "branch endpoint out of range");
-        assert!(self.rad_nodes.iter().all(|&k| k < n), "radiator node out of range");
         self.u = zf(b);
         self.mom = zf(b);
         self.l_prev = zf(b);
@@ -872,8 +869,8 @@ impl AirwayNetwork {
         let enable_energy_safe = self.energy_safe;
         let symmetric = self.symmetric_kinetic;
         {
-            // indices were validated in finalize(): every b_a/b_b < n_nodes, and the per-branch
-            // arrays all have n_branches entries
+            // the arrays the branch loop reads, borrowed once (checked indexing costs nothing
+            // measurable here, against get_unchecked)
             let area = &self.area[..n];
             let amin = &self.amin[..n];
             let inv_a = &self.inv_a[..n];
@@ -889,12 +886,6 @@ impl AirwayNetwork {
             let branch_area = &mut self.branch_area[..nb];
             let port_area = &mut self.port_area[..nb];
             let (port_area_step, port_len, port_half, port_slit, port_extra_r, port_kin, port_kex) = (&self.port_area_step[..nb], &self.port_len[..nb], &self.port_half[..nb], &self.port_slit[..nb], &self.port_extra_r[..nb], &self.port_kin[..nb], &self.port_kex[..nb]);
-            macro_rules! node {
-                ($v:expr, $i:expr) => {
-                    // SAFETY: $i is a branch endpoint (< n, checked in finalize) and $v has n entries
-                    unsafe { *$v.get_unchecked($i) }
-                };
-            }
             for j in 0..nb {
                 let a = b_a[j];
                 let b = b_b[j];
@@ -904,10 +895,10 @@ impl AirwayNetwork {
                 let mut kb: f64;
                 let a_eff: f64;
                 if b_kind[j] == KIND_SERIES {
-                    let aa = node!(area, a);
-                    let ab = node!(area, b);
-                    let ma = node!(amin, a);
-                    let mb = node!(amin, b);
+                    let aa = area[a];
+                    let ab = area[b];
+                    let ma = amin[a];
+                    let mb = amin[b];
                     a_eff = if ma < mb { ma } else { mb };
                     if (if aa < ab { aa } else { ab }) < closed || a_eff < closed {
                         u_arr[j] = 0.0;
@@ -915,15 +906,15 @@ impl AirwayNetwork {
                         branch_area[j] = a_eff;
                         continue;
                     }
-                    let ia = node!(inv_a, a);
-                    let ib = node!(inv_a, b);
-                    l = half_rho * (node!(half_l, a) + node!(half_l, b));
+                    let ia = inv_a[a];
+                    let ib = inv_a[b];
+                    l = half_rho * (half_l[a] + half_l[b]);
                     // viscous: R = S·l/A² · sqrt(ρμω/2) with S = perimeter of each half-section
-                    r = 0.5 * visc * (node!(half_r, a) + node!(half_r, b));
+                    r = 0.5 * visc * (half_r[a] + half_r[b]);
                     // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
                     // the downstream node (sub-section minima make short constrictions lossy as they should be)
-                    let ima = node!(inv_amin, a);
-                    let imb = node!(inv_amin, b);
+                    let ima = inv_amin[a];
+                    let imb = inv_amin[b];
                     let ef = ima - ib; // a→b
                     let eb = imb - ia; // b→a
                     kf = if ef > 0.0 { half_rho * ef * ef } else { 0.0 };
@@ -955,7 +946,7 @@ impl AirwayNetwork {
                     let len = port_len[j];
                     let mut ll = RHO * len * ip;
                     if port_half[j] {
-                        ll += half_rho * (node!(half_l, a) + node!(half_l, b));
+                        ll += half_rho * (half_l[a] + half_l[b]);
                     }
                     l = ll;
                     let w = port_slit[j];
@@ -963,8 +954,8 @@ impl AirwayNetwork {
                     rr += port_extra_r[j];
                     r = rr;
                     // kinetic: entrance (contraction) + exit (jet expansion into the downstream node)
-                    let ex_f = ip - node!(inv_a, b); // flow a→b exits into b
-                    let ex_b = ip - node!(inv_a, a); // flow b→a exits into a
+                    let ex_f = ip - inv_a[b]; // flow a→b exits into b
+                    let ex_b = ip - inv_a[a]; // flow b→a exits into a
                     let kin = port_kin[j] * half_rho * ip * ip;
                     kf = kin + port_kex[j] * half_rho * (if ex_f > 0.0 { ex_f * ex_f } else { 0.0 });
                     kb = kin + port_kex[j] * half_rho * (if ex_b > 0.0 { ex_b * ex_b } else { 0.0 });
@@ -979,7 +970,7 @@ impl AirwayNetwork {
                 }
                 let lp = l_prev[j];
                 let m0 = if enable_energy_safe && l < lp { l * u_arr[j] } else { mom[j] };
-                let c = node!(p, a) - node!(p, b) + psrc[j] + m0 * inv_t;
+                let c = p[a] - p[b] + psrc[j] + m0 * inv_t;
                 let bq = l * inv_t + r;
                 let u = if c >= 0.0 {
                     if kf > 0.0 { (2.0 * c) / (bq + sqrt(bq * bq + 4.0 * kf * c)) } else { c / bq }
@@ -991,17 +982,12 @@ impl AirwayNetwork {
                 u_arr[j] = u;
                 mom[j] = l * u;
                 l_prev[j] = l;
-                // SAFETY: as above (endpoints < n)
-                unsafe {
-                    *flow_sum.get_unchecked_mut(a) -= u;
-                    *flow_sum.get_unchecked_mut(b) += u;
-                }
-                if node!(is_j, a) | node!(is_j, b) {
+                flow_sum[a] -= u;
+                flow_sum[b] += u;
+                if is_j[a] | is_j[b] {
                     let il = 1.0 / l;
-                    unsafe {
-                        *inv_lsum.get_unchecked_mut(a) += il;
-                        *inv_lsum.get_unchecked_mut(b) += il;
-                    }
+                    inv_lsum[a] += il;
+                    inv_lsum[b] += il;
                 }
             }
         }

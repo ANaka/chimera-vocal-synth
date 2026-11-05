@@ -149,7 +149,7 @@ impl HumanAirway {
             base: None,
             base_dt: 0.0,
             noise_list: Vec::with_capacity(8),
-            scratch_frame: HumanFrame::default(),
+            scratch_frame: HumanFrame::with_capacity(),
         }
     }
 

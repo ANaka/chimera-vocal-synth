@@ -560,6 +560,8 @@ impl HumanVoice {
         out.gate = self.gate;
         out.clock = self.clock;
         out.active.clear();
+        // room for every label it can hold, so the first labelled gesture does not allocate
+        out.active.reserve(4);
         for g in self.score.active_at(self.clock) {
             if out.active.len() == 4 {
                 break;

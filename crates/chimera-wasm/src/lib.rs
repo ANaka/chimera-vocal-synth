@@ -486,8 +486,10 @@ pub unsafe extern "C" fn engine_set_creature(h: *mut Handle, ptr: *const u8, len
         }
     }
     h.engine.set_creature(Some(def), &initial);
-    let c = h.engine.creature().unwrap();
-    let t = c.new_telemetry();
+    // a filled snapshot (taken now, while switching allocates anyway) gives the layout the
+    // worklet decodes and the block's capacity; `new_telemetry` alone only reserves room
+    let mut t = h.engine.creature().unwrap().new_telemetry();
+    h.engine.creature_telemetry(&mut t);
     let info = serde_json::json!({
         "id": def.id,
         "params": def.params.iter().map(|p| p.key).collect::<Vec<_>>(),

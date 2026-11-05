@@ -29,8 +29,11 @@ struct Stats {
 fn cmp(path: &str, want: &Value, got: &Value, st: &mut Stats) {
     match (want, got) {
         (Value::Object(a), Value::Object(b)) => {
-            let ka: Vec<&String> = a.keys().collect();
-            let kb: Vec<&String> = b.keys().collect();
+            // the same keys (in any order: JSON objects are maps)
+            let mut ka: Vec<&String> = a.keys().collect();
+            let mut kb: Vec<&String> = b.keys().collect();
+            ka.sort();
+            kb.sort();
             assert_eq!(ka, kb, "{path}: keys differ");
             for (k, va) in a {
                 let p = format!("{path}.{k}");
