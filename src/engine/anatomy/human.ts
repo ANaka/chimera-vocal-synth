@@ -303,9 +303,14 @@ export class HumanVocalTract {
     const llBase = J(7.12, 7.45);
     const lowerLipIn = bezier3(llBase, add(llBase, v(0.25 * k + prot * 0.3, -0.05 * k)), add(llEdge, v(-0.3 * k, -0.12 * k)), llEdge, 7);
 
+    // acoustic inner wall: epiglottis (laryngeal surface) then the tongue root *above* the
+    // epiglottis tip — the vallecula pocket is omitted so the wall is single-valued along the
+    // pharyngeal rays (a pocket makes ray crossings flip discontinuously)
     const inner = new Polyline();
-    inner.push(epiBase).push(epiTip).push(vallecula);
-    inner.append(root, true);
+    inner.push(epiBase).push(epiTip);
+    let rootStart = root.findIndex((q) => q.y > epiTip.y + 0.05 * k);
+    if (rootStart < 0) rootStart = root.length - 1;
+    for (let i = rootStart; i < root.length; i++) inner.push(root[i]);
     inner.append(arcPts, true);
     inner.append(blade, true);
     inner.append(under, true);
@@ -461,7 +466,7 @@ export class HumanVocalTract {
    * Uses the harmonic mean of area over each section (preserves constriction inertance and
    * exact closures).
    */
-  resample(a: HumanArtic, f: HumanFrame, nPh: number, nOr: number, outPh: Float64Array, outOr: Float64Array): { phLen: number; orLen: number } {
+  resample(a: HumanArtic, f: HumanFrame, nPh: number, nOr: number, outPh: Float64Array, outOr: Float64Array, minPh?: Float64Array, minOr?: Float64Array): { phLen: number; orLen: number } {
     const epiLen = 2.4 * this.k * this.body.pharynx;
     const g = f.grid;
     const areaAt = (s: number): number => {
@@ -478,14 +483,16 @@ export class HumanVocalTract {
       const t = (s - g[lo].s) / Math.max(1e-9, g[hi].s - g[lo].s);
       return lerp(g[lo].area, g[hi].area, t);
     };
-    const fill = (s0: number, s1: number, n: number, out: Float64Array) => {
+    const fill = (s0: number, s1: number, n: number, out: Float64Array, mins?: Float64Array) => {
       const d = (s1 - s0) / n;
       const sub = 8;
       for (let i = 0; i < n; i++) {
         let inv = 0;
         let closed = false;
+        let mn = Infinity;
         for (let j = 0; j < sub; j++) {
           const A = areaAt(s0 + d * (i + (j + 0.5) / sub));
+          if (A < mn) mn = A;
           if (A <= 1e-5) {
             closed = true;
             break;
@@ -493,11 +500,12 @@ export class HumanVocalTract {
           inv += 1 / A;
         }
         out[i] = closed ? 0 : sub / inv;
+        if (mins) mins[i] = closed ? 0 : mn;
       }
     };
     const sp = f.pharynxLength;
-    fill(0, sp, nPh, outPh);
-    fill(sp, f.lipS, nOr, outOr);
+    fill(0, sp, nPh, outPh, minPh);
+    fill(sp, f.lipS, nOr, outOr, minOr);
     return { phLen: sp, orLen: f.lipS - sp };
   }
 }

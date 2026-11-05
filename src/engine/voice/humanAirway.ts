@@ -8,6 +8,7 @@
 import { AirwayNetwork, type Tube } from "../airway/network.ts";
 import { HumanVocalTract, type HumanArtic, type HumanBody, type HumanFrame, BODY_MALE } from "../anatomy/human.ts";
 import { WALL_SOFT, WALL_TRACHEA, WALL_NASAL, RHO, C_SOUND } from "../physics.ts";
+import { smoothstep as smooth } from "../util/math.ts";
 
 export interface HumanAirwayOptions {
   body?: HumanBody;
@@ -33,6 +34,8 @@ export class HumanAirway {
   readonly nOr: number;
   readonly phAreas: Float64Array;
   readonly orAreas: Float64Array;
+  readonly phMin: Float64Array;
+  readonly orMin: Float64Array;
   frame: HumanFrame | null = null;
   phLen = 8.8;
   orLen = 8.3;
@@ -53,6 +56,8 @@ export class HumanAirway {
     this.nOr = Math.max(8, Math.floor(orMin / dxMin));
     this.phAreas = new Float64Array(this.nPh);
     this.orAreas = new Float64Array(this.nOr);
+    this.phMin = new Float64Array(this.nPh);
+    this.orMin = new Float64Array(this.nOr);
 
     const trLen = 12 * k;
     this.trachea = net.addTube({ name: "trachea", n: Math.max(6, Math.floor(trLen / Math.max(dxMin, 0.9 * k))), length: trLen, area: 2.5 * k * k, wall: WALL_TRACHEA });
@@ -90,14 +95,32 @@ export class HumanAirway {
     return t.branch(Math.max(0, Math.min(t.n - 2, i)));
   }
 
-  /** Geometry → targets for the next block. Returns the computed frame. */
-  apply(a: HumanArtic): HumanFrame {
+  /** max area change rate (cm²/s, body-scaled): a physiological guard against geometric jumps */
+  maxAreaRate = 160;
+
+  /** Geometry → targets for the next block. Returns the computed frame. `dt` enables slew limiting. */
+  apply(a: HumanArtic, dt = 0): HumanFrame {
     const f = (this.frame = this.tract.compute(a));
-    const { phLen, orLen } = this.tract.resample(a, f, this.nPh, this.nOr, this.phAreas, this.orAreas);
+    const oldPh = dt > 0 ? Float64Array.from(this.phAreas) : null;
+    const oldOr = dt > 0 ? Float64Array.from(this.orAreas) : null;
+    const { phLen, orLen } = this.tract.resample(a, f, this.nPh, this.nOr, this.phAreas, this.orAreas, this.phMin, this.orMin);
+    if (oldPh && oldOr) {
+      const lim = this.maxAreaRate * this.body.scale * this.body.scale * dt;
+      const clampArr = (cur: Float64Array, old: Float64Array, mins: Float64Array) => {
+        for (let i = 0; i < cur.length; i++) {
+          const d = cur[i] - old[i];
+          if (d > lim) cur[i] = old[i] + lim;
+          else if (d < -lim) cur[i] = old[i] - lim;
+          if (mins[i] > cur[i]) mins[i] = cur[i];
+        }
+      };
+      clampArr(this.phAreas, oldPh, this.phMin);
+      clampArr(this.orAreas, oldOr, this.orMin);
+    }
     this.phLen = phLen;
     this.orLen = orLen;
-    this.net.setTubeTargets(this.pharynx, this.phAreas, phLen);
-    this.net.setTubeTargets(this.oral, this.orAreas, orLen);
+    this.net.setTubeTargets(this.pharynx, this.phAreas, phLen, this.phMin);
+    this.net.setTubeTargets(this.oral, this.orAreas, orLen, this.orMin);
     this.net.setPortTarget(this.velumPort, f.velumPort);
     this.updateNoise(f);
     return f;
@@ -113,32 +136,36 @@ export class HumanAirway {
     const nPh = this.nPh, nOr = this.nOr;
     let minA = Infinity, minI = -1;
     for (let i = 0; i < nPh + nOr; i++) {
-      const A = i < nPh ? this.phAreas[i] : this.orAreas[i - nPh];
+      const A = i < nPh ? this.phMin[i] : this.orMin[i - nPh];
       if (A > 0 && A < minA) {
         minA = A;
         minI = i;
       }
     }
-    // also consider closures adjacent to open sections (release bursts): the open neighbour of a zero
-    if (minI >= 0 && minA < 0.8 * this.body.scale * this.body.scale) {
+    // narrowest open point: its jet makes frication noise. Every weight below is a smooth function
+    // of geometry so sources fade in/out instead of toggling (toggling = audible noise bursts).
+    const k2 = this.body.scale * this.body.scale;
+    const wArea = minI >= 0 ? 1 - smooth(0.35 * k2, 0.9 * k2, minA) : 0;
+    if (wArea > 0) {
       const dxPh = this.phLen / nPh, dxOr = this.orLen / nOr;
       const toBranch = (gi: number): number => (gi < nPh ? this.branchOf(this.pharynx, gi) : gi === nPh ? -1 : this.branchOf(this.oral, gi - nPh));
       const dx = minI < nPh ? dxPh : dxOr;
-      const off = Math.max(1, Math.round(0.9 * this.body.scale / dx));
+      const off = Math.max(1, Math.round((0.9 * this.body.scale) / dx));
       const src = toBranch(Math.min(minI, nPh + nOr - 2));
-      const fwdI = Math.min(nPh + nOr - 2, minI + off);
-      const bwdI = Math.max(0, minI - off);
-      const fwd = toBranch(fwdI);
-      const bwd = toBranch(bwdI);
+      const fwd = toBranch(Math.min(nPh + nOr - 2, minI + off));
+      const bwd = toBranch(Math.max(0, minI - off));
       if (src >= 0 && fwd >= 0 && bwd >= 0) {
-        list.push({ src, fwd, bwd, gain: g.constriction, lowpassHz: 9000, highpassHz: 700 });
-        // obstacle source at the teeth for constrictions 0.3–3 cm behind the incisors
+        list.push({ src, fwd, bwd, gain: g.constriction * wArea, lowpassHz: 9000, highpassHz: 700 });
+        // obstacle source: a narrow anterior jet impinging on the incisors (sibilants)
         const sMin = minI < nPh ? (minI + 0.5) * dxPh : this.phLen + (minI - nPh + 0.5) * dxOr;
-        const behind = f.teethS - sMin;
-        if (behind > 0.3 * this.body.scale && behind < 3.2 * this.body.scale) {
+        const behind = (f.teethS - sMin) / this.body.scale;
+        const wDist = smooth(0.15, 0.5, behind) * (1 - smooth(1.8, 3.0, behind));
+        const wJet = 1 - smooth(0.12 * k2, 0.35 * k2, minA);
+        const wt = wDist * wJet;
+        if (wt > 1e-3) {
           const teethI = nPh + Math.min(nOr - 2, Math.max(0, Math.round((f.teethS - this.phLen) / dxOr)));
           const tb = toBranch(teethI);
-          if (tb >= 0) list.push({ src, fwd: tb, bwd: bwd, gain: g.teeth * (1 - Math.abs(behind - 1.2) / 3), lowpassHz: 11000, highpassHz: 1800 });
+          if (tb >= 0) list.push({ src, fwd: tb, bwd, gain: g.teeth * wt, lowpassHz: 11000, highpassHz: 1800 });
         }
       }
     }

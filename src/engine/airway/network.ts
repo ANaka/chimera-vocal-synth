@@ -130,6 +130,29 @@ export class AirwayNetwork {
   area!: Float64Array;
   private areaTarget!: Float64Array;
   private areaStep!: Float64Array;
+  /** current minimum (sub-section) area per node: drives kinetic losses and Reynolds numbers */
+  amin!: Float64Array;
+  private aminTarget!: Float64Array;
+  private aminStep!: Float64Array;
+  /** nodes with ≥3 connections get a compliance floor for leapfrog stability */
+  private isJunction!: Uint8Array;
+  private invLsum!: Float64Array;
+  /** neighbour lists (CSR) for redistributing squeezed volume of nearly closed nodes */
+  private nbrStart!: Int32Array;
+  private nbrList!: Int32Array;
+  private spill!: Float64Array;
+  /** band-limited moving-wall volume source (2-pole low-pass state per node) */
+  private volSrc1!: Float64Array;
+  private volSrc2!: Float64Array;
+  private volLpCoef = 0;
+  /** cut-off of the moving-wall volume source (Hz): articulator-driven flow is sub-audio */
+  volumeSourceHz = 60;
+  /** below this node area (cm²) displaced volume is pushed into the neighbours */
+  squeezeArea = 0.12;
+  /** model switches (diagnostics / ablation) */
+  enableVolumeSource = true;
+  enableJunctionFloor = true;
+  energySafe = true;
   /** current section length (cm) */
   dx!: Float64Array;
   private dxTarget!: Float64Array;
@@ -165,6 +188,7 @@ export class AirwayNetwork {
   private bk!: Uint8Array;
   U!: Float64Array;
   private mom!: Float64Array;
+  private Lprev!: Float64Array;
   /** extra series pressure sources (noise, driven sources), cleared each sample */
   psrc!: Float64Array;
   /** port branch area (cm²), current */
@@ -184,6 +208,7 @@ export class AirwayNetwork {
   private radNodes: number[] = [];
   private radNodeArr!: Int32Array;
   private radUL!: Float64Array;
+  private radLprev!: Float64Array;
   /** radiated volume velocity of each radiator (telemetry) */
   radU!: Float64Array;
   private radPrevTotal = 0;
@@ -271,6 +296,11 @@ export class AirwayNetwork {
     this.area = new Float64Array(N);
     this.areaTarget = new Float64Array(N);
     this.areaStep = new Float64Array(N);
+    this.amin = new Float64Array(N);
+    this.aminTarget = new Float64Array(N);
+    this.aminStep = new Float64Array(N);
+    this.isJunction = new Uint8Array(N);
+    this.invLsum = new Float64Array(N);
     this.dx = new Float64Array(N);
     this.dxTarget = new Float64Array(N);
     this.dxStep = new Float64Array(N);
@@ -298,6 +328,7 @@ export class AirwayNetwork {
         const k = t.node(i);
         const a = typeof spec.area === "number" ? spec.area : spec.area[i];
         this.area[k] = this.areaTarget[k] = a;
+        this.amin[k] = this.aminTarget[k] = a;
         this.dx[k] = this.dxTarget[k] = dx;
         this.nodeTube[k] = t.index;
         this.viscF[k] = spec.viscousFactor ?? 1;
@@ -318,6 +349,25 @@ export class AirwayNetwork {
     this.bk = Uint8Array.from(this.bKind);
     this.U = new Float64Array(B);
     this.mom = new Float64Array(B);
+    this.Lprev = new Float64Array(B);
+    const degree = new Int32Array(N);
+    for (let j = 0; j < B; j++) {
+      degree[this.ba[j]]++;
+      degree[this.bb[j]]++;
+    }
+    for (let k = 0; k < N; k++) this.isJunction[k] = degree[k] >= 3 ? 1 : 0;
+    this.nbrStart = new Int32Array(N + 1);
+    for (let k = 0; k < N; k++) this.nbrStart[k + 1] = this.nbrStart[k] + degree[k];
+    this.nbrList = new Int32Array(this.nbrStart[N]);
+    const fillN = this.nbrStart.slice(0, N);
+    for (let j = 0; j < B; j++) {
+      this.nbrList[fillN[this.ba[j]]++] = this.bb[j];
+      this.nbrList[fillN[this.bb[j]]++] = this.ba[j];
+    }
+    this.spill = new Float64Array(N);
+    this.volSrc1 = new Float64Array(N);
+    this.volSrc2 = new Float64Array(N);
+    this.volLpCoef = 1 - Math.exp((-2 * Math.PI * this.volumeSourceHz) / this.fs);
     this.psrc = new Float64Array(B);
     this.portArea = new Float64Array(B);
     this.portAreaTarget = new Float64Array(B);
@@ -343,6 +393,7 @@ export class AirwayNetwork {
     }
     this.radNodeArr = Int32Array.from(this.radNodes);
     this.radUL = new Float64Array(this.radNodes.length);
+    this.radLprev = new Float64Array(this.radNodes.length);
     this.radU = new Float64Array(this.radNodes.length);
     for (let r = 0; r < this.radNodes.length; r++) this.radOf[this.radNodes[r]] = r;
     for (let k = 0; k < N; k++) {
@@ -364,8 +415,12 @@ export class AirwayNetwork {
   // ---------------------------------------------------------------- control-rate API
 
   /** Set target areas (and optionally total length) of a tube, reached at the end of the next block. */
-  setTubeTargets(t: Tube, areas: ArrayLike<number>, length?: number): void {
-    for (let i = 0; i < t.n; i++) this.areaTarget[t.node(i)] = Math.max(0, areas[i]);
+  setTubeTargets(t: Tube, areas: ArrayLike<number>, length?: number, minAreas?: ArrayLike<number>): void {
+    for (let i = 0; i < t.n; i++) {
+      const a = Math.max(0, areas[i]);
+      this.areaTarget[t.node(i)] = a;
+      this.aminTarget[t.node(i)] = minAreas ? Math.max(0, Math.min(a, minAreas[i])) : a;
+    }
     if (length !== undefined) {
       t.length = length;
       const d = length / t.n;
@@ -375,6 +430,7 @@ export class AirwayNetwork {
 
   setNodeAreaTarget(node: number, area: number): void {
     this.areaTarget[node] = Math.max(0, area);
+    this.aminTarget[node] = this.areaTarget[node];
   }
 
   setPortTarget(branch: number, area: number): void {
@@ -392,12 +448,42 @@ export class AirwayNetwork {
     this.p[node] = p;
   }
 
+  /** Jump the geometry to the current targets immediately (initialisation; no dV/dt transient). */
+  snapToTargets(): void {
+    for (let k = 0; k < this.nNodes; k++) {
+      this.area[k] = this.areaTarget[k];
+      this.amin[k] = this.aminTarget[k];
+      this.dx[k] = this.dxTarget[k];
+      this.vol[k] = Math.max(this.area[k], this.minNodeArea) * this.dx[k];
+      this.invA[k] = 1 / Math.max(this.area[k], 1e-6);
+      this.areaStep[k] = this.aminStep[k] = this.dxStep[k] = 0;
+    }
+    for (let j = 0; j < this.nBranches; j++) {
+      if (this.bk[j] === KIND_PORT) {
+        this.portArea[j] = this.portAreaTarget[j];
+        this.portAreaStep[j] = 0;
+      }
+    }
+  }
+
   /** Prepare per-sample linear ramps toward the targets over `samples` internal samples. */
   beginBlock(samples: number): void {
     const inv = 1 / Math.max(1, samples);
+    let maxP = 0;
     for (let k = 0; k < this.nNodes; k++) {
       this.areaStep[k] = (this.areaTarget[k] - this.area[k]) * inv;
+      this.aminStep[k] = (this.aminTarget[k] - this.amin[k]) * inv;
       this.dxStep[k] = (this.dxTarget[k] - this.dx[k]) * inv;
+      if (!this.fixed[k]) {
+        const ap = Math.abs(this.p[k]);
+        if (ap > maxP) maxP = ap;
+      }
+    }
+    // flush decayed state to zero (avoids denormal slowdowns in silent tails)
+    if (maxP < 1e-9) {
+      let maxU = 0;
+      for (let j = 0; j < this.nBranches; j++) maxU = Math.max(maxU, Math.abs(this.U[j]));
+      if (maxU < 1e-9) this.flushState();
     }
     for (let j = 0; j < this.nBranches; j++) {
       if (this.bk[j] === KIND_PORT) this.portAreaStep[j] = (this.portAreaTarget[j] - this.portArea[j]) * inv;
@@ -430,6 +516,17 @@ export class AirwayNetwork {
     this.noise = next;
   }
 
+  private flushState(): void {
+    for (let k = 0; k < this.nNodes; k++) {
+      if (!this.fixed[k]) this.p[k] = 0;
+      this.wallV[k] = 0;
+      if (Math.abs(this.wallY[k]) < 1e-12) this.wallY[k] = 0;
+    }
+    this.U.fill(0);
+    this.mom.fill(0);
+    this.radUL.fill(0);
+  }
+
   get noiseSources(): readonly { src: number; level: number }[] {
     return this.noise;
   }
@@ -444,23 +541,68 @@ export class AirwayNetwork {
     const invT = this.invT;
     const p = this.p;
     const area = this.area;
+    const amin = this.amin;
     const dx = this.dx;
     const invA = this.invA;
     const vol = this.vol;
     const flowSum = this.flowSum;
     const minA = this.minNodeArea;
+    const isJ = this.isJunction;
+    const invLsum = this.invLsum;
 
-    // 1) geometry ramps; accumulate -dV/dt into the flow sums
+    // 1) geometry ramps; accumulate -dV/dt into the flow sums. A nearly closed node cannot hold
+    //    the air its walls displace: that share is pushed into its neighbours (mass-conserving).
+    const sq = this.squeezeArea;
+    let anySpill = false;
     for (let k = 0; k < N; k++) {
       let a = area[k] + this.areaStep[k];
       if (a < 0) a = 0;
       area[k] = a;
+      let am = amin[k] + this.aminStep[k];
+      if (am < 0) am = 0;
+      amin[k] = am > a ? a : am;
       const d = (dx[k] += this.dxStep[k]);
       invA[k] = 1 / (a > 1e-6 ? a : 1e-6);
       const v = (a > minA ? a : minA) * d;
-      flowSum[k] = -(v - vol[k]) * invT + this.extFlow[k];
-      this.extFlow[k] = 0;
+      // −dV/dt is piecewise constant across control blocks (and kinks at geometric vertices);
+      // its derivative would radiate as clicks, so it is low-passed (physical content is sub-audio)
+      let src = 0;
+      if (this.enableVolumeSource) {
+        const raw = -(v - vol[k]) * invT;
+        const c = this.volLpCoef;
+        const s1 = (this.volSrc1[k] += c * (raw - this.volSrc1[k]));
+        src = this.volSrc2[k] += c * (s1 - this.volSrc2[k]);
+      }
       vol[k] = v;
+      invLsum[k] = 0;
+      if (a < sq && src !== 0) {
+        const t = a / sq;
+        const keep = t * t * (3 - 2 * t);
+        flowSum[k] = src * keep + this.extFlow[k];
+        this.spill[k] = src * (1 - keep);
+        anySpill = true;
+      } else {
+        flowSum[k] = src + this.extFlow[k];
+        this.spill[k] = 0;
+      }
+      this.extFlow[k] = 0;
+    }
+    if (anySpill) {
+      const cl = this.closedArea;
+      for (let k = 0; k < N; k++) {
+        const sp = this.spill[k];
+        if (sp === 0) continue;
+        const s0 = this.nbrStart[k], s1 = this.nbrStart[k + 1];
+        // only open neighbours can receive displaced air
+        let nOpen = 0;
+        for (let e = s0; e < s1; e++) if (area[this.nbrList[e]] >= cl) nOpen++;
+        if (nOpen === 0) continue; // fully sealed pocket: the squeezed air is absorbed by contact
+        const share = sp / nOpen;
+        for (let e = s0; e < s1; e++) {
+          const m = this.nbrList[e];
+          if (area[m] >= cl) flowSum[m] += share;
+        }
+      }
     }
 
     // 2) turbulence noise → series pressure sources
@@ -474,8 +616,10 @@ export class AirwayNetwork {
     const bk = this.bk;
     const U = this.U;
     const mom = this.mom;
+    const Lprev = this.Lprev;
     const visc = Math.sqrt((RHO * MU * this.viscousOmega) / 2) * this.viscousScale;
     const closed = this.closedArea;
+    const halfRho = 0.5 * RHO;
     for (let j = 0; j < B; j++) {
       const a = ba[j];
       const b = bb[j];
@@ -487,8 +631,10 @@ export class AirwayNetwork {
       if (bk[j] === KIND_SERIES) {
         const Aa = area[a];
         const Ab = area[b];
-        aEff = Aa < Ab ? Aa : Ab;
-        if (aEff < closed) {
+        const ma = amin[a];
+        const mb = amin[b];
+        aEff = ma < mb ? ma : mb;
+        if ((Aa < Ab ? Aa : Ab) < closed || aEff < closed) {
           U[j] = 0;
           mom[j] = 0;
           this.branchArea[j] = aEff;
@@ -496,14 +642,20 @@ export class AirwayNetwork {
         }
         const ia = invA[a];
         const ib = invA[b];
-        L = 0.5 * RHO * (dx[a] * ia + dx[b] * ib);
+        L = halfRho * (dx[a] * ia + dx[b] * ib);
         // viscous: R = S·l/A² · sqrt(ρμω/2) with S = perimeter of each half-section
         R = 0.5 * visc * (this.wallPerim[a] * dx[a] * Math.sqrt(Aa) * ia * ia * this.viscF[a] + this.wallPerim[b] * dx[b] * Math.sqrt(Ab) * ib * ib * this.viscF[b]);
-        const diff = ia - ib; // >0 when a is narrower
-        const bc = 0.5 * RHO * diff * diff;
-        // flow a→b expands if b wider (diff>0); flow b→a expands if a wider (diff<0)
-        kf = diff > 0 ? bc : 0.1 * bc;
-        kb = diff < 0 ? bc : 0.1 * bc;
+        // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
+        // the downstream node (sub-section minima make short constrictions lossy as they should be)
+        const ef = 1 / ma - ib; // a→b
+        const eb = 1 / mb - ia; // b→a
+        kf = ef > 0 ? halfRho * ef * ef : 0;
+        kb = eb > 0 ? halfRho * eb * eb : 0;
+        // small contraction (vena contracta) loss entering a narrower node
+        const cf = 1 / mb - ia;
+        const cb = 1 / ma - ib;
+        if (cf > 0) kf += 0.1 * halfRho * cf * cf;
+        if (cb > 0) kb += 0.1 * halfRho * cb * cb;
       } else {
         let Ap = (this.portArea[j] += this.portAreaStep[j]);
         if (Ap < 0) Ap = this.portArea[j] = 0;
@@ -517,22 +669,24 @@ export class AirwayNetwork {
         const ip = 1 / Ap;
         const len = this.portLen[j];
         L = RHO * len * ip;
-        if (this.portHalf[j]) L += 0.5 * RHO * (dx[a] * invA[a] + dx[b] * invA[b]);
+        if (this.portHalf[j]) L += halfRho * (dx[a] * invA[a] + dx[b] * invA[b]);
         const w = this.portSlit[j];
         if (w > 0) R = (12 * MU * len * w * w) * ip * ip * ip;
         else R = visc * 2 * Math.sqrt(Math.PI) * len * Math.sqrt(Ap) * ip * ip;
         R += this.portExtraR[j];
         // kinetic: entrance (contraction) + exit (jet expansion into the downstream node)
-        const ipa = invA[a];
-        const ipb = invA[b];
-        const exF = ip - ipb; // flow a→b exits into b
-        const exB = ip - ipa; // flow b→a exits into a
-        const kin = this.portKin[j] * 0.5 * RHO * ip * ip;
-        kf = kin + this.portKex[j] * 0.5 * RHO * (exF > 0 ? exF * exF : 0);
-        kb = kin + this.portKex[j] * 0.5 * RHO * (exB > 0 ? exB * exB : 0);
+        const exF = ip - invA[b]; // flow a→b exits into b
+        const exB = ip - invA[a]; // flow b→a exits into a
+        const kin = this.portKin[j] * halfRho * ip * ip;
+        kf = kin + this.portKex[j] * halfRho * (exF > 0 ? exF * exF : 0);
+        kb = kin + this.portKex[j] * halfRho * (exB > 0 ? exB * exB : 0);
       }
       this.branchArea[j] = aEff;
-      const c = p[a] - p[b] + psrc[j] + mom[j] * invT;
+      // energy-safe momentum transfer when the inertance changes: closing (L↑) conserves
+      // momentum (flow drops), opening (L↓) conserves flow — never injects kinetic energy
+      const Lp = Lprev[j];
+      const m0 = this.energySafe && L < Lp ? L * U[j] : mom[j];
+      const c = p[a] - p[b] + psrc[j] + m0 * invT;
       const bq = L * invT + R;
       let u: number;
       if (c >= 0) {
@@ -542,8 +696,14 @@ export class AirwayNetwork {
       }
       U[j] = u;
       mom[j] = L * u;
+      Lprev[j] = L;
       flowSum[a] -= u;
       flowSum[b] += u;
+      if (isJ[a] | isJ[b]) {
+        const il = 1 / L;
+        invLsum[a] += il;
+        invLsum[b] += il;
+      }
     }
 
     // 4) walls (velocity at half step from p(n), displacement integrates)
@@ -565,10 +725,37 @@ export class AirwayNetwork {
 
     // 5) nodes (radiation loads handled semi-implicitly)
     const radUL = this.radUL;
+    const T2 = T * T;
     let radTotal = wallRadSum;
+    const cl = this.closedArea;
     for (let k = 0; k < N; k++) {
       if (this.fixed[k]) continue;
-      const C = vol[k] / RHO_C2;
+      if (area[k] < cl) {
+        // sealed cell (tissue contact): no air of its own; follow the open neighbours' mean
+        let sum = 0, cnt = 0;
+        for (let e = this.nbrStart[k]; e < this.nbrStart[k + 1]; e++) {
+          const m = this.nbrList[e];
+          if (area[m] >= cl) {
+            sum += p[m];
+            cnt++;
+          }
+        }
+        if (cnt > 0) p[k] += 0.02 * (sum / cnt - p[k]);
+        const rr = this.radOf[k];
+        if (rr >= 0) {
+          // sealed aperture: let the radiated flow die away smoothly (no derivative step)
+          radUL[rr] *= 0.995;
+          this.radU[rr] = radUL[rr];
+          radTotal += radUL[rr];
+        }
+        continue;
+      }
+      let C = vol[k] / RHO_C2;
+      // junction stability: local breathing mode ω² ≈ ΣL⁻¹/C must satisfy T²ω² ≤ 2.4
+      if (isJ[k] && this.enableJunctionFloor) {
+        const cMin = (T2 * invLsum[k]) / 2.4;
+        if (C < cMin) C = cMin;
+      }
       const r = this.radOf[k];
       if (r < 0) {
         p[k] += (T / C) * flowSum[k];
@@ -577,7 +764,12 @@ export class AirwayNetwork {
         const Lr = (8 * RHO) / (3 * Math.PI * Math.sqrt(Math.PI * a));
         const Rr = (128 * RHO * C_SOUND) / (9 * Math.PI * Math.PI * a);
         const pOld = p[k];
-        const ul = radUL[r] + (T / Lr) * pOld;
+        // energy-safe: when the radiation inertance grows (aperture closing) conserve momentum
+        const Lp = this.radLprev[r];
+        let ulPrev = radUL[r];
+        if (Lp > 0 && Lr > Lp) ulPrev *= Lp / Lr;
+        this.radLprev[r] = Lr;
+        const ul = ulPrev + (T / Lr) * pOld;
         radUL[r] = ul;
         const g = 0.5 / Rr;
         const pNew = (pOld * (C * invT - g) + flowSum[k] - ul) / (C * invT + g);
@@ -597,7 +789,9 @@ export class AirwayNetwork {
     const U = this.U;
     const psrc = this.psrc;
     const rng = this.rng;
-    const scale = this.noiseScale;
+    // white noise power per Hz scales with fs: normalise to a 96 kHz reference
+    const scale = this.noiseScale * Math.sqrt(96000 / this.fs);
+    const sat = 12000 * 12000 - RE_CRIT * RE_CRIT;
     for (let i = 0; i < this.noise.length; i++) {
       const s = this.noise[i];
       const a = this.branchArea[s.src];
@@ -606,7 +800,10 @@ export class AirwayNetwork {
       if (a > this.closedArea) {
         // Re = v·d_h/ν with d_h = 2√(A/π) → Re = |U|·2/(ν·√(πA))
         const re = (Math.abs(u) * 2) / (NU * Math.sqrt(Math.PI * a));
-        if (re > RE_CRIT) amp = s.gain * scale * (re * re - RE_CRIT * RE_CRIT);
+        if (re > RE_CRIT) {
+          const x = re * re - RE_CRIT * RE_CRIT;
+          amp = (s.gain * scale * x) / (1 + x / sat); // bounded growth at very high Re
+        }
       }
       // white → high-pass (1st order) → 2nd-order low-pass
       const w = rng.bipolar() * 1.732;
@@ -699,9 +896,11 @@ export class AirwayNetwork {
     this.p.fill(0);
     this.U.fill(0);
     this.mom.fill(0);
+    this.Lprev.fill(0);
     this.wallY.fill(0);
     this.wallV.fill(0);
     this.radUL.fill(0);
+    this.radLprev.fill(0);
     this.radPrevTotal = 0;
   }
 }
