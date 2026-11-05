@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import { useCanvasLoop, font } from "../useCanvas.ts";
 import { useStore } from "../store.ts";
-import { creatureById } from "../../engine/creatures/index.ts";
-import type { CreatureDef } from "../../engine/creatures/types.ts";
+import { creatureById } from "../../wasm/engine.ts";
+import type { CreatureDef } from "../../wasm/types.ts";
 import { liveTelemetry, previewTelemetry } from "../creatureLive.ts";
 import { C, hot, pressureLevel } from "../colors.ts";
 

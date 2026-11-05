@@ -1,76 +1,63 @@
 /**
- * Ownership and ordering of live control: tagged releases never let a gesture rise again, the
- * worklet applies score messages sent during a body change to the new voice, and MIDI notes
- * held on several keyboards/channels end only when the last one lets go.
+ * Ownership and ordering of live control: the worklet applies messages in the order they arrive,
+ * to the voice they were meant for (score messages right after a body change play on the new
+ * voice; a beat stop cancels a hit sent just before it), and MIDI notes held on several
+ * keyboards/channels end only when the last one lets go. (Tagged releases: crates/chimera/tests/live_control.rs.)
  */
 import { describe, expect, test } from "bun:test";
-import { GestureScore, activation } from "../src/engine/control/score.ts";
-import { planNoteOn } from "../src/engine/phonetics/sing.ts";
-import type { Syllable } from "../src/engine/phonetics/syllables.ts";
-import type { HumanVoice } from "../src/engine/voice/humanVoice.ts";
-
-describe("tagged release", () => {
-  test("a note released early drops what has not begun and fades what has, never rising again", () => {
-    // /strɑ/ held, released 30 ms in: the vowel and its pitch have not begun yet
-    const syl: Syllable = { text: "stra", onset: [{ ipa: "s" }, { ipa: "t" }, { ipa: "ɹ" }], nucleus: { ipa: "ɑ", stress: 1 }, coda: [], wordEnd: true, phraseEnd: false };
-    const gs = planNoteOn(syl, 57, { body: "male", vibrato: 30, tag: 4 });
-    const score = new GestureScore();
-    score.addAll(gs.map((g) => ({ ...g, t0: g.t0 + 0.05, t1: g.t1 + 0.05 })));
-    const t = 0.08;
-    const before = new Map(score.activeAt(t).map((g) => [g, activation(g, t)]));
-    score.release(4, t);
-    score.release(5, t);
-    for (const g of score.activeAt(t)) expect(activation(g, t)).toBeCloseTo(before.get(g) ?? 0, 6); // continuous
-    // after the release, no released gesture's activation exceeds what it had at the release
-    for (let tt = t; tt < t + 0.5; tt += 0.002)
-      for (const g of score.activeAt(tt)) if (g.tag === 4 || g.tag === 5) expect(activation(g, tt)).toBeLessThanOrEqual((before.get(g) ?? 0) + 1e-9);
-    // the vowel (not begun at 80 ms) is gone, and everything is over soon after
-    expect(score.activeAt(0.3).length).toBe(0);
-  });
-});
+import { wasmModule } from "./harness.ts";
+import { fromUtf8 } from "../src/wasm/wire.ts";
 
 describe("worklet ordering", () => {
-  test("a note scheduled right after a body change plays on the new voice", async () => {
-    let Proc: (new () => { port: { onmessage: ((e: { data: unknown }) => void) | null }; process: (i: unknown, o: Float32Array[][]) => boolean }) | null = null;
+  test("a note scheduled right after a body change plays on the new voice; a stop cancels what came before it", async () => {
+    type Proc = { port: { onmessage: ((e: { data: unknown }) => void) | null }; process: (i: unknown, o: Float32Array[][]) => boolean };
+    let Ctor: (new (o: unknown) => Proc) | null = null;
+    const posted: { type: string; body?: string; message?: string }[] = [];
     const g = globalThis as Record<string, unknown>;
     g.sampleRate = 48000;
     g.AudioWorkletProcessor = class {
-      port = { onmessage: null as unknown, postMessage: () => {} };
+      port = { onmessage: null as unknown, postMessage: (m: { type: string }) => posted.push(m) };
     };
-    g.registerProcessor = (_name: string, ctor: typeof Proc) => (Proc = ctor);
+    g.registerProcessor = (_name: string, ctor: typeof Ctor) => (Ctor = ctor);
     await import("../src/worklet/processor.ts");
-    const p = new Proc!();
+    const p = new Ctor!({ processorOptions: { module: wasmModule } });
     const send = (data: unknown) => p.port.onmessage!({ data });
+    const block = () => p.process([], [[new Float32Array(128)]]);
+    // the processor's engine, for inspection
+    const { x, h } = p as unknown as { x: Record<string, (...a: number[]) => number> & { memory: WebAssembly.Memory }; h: number };
+    const scoreSize = () => {
+      x.engine_score_json(h);
+      return JSON.parse(fromUtf8(new Uint8Array(x.memory.buffer, x.chimera_result_ptr(), x.chimera_result_len()))).length;
+    };
+    const body = () => ["male", "female", "child"][x.engine_body(h)];
+
     const breath = { t0: 0, t1: 1, rampIn: 0.04, rampOut: 0.05, strength: 1, targets: { breath: 1 }, label: "breath" };
     send({ type: "body", body: "female" });
     send({ type: "schedule", gestures: [breath], segments: [], end: 1, id: 1, replace: false, lead: 0.006 });
-    p.process([], [[new Float32Array(128)]]);
-    const voice = (p as unknown as { voice: HumanVoice }).voice;
-    expect(voice.airway.body.scale).toBeLessThan(1); // the new (female) voice
-    expect(voice.score.size).toBe(1); // holding the note
+    block();
+    expect(body()).toBe("female"); // the new voice
+    expect(posted.filter((m) => m.type === "ready").at(-1)?.body).toBe("female");
+    expect(scoreSize()).toBe(1); // holding the note
 
-    // a beat stop sent after a hit, during a body change, still cancels that hit
+    // a beat stop sent after a hit, around a body change, still cancels that hit
     send({ type: "beat", steps: [{ id: "B" }, null, null, null], bpm: 96, playing: true });
-    for (let i = 0; i < 20; i++) p.process([], [[new Float32Array(128)]]);
+    for (let i = 0; i < 20; i++) block();
     send({ type: "body", body: "male" });
     send({ type: "beatHit", id: "B" });
     send({ type: "beat", playing: false });
-    p.process([], [[new Float32Array(128)]]);
-    const v2 = (p as unknown as { voice: HumanVoice }).voice;
-    expect(v2.airway.body.scale).toBe(1);
-    expect(v2.score.size).toBe(0);
+    block();
+    expect(body()).toBe("male");
+    expect(scoreSize()).toBe(0);
 
-    // a backlog replays in order, one full-size schedule per block
+    // three full-size schedules, then a stop: the stop comes after all three
     const big = Array.from({ length: 4000 }, (_, i) => ({ ...breath, t0: 1 + i * 1e-3, t1: 1.5 + i * 1e-3, label: `g${i}` }));
     send({ type: "body", body: "child" });
     for (let k = 0; k < 3; k++) send({ type: "schedule", gestures: big, segments: [], end: 1, id: 10 + k, replace: false });
-    send({ type: "stopSpeech" }); // must come after all three
-    const sizes: number[] = [];
-    for (let i = 0; i < 4; i++) {
-      p.process([], [[new Float32Array(128)]]);
-      sizes.push((p as unknown as { voice: HumanVoice }).voice.score.size);
-    }
-    expect(sizes).toEqual([4000, 8000, 12000, 0]);
+    expect(scoreSize()).toBe(12000);
+    send({ type: "stopSpeech" });
+    block();
+    expect(scoreSize()).toBe(0);
+    expect(posted.filter((m) => m.type === "error")).toEqual([]);
   });
 });
 

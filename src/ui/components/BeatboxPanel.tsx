@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.ts";
 import { engine } from "../../audio/AudioEngine.ts";
-import { BEAT_SOUNDS, BEAT_PRESETS, formatBeat, parseBeat, type Airstream } from "../../engine/phonetics/beatbox.ts";
+import { BEAT_SOUNDS, BEAT_PRESETS, formatBeat, parseBeat, type Airstream } from "../../wasm/engine.ts";
 import { Slider, Toggle } from "./Controls.tsx";
 import { Keys } from "./Keys.tsx";
 

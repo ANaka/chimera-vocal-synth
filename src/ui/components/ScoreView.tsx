@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useCanvasLoop, font } from "../useCanvas.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { currentPlan, onPlan, type SpokenPlan } from "../speech.ts";
-import { activation, type Gesture } from "../../engine/control/score.ts";
+import { activation, type Gesture } from "../../wasm/engine.ts";
 import { C } from "../colors.ts";
 
 const ROWS: { name: string; keys: string[] }[] = [

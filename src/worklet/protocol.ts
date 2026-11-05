@@ -1,10 +1,10 @@
 /** Messages between the main thread and the CHIMERA AudioWorklet. */
-import type { HumanArtic } from "../engine/anatomy/human.ts";
-import type { VoiceSource, VoiceTelemetry } from "../engine/voice/humanVoice.ts";
-import type { Segment, PlannedSegment } from "../engine/phonetics/planner.ts";
-import type { Gesture } from "../engine/control/score.ts";
-import type { CreatureTelemetry } from "../engine/creatures/voice.ts";
-import type { BeatStep } from "../engine/phonetics/beatbox.ts";
+import type { HumanArtic } from "../wasm/types.ts";
+import type { VoiceSource, VoiceTelemetry } from "../wasm/types.ts";
+import type { Segment, PlannedSegment } from "../wasm/types.ts";
+import type { Gesture } from "../wasm/types.ts";
+import type { CreatureTelemetry } from "../wasm/types.ts";
+import type { BeatStep } from "../wasm/types.ts";
 
 export interface PhraseMsg {
   segments: Segment[];

@@ -1,31 +1,32 @@
 /**
  * Sing mode's live path end to end, without a browser: the key handling in src/ui/singing.ts
  * talks to a stand-in for the audio engine that does what the worklet does with each message
- * (schedule at clock + lead, release by tag, cancel), on a real offline voice.
+ * (schedule at clock + lead, release by tag, cancel), on the real engine (the wasm build, in its
+ * own instance as in the worklet).
  */
 import { describe, expect, mock, test } from "bun:test";
-import { HumanVoice } from "../src/engine/voice/humanVoice.ts";
-import { midiToHz } from "../src/engine/phonetics/sing.ts";
-import { activation, type Gesture } from "../src/engine/control/score.ts";
+import { initEngine, WasmVoice } from "./harness.ts";
+import type { Gesture } from "../src/wasm/types.ts";
+
+await initEngine();
+const { activation } = await import("../src/wasm/engine.ts");
+const midiToHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 
 const FS = 48000;
-let voice = new HumanVoice({ fsOut: FS });
+let voice = new WasmVoice(FS);
 const fakeEngine = {
   latest: null,
   voiceClock: () => voice.clock,
   onPlanned: () => () => {},
   scheduleGestures: (gs: Gesture[], lead = 0.006) => {
-    const off = voice.clock + lead;
-    voice.schedule(gs.map((g) => ({ ...g, t0: g.t0 + off, t1: g.t1 + off })));
+    voice.schedule(gs, lead);
   },
   schedule: (plan: { gestures: Gesture[] }) => {
-    voice.cancelScore();
-    const off = voice.clock + 0.03;
-    voice.schedule(plan.gestures.map((g) => ({ ...g, t0: g.t0 + off, t1: g.t1 + off })));
+    voice.schedule(plan.gestures, 0.03, true);
     return 1;
   },
   release: (tag: number) => voice.release(tag),
-  stopSpeech: () => voice.cancelScore(),
+  stopSpeech: () => voice.stop(),
 };
 let startAudio: () => void = () => {};
 const engineStub = new Proxy(
@@ -38,23 +39,30 @@ const engineStub = new Proxy(
 );
 mock.module("../src/audio/AudioEngine.ts", () => ({ engine: engineStub }));
 const { useSing, singNoteOn, singNoteOff, playDemo, stopSinging } = await import("../src/ui/singing.ts");
-const gesturesOf = () => (voice.score as unknown as { gestures: Gesture[] }).gestures;
+const gesturesOf = () => voice.score();
+/** breath the score is giving now (strength-weighted activation of breath gestures) */
+const breathNow = () => {
+  const t = voice.clock;
+  let breath = 0;
+  for (const g of voice.score()) if (g.targets.breath !== undefined) breath += activation(g, t) * g.strength;
+  return breath;
+};
 
 /** Render `sec` seconds; per 2.7 ms block: f0, voicing, output RMS, narrowest oral area. */
 function run(sec: number) {
   const n = Math.round(sec * FS);
-  const out = new Float32Array(n);
   const f0: number[] = [], voicing: number[] = [], rms: number[] = [], minOral: number[] = [];
   for (let i = 0; i < n; i += 128) {
     const m = Math.min(128, n - i);
-    voice.render(out, i, m);
+    const out = voice.render(m);
     let e = 0;
-    for (let j = i; j < i + m; j++) e += out[j] * out[j];
+    for (let j = 0; j < m; j++) e += out[j] * out[j];
     rms.push(Math.sqrt(e / m));
-    f0.push(voice.glottis.f0Now);
-    voicing.push(voice.glottis.voicing);
+    const st = voice.state();
+    f0.push(st.f0);
+    voicing.push(st.voicing);
     let mn = Infinity;
-    for (const a of voice.airway.orAreas) mn = Math.min(mn, a);
+    for (const a of st.orAreas) mn = Math.min(mn, a);
     minOral.push(mn);
   }
   // the last 40 % of the span, where a note has settled
@@ -66,7 +74,7 @@ const cents = (f: number, midi: number) => 1200 * Math.log2(f / midiToHz(midi));
 
 describe("Sing mode, live keys", () => {
   test("each key sings the next syllable at its pitch; legato, melisma and release to silence", () => {
-    voice = new HumanVoice({ fsOut: FS });
+    voice = new WasmVoice(FS);
     useSing.getState().setVibrato(0);
     useSing.getState().setLyrics("la ma -");
     expect(useSing.getState().syllables.map((s) => s.text)).toEqual(["la", "ma", "~"]);
@@ -115,14 +123,14 @@ describe("Sing mode, live keys", () => {
 
   test("a soft key breathes less than a hard one", () => {
     const level = (velocity: number) => {
-      voice = new HumanVoice({ fsOut: FS });
+      voice = new WasmVoice(FS);
       useSing.getState().setLyrics("ah");
       run(0.05);
       singNoteOn(50, velocity, "male");
       const r = run(0.5);
       singNoteOff(50, "male");
       run(0.4);
-      return { p: voice.source.pressure, rms: median(r.late(r.rms)) };
+      return { rms: median(r.late(r.rms)) };
     };
     const soft = level(30), hard = level(127);
     if (process.env.SING_VERBOSE) console.log(`hard vs soft key: ${(20 * Math.log10(hard.rms / soft.rms)).toFixed(1)} dB`);
@@ -130,7 +138,7 @@ describe("Sing mode, live keys", () => {
   });
 
   test("a demo still waiting for audio or the dictionary is cancelled by a stop", async () => {
-    voice = new HumanVoice({ fsOut: FS });
+    voice = new WasmVoice(FS);
     let scheduled = 0;
     const schedule = engineStub.schedule as typeof fakeEngine.schedule;
     engineStub.schedule = (plan: { gestures: Gesture[] }) => (scheduled++, schedule(plan));
@@ -149,7 +157,7 @@ describe("Sing mode, live keys", () => {
   });
 
   test("a quick next note drops the last one's breath-out; leaving Sing cancels a pending ending", () => {
-    voice = new HumanVoice({ fsOut: FS });
+    voice = new WasmVoice(FS);
     useSing.getState().setVibrato(0);
     useSing.getState().setLyrics("cat dog");
     run(0.05);
@@ -167,13 +175,11 @@ describe("Sing mode, live keys", () => {
     stopSinging(); // ...and the mode changes at once
     run(0.06);
     // the cancelled ending's breath is gone (the note's own breath is at the end of its 70 ms fade)
-    let breath = 0;
-    for (const g of voice.score.activeAt(voice.clock)) if (g.targets.breath !== undefined) breath += activation(g, voice.clock) * g.strength;
-    expect(breath).toBeLessThan(0.01);
+    expect(breathNow()).toBeLessThan(0.01);
   });
 
   test("overlapping endings all stay owned: a stop cancels every one", () => {
-    voice = new HumanVoice({ fsOut: FS });
+    voice = new WasmVoice(FS);
     useSing.getState().setLyrics("cats dogs");
     run(0.05);
     singNoteOn(50, 96, "male");
@@ -186,16 +192,14 @@ describe("Sing mode, live keys", () => {
     run(0.01);
     stopSinging();
     run(0.08);
-    let breath = 0;
-    for (const g of voice.score.activeAt(voice.clock)) if (g.targets.breath !== undefined) breath += activation(g, voice.clock) * g.strength;
-    expect(breath).toBeLessThan(0.01);
+    expect(breathNow()).toBeLessThan(0.01);
   });
 });
 
 describe("keys pressed before the audio has started", () => {
   test("only the press still down sings, once, and not after the body changed", async () => {
     const { useStore } = await import("../src/ui/store.ts");
-    voice = new HumanVoice({ fsOut: FS });
+    voice = new WasmVoice(FS);
     useStore.setState({ started: false, mode: "play" });
     useStore.getState().setMode("sing");
     useSing.getState().setLyrics("one two three");

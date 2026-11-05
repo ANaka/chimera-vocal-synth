@@ -9,11 +9,11 @@
 import { create } from "zustand";
 import { engine } from "../audio/AudioEngine.ts";
 import { g2p } from "./speech.ts";
-import { lyricsToSyllables, type Syllable } from "../engine/phonetics/syllables.ts";
-import { planSong, planNoteOn, planNoteOff, planMelisma } from "../engine/phonetics/sing.ts";
-import { EXHALE_LABEL } from "../engine/phonetics/planner.ts";
-import { DEMO_SONGS } from "../engine/phonetics/songs.ts";
-import type { Gesture } from "../engine/control/score.ts";
+import { lyricsToSyllables, type Syllable } from "../wasm/engine.ts";
+import { planSong, planNoteOn, planNoteOff, planMelisma } from "../wasm/engine.ts";
+import { EXHALE_LABEL } from "../wasm/engine.ts";
+import { DEMO_SONGS } from "../wasm/engine.ts";
+import type { Gesture } from "../wasm/types.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
 /** A note on the piano roll, on the voice clock (s); t1 is null while it is held. */
@@ -51,14 +51,14 @@ interface SingState {
 
 export const useSing = create<SingState>((set, get) => ({
   lyrics: DEFAULT_LYRICS,
-  syllables: lyricsToSyllables(DEFAULT_LYRICS, g2p),
+  syllables: lyricsToSyllables(DEFAULT_LYRICS),
   cursor: 0,
   vibrato: 35,
   demo: null,
   demoAt: -1,
   setLyrics: (text) => {
     stopDemo();
-    set({ lyrics: text, syllables: lyricsToSyllables(text, g2p), cursor: 0 });
+    set({ lyrics: text, syllables: lyricsToSyllables(text), cursor: 0 });
   },
   setCursor: (i) => set({ cursor: Math.max(0, Math.min(i, Math.max(0, get().syllables.length - 1))) }),
   setVibrato: (cents) => set({ vibrato: cents }),
@@ -71,7 +71,7 @@ export function ensureDictionary(): void {
     .load()
     .then(() => {
       const s = useSing.getState();
-      const syllables = lyricsToSyllables(s.lyrics, g2p);
+      const syllables = lyricsToSyllables(s.lyrics);
       useSing.setState({ syllables, cursor: Math.min(s.cursor, Math.max(0, syllables.length - 1)) });
     })
     .catch(() => {
@@ -225,7 +225,7 @@ export async function playDemo(name: string, body: BodyName, ready?: () => Promi
     // letter-to-sound rules
   }
   if (token !== demoToken) return;
-  const syl = lyricsToSyllables(song.lyrics, g2p);
+  const syl = lyricsToSyllables(song.lyrics);
   if (!syl.length) return;
   const shift = song.octave[body] * 12;
   const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));

@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { useStore } from "../store.ts";
-import { CREATURES, creatureById } from "../../engine/creatures/index.ts";
-import type { CreatureDef } from "../../engine/creatures/types.ts";
+import { CREATURES, creatureById } from "../../wasm/engine.ts";
+import type { CreatureDef } from "../../wasm/types.ts";
 import { useLiveCreature } from "../creatureLive.ts";
 import { Slider } from "./Controls.tsx";
 import { Keys } from "./Keys.tsx";

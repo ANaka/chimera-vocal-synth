@@ -9,16 +9,11 @@ const VOWEL_CHARS: &str = "iyɨʉɯuɪʏʊeøɘɵɤoəɛœɜɞʌɔæɐaɶɑɒɝ�
 const MULTI: [&str; 10] = ["tʃ", "dʒ", "ts", "dz", "pf", "aɪ", "aʊ", "ɔɪ", "eɪ", "oʊ"];
 const ALIASES: [(&str, &str); 9] = [("t͡ʃ", "tʃ"), ("d͡ʒ", "dʒ"), ("t͡s", "ts"), ("d͡z", "dz"), ("ɡ", "g"), ("ʧ", "tʃ"), ("ʤ", "dʒ"), ("r̥", "r"), ("ɐ̯", "ɐ")];
 
-/// `CONSONANT_SYMBOLS` of `inventory.ts` (the IPA of every consonant definition, in order).
-/// Kept here until `inventory.rs` is ported; it must stay equal to that list.
-pub(crate) const CONSONANT_SYMBOLS: [&str; 64] = [
-    "p", "b", "t", "d", "ʈ", "ɖ", "c", "ɟ", "k", "g", "q", "ɢ", "ʔ", "m", "ɱ", "n", "ɳ", "ɲ", "ŋ", "ɴ", "ɸ", "β", "f", "v", "θ", "ð", "s", "z", "ʃ", "ʒ", "ʂ", "ʐ", "ç", "ʝ", "x", "ɣ", "χ", "ʁ", "ħ", "ʕ", "h", "ɦ", "ɬ", "ɮ", "ts", "dz", "tʃ", "dʒ", "pf", "w", "ʋ", "ɹ", "ɻ", "j", "ɰ", "l", "ɫ", "ɭ", "ʎ", "ɾ", "ɽ", "r", "ʀ", "ʙ",
-];
 
 fn known() -> &'static HashSet<&'static str> {
     static K: OnceLock<HashSet<&'static str>> = OnceLock::new();
     K.get_or_init(|| {
-        let mut k: HashSet<&'static str> = CONSONANT_SYMBOLS.iter().copied().collect();
+        let mut k: HashSet<&'static str> = super::inventory::consonant_symbols().iter().copied().collect();
         for (i, c) in VOWEL_CHARS.char_indices() {
             k.insert(&VOWEL_CHARS[i..i + c.len_utf8()]);
         }
@@ -91,7 +86,7 @@ pub fn tokenize_ipa(input: &str) -> Vec<Segment> {
         if !known.contains(tok.as_str()) {
             continue;
         }
-        let is_v = tok.chars().next().is_some_and(|c| VOWEL_CHARS.contains(c)) && !CONSONANT_SYMBOLS.contains(&tok.as_str());
+        let is_v = tok.chars().next().is_some_and(|c| VOWEL_CHARS.contains(c)) && !super::inventory::consonant_symbols().contains(&tok.as_str());
         out.push(Segment { ipa: tok, stress: Some(if is_v { stress } else { 0 }), ..Default::default() });
         if is_v {
             stress = 0;

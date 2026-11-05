@@ -129,6 +129,9 @@ pub struct Handle {
     tele_block: Vec<f64>,
     /// active gesture labels: up to 4 × (length byte + 24 bytes)
     tele_labels: Vec<u8>,
+    /// the creature's telemetry (sized when it is chosen) and its flat block
+    ctele: Option<chimera::creatures::voice::CreatureTelemetry>,
+    ctele_block: Vec<f64>,
 }
 
 fn bodies(i: u32) -> BodyName {
@@ -150,6 +153,8 @@ pub extern "C" fn engine_new(sample_rate: f64) -> *mut Handle {
         tele: VoiceTelemetry::default(),
         tele_block: Vec::with_capacity(TELE_HEADER + 1024),
         tele_labels: vec![0u8; 4 * 25],
+        ctele: None,
+        ctele_block: Vec::new(),
     });
     // size every telemetry buffer once, so later snapshots reuse them
     h.engine.telemetry(&mut h.tele);
@@ -449,4 +454,125 @@ pub unsafe extern "C" fn engine_beat_hit(h: *mut Handle) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn engine_beat_step(h: *mut Handle) -> f64 {
     handle!(h).engine.beat_step() as f64
+}
+
+// ------------------------------------------------------------------ creatures
+
+/// Switch to a creature: `{"id": …, "params": {name: value}}` as UTF-8 JSON at `ptr..ptr+len`.
+/// Allocates (not real-time). The result buffer (`chimera_result_ptr`) receives what the worklet
+/// needs to address it by index: `{id, params: [key], calls: [id], tubes: [{name, n}], sources: [key]}`.
+/// Returns 0, or 1 with `{error}` (unknown creature: the human voice keeps playing).
+///
+/// # Safety
+/// `h` must be a live handle; `ptr..ptr+len` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_set_creature(h: *mut Handle, ptr: *const u8, len: usize) -> u32 {
+    let h = handle!(h);
+    let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
+    let req: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => return api::set_result(Err(format!("bad request: {e}"))),
+    };
+    let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let Some(def) = chimera::creatures::creature_by_id(id) else {
+        return api::set_result(Err(format!("no creature {id}")));
+    };
+    let mut initial = Vec::new();
+    if let Some(m) = req.get("params").and_then(|v| v.as_object()) {
+        for (k, v) in m {
+            if let (Some(i), Some(x)) = (def.param_index(k), v.as_f64()) {
+                initial.push((i, x));
+            }
+        }
+    }
+    h.engine.set_creature(Some(def), &initial);
+    let c = h.engine.creature().unwrap();
+    let t = c.new_telemetry();
+    let info = serde_json::json!({
+        "id": def.id,
+        "params": def.params.iter().map(|p| p.key).collect::<Vec<_>>(),
+        "calls": def.calls.iter().map(|c| c.id).collect::<Vec<_>>(),
+        "tubes": t.tubes.iter().map(|tb| serde_json::json!({ "name": tb.name, "n": tb.areas.len() })).collect::<Vec<_>>(),
+        "sources": t.source.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+    });
+    let n = 4 + t.params.len() + t.tubes.iter().map(|tb| 2 * tb.areas.len()).sum::<usize>() + t.source.len();
+    h.ctele_block = Vec::with_capacity(n);
+    h.ctele = Some(t);
+    api::set_result(Ok(info))
+}
+
+/// Back to the human voice (its clock resumes where it stopped).
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_set_human(h: *mut Handle) {
+    let h = handle!(h);
+    h.engine.set_creature(None, &[]);
+    h.ctele = None;
+}
+
+/// Set one of the creature's params (its index in the def).
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_creature_param(h: *mut Handle, index: usize, value: f64) {
+    handle!(h).engine.set_creature_params(&[(index, value)]);
+}
+
+/// Play the creature's call `index`; `pitch`/`amp` NaN: the call's own.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_play_call(h: *mut Handle, index: usize, pitch: f64, amp: f64) {
+    handle!(h).engine.play_call(index, opt(pitch), opt(amp));
+}
+
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_stop_call(h: *mut Handle) {
+    handle!(h).engine.stop_call();
+}
+
+/// Take the creature's telemetry (resets its RMS measurements) into a flat f64 block: gate,
+/// outRms, clock, the active call's index (−1: none), the params in def order, then per tube (in
+/// the switch's `tubes` order) its areas then its RMS, then the source values. Null when the human
+/// voice is playing.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_creature_telemetry(h: *mut Handle) -> *const f64 {
+    let h = handle!(h);
+    let Some(t) = h.ctele.as_mut() else { return core::ptr::null() };
+    if !h.engine.creature_telemetry(t) {
+        return core::ptr::null();
+    }
+    let b = &mut h.ctele_block;
+    b.clear();
+    let call = match (t.call, h.engine.creature()) {
+        (Some(id), Some(c)) => c.def.call_index(id).map_or(-1.0, |i| i as f64),
+        _ => -1.0,
+    };
+    b.extend_from_slice(&[t.gate, t.out_rms, t.clock, call]);
+    b.extend(t.params.iter().map(|(_, v)| *v));
+    for tb in &t.tubes {
+        b.extend(tb.areas.iter().map(|x| *x as f64));
+        b.extend(tb.rms.iter().map(|x| *x as f64));
+    }
+    b.extend(t.source.iter().map(|(_, v)| *v));
+    b.as_ptr()
+}
+
+/// The human voice's gesture score as JSON in the result buffer (diagnostics and tests; allocates).
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_score_json(h: *mut Handle) -> u32 {
+    let h = handle!(h);
+    api::set_result(serde_json::to_value(h.engine.score().gestures()).map_err(|e| e.to_string()))
 }

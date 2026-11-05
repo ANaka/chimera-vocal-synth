@@ -3,9 +3,10 @@
  * parameter messages (at most one per animation frame per kind) and telemetry fan-out.
  */
 import workletUrl from "../worklet/processor.ts?worker&url";
+import { chimeraModule } from "../wasm/chimera.ts";
 import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName, PlannedMessage, CreatureTelemetryMessage } from "../worklet/protocol.ts";
-import type { HumanArtic } from "../engine/anatomy/human.ts";
-import type { VoiceSource } from "../engine/voice/humanVoice.ts";
+import type { HumanArtic } from "../wasm/types.ts";
+import type { VoiceSource } from "../wasm/types.ts";
 
 type Listener = (t: TelemetryMessage) => void;
 
@@ -60,7 +61,8 @@ export class AudioEngine {
     this.ctx = ctx;
     this.sampleRate = ctx.sampleRate;
     await ctx.audioWorklet.addModule(workletUrl);
-    const node = new AudioWorkletNode(ctx, "chimera", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+    // the worklet instantiates the engine from the module compiled at startup (main.tsx)
+    const node = new AudioWorkletNode(ctx, "chimera", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { module: chimeraModule() } });
     this.node = node;
     const master = ctx.createGain();
     master.gain.value = 0.8;
@@ -137,7 +139,7 @@ export class AudioEngine {
   }
 
   /** Send a gestural plan (times relative to now). Returns the request id. */
-  schedule(plan: { gestures: import("../engine/control/score.ts").Gesture[]; segments: import("../engine/phonetics/planner.ts").PlannedSegment[]; end: number }, replace = true): number {
+  schedule(plan: { gestures: import("../wasm/types.ts").Gesture[]; segments: import("../wasm/types.ts").PlannedSegment[]; end: number }, replace = true): number {
     const id = ++this.speakId;
     this.send({ type: "schedule", gestures: plan.gestures, segments: plan.segments, end: plan.end, id, replace });
     return id;
@@ -185,7 +187,7 @@ export class AudioEngine {
     this.node.connect(on ? this.micIn : this.master);
   }
 
-  setBeat(m: { steps?: import("../engine/phonetics/beatbox.ts").BeatStep[] | (import("../engine/phonetics/beatbox.ts").BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }): void {
+  setBeat(m: { steps?: import("../wasm/types.ts").BeatStep[] | (import("../wasm/types.ts").BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }): void {
     this.send({ type: "beat", ...m });
   }
 
@@ -195,7 +197,7 @@ export class AudioEngine {
   }
 
   /** Gestures planned on the main thread, times relative to arrival + lead (live playing). */
-  scheduleGestures(gestures: import("../engine/control/score.ts").Gesture[], lead = 0.006): void {
+  scheduleGestures(gestures: import("../wasm/types.ts").Gesture[], lead = 0.006): void {
     this.send({ type: "schedule", gestures, segments: [], end: 0, id: ++this.speakId, replace: false, lead });
   }
 

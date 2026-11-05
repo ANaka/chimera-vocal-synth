@@ -6,11 +6,13 @@
 use chimera::airway::frequency::{find_peaks, transfer_function};
 use chimera::anatomy::human::{BodyName, HumanArtic, HumanFrame};
 use chimera::control::beat_player::BeatPlayer;
+use chimera::creatures::voice::CreatureVoice;
 use chimera::math;
 use chimera::phonetics::beatbox::{self, BeatStep};
 use chimera::phonetics::planner::{self, PhraseInput, PlanOptions};
 use chimera::phonetics::sing::{self, MelismaOptions, NoteOnOptions, SongOptions, SungNote};
-use chimera::phonetics::{Segment, Syllable};
+use chimera::phonetics::english::EnglishG2P;
+use chimera::phonetics::{Segment, Syllable, ipa, songs, syllables, vowel_data};
 use chimera::voice::human_airway::HumanAirway;
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -25,6 +27,8 @@ struct Model {
 struct State {
     result: Vec<u8>,
     models: Vec<Model>,
+    /// the page's English G2P (one dictionary, loaded once)
+    g2p: EnglishG2P,
 }
 
 thread_local! {
@@ -102,6 +106,26 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
             let formants: Vec<f64> = find_peaks(&freqs, &h.mag, 150.0).iter().map(|p| p.freq).take(5).collect();
             Ok(json!({ "freqs": freqs, "db": db, "formants": formants }))
         }
+        // ---------------------------------------------------------------- text → phonemes
+        "tokenizeIpa" => to_json(&ipa::tokenize_ipa(&arg::<String>(req, "text")?)),
+        "g2pLoad" => {
+            st.g2p.load_dict(&arg::<String>(req, "text")?);
+            Ok(json!(true))
+        }
+        "g2pPhrases" => to_json(&st.g2p.to_phrases(&arg::<String>(req, "text")?)),
+        "g2pWord" => to_json(&st.g2p.word(&arg::<String>(req, "word")?, arg::<Option<bool>>(req, "reduce")?.unwrap_or(true))),
+        "lyricsToSyllables" => to_json(&syllables::lyrics_to_syllables(&arg::<String>(req, "text")?, &st.g2p)),
+        // ---------------------------------------------------------------- creatures
+        "creaturePreview" => {
+            let id: String = arg(req, "id")?;
+            let def = chimera::creatures::creature_by_id(&id).ok_or_else(|| format!("no creature {id}"))?;
+            let params: std::collections::BTreeMap<String, f64> = arg::<Option<_>>(req, "params")?.unwrap_or_default();
+            let initial: Vec<(usize, f64)> = params.iter().filter_map(|(k, v)| def.param_index(k).map(|i| (i, *v))).collect();
+            let mut c = CreatureVoice::new(def, 48000.0, &initial);
+            let mut t = c.new_telemetry();
+            c.telemetry(&mut t);
+            to_json(&t)
+        }
         // ---------------------------------------------------------------- planning (speech, song)
         "planUtterance" => to_json(&planner::plan_utterance(&arg::<Vec<Segment>>(req, "segments")?, &arg::<PlanOptions>(req, "options")?)),
         "planPhrases" => to_json(&planner::plan_phrases(&arg::<Vec<PhraseInput>>(req, "phrases")?, &arg::<PlanOptions>(req, "options")?)),
@@ -139,7 +163,20 @@ fn catalog() -> Res {
         "beatSounds": &beatbox::BEAT_SOUNDS[..],
         "beatPresets": &beatbox::BEAT_PRESETS[..],
         "vowelTargets": vowels,
+        "demoSongs": songs::DEMO_SONGS,
+        "vowels": vowel_data::VOWELS,
+        "creatures": &chimera::creatures::CREATURES[..],
     }))
+}
+
+/// Put a call's result (or error) in the result buffer; 0 on success, 1 on error.
+pub(crate) fn set_result(out: Res) -> u32 {
+    let (code, v) = match out {
+        Ok(v) => (0, v),
+        Err(e) => (1, json!({ "error": e })),
+    };
+    STATE.with(|s| s.borrow_mut().result = serde_json::to_vec(&v).unwrap_or_else(|_| b"{\"error\":\"unserialisable result\"}".to_vec()));
+    code
 }
 
 /// Run one JSON call (see the module docs). Returns 0 on success, 1 if the result is an error.

@@ -12,6 +12,8 @@
 use crate::anatomy::human::{ArticPatch, BodyName};
 use crate::control::beat_player::BeatPlayer;
 use crate::control::score::{Gesture, GestureScore};
+use crate::creatures::types::CreatureDef;
+use crate::creatures::voice::{CreatureTelemetry, CreatureVoice};
 use crate::phonetics::beatbox::{BeatStep, MAX_SOUND_GESTURES};
 use crate::voice::human_voice::{HumanVoice, SourcePatch, VoiceTelemetry};
 
@@ -47,13 +49,15 @@ pub struct Engine {
     pos: u64,
     scratch: Vec<Gesture>,
     beat: BeatPlayer,
+    /// a creature playing instead of the human voice (whose clock then stands still)
+    creature: Option<CreatureVoice>,
 }
 
 impl Engine {
     pub fn new(sample_rate: f64) -> Engine {
         crate::init();
         let body = BodyName::Male;
-        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new() }
+        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new(), creature: None }
     }
 
     fn make_voice(fs: f64, body: BodyName) -> HumanVoice {
@@ -108,6 +112,57 @@ impl Engine {
     pub fn set_gate(&mut self, level: f64) {
         self.gate_level = level;
         self.voice.set_gate(level);
+        if let Some(c) = self.creature.as_mut() {
+            c.set_gate(level);
+        }
+    }
+
+    // ---------------------------------------------------------------- creatures
+
+    /// Play a creature instead of the human voice (`None`: back to the human), starting from
+    /// these settings (param index, value). Returns its definition. Allocates (a new airway).
+    pub fn set_creature(&mut self, def: Option<&'static CreatureDef>, initial: &[(usize, f64)]) -> Option<&'static CreatureDef> {
+        self.creature = def.map(|d| {
+            let mut c = CreatureVoice::new(d, self.sample_rate, initial);
+            c.set_gate(self.gate_level);
+            c
+        });
+        def
+    }
+
+    pub fn creature(&self) -> Option<&CreatureVoice> {
+        self.creature.as_ref()
+    }
+
+    /// The performer's settings for the creature (param index, value).
+    pub fn set_creature_params(&mut self, values: &[(usize, f64)]) {
+        if let Some(c) = self.creature.as_mut() {
+            c.set_params(values);
+        }
+    }
+
+    /// Play a call of the creature (its index in the def); `pitch` scales its pitch params.
+    pub fn play_call(&mut self, call: usize, pitch: Option<f64>, amp: Option<f64>) {
+        if let Some(c) = self.creature.as_mut() {
+            c.play_call(call, pitch, amp.unwrap_or(1.0));
+        }
+    }
+
+    pub fn stop_call(&mut self) {
+        if let Some(c) = self.creature.as_mut() {
+            c.stop_call();
+        }
+    }
+
+    /// The creature's telemetry (see [`CreatureVoice::telemetry`]); false when the human plays.
+    pub fn creature_telemetry(&mut self, out: &mut CreatureTelemetry) -> bool {
+        match self.creature.as_mut() {
+            Some(c) => {
+                c.telemetry(out);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Schedule gestures planned with times relative to "now": they are shifted onto the voice
@@ -155,7 +210,10 @@ impl Engine {
                 self.sub_block_start();
             }
             let n = (SUB_BLOCK - phase).min(out.len() - i);
-            self.voice.render(&mut out[i..i + n]);
+            match self.creature.as_mut() {
+                Some(c) => c.render(&mut out[i..i + n]),
+                None => self.voice.render(&mut out[i..i + n]),
+            }
             i += n;
             self.pos += n as u64;
         }
@@ -163,6 +221,9 @@ impl Engine {
 
     /// Per-sub-block bookkeeping: the sequencer schedules the hits within its horizon.
     fn sub_block_start(&mut self) {
+        if self.creature.is_some() {
+            return; // the human voice (and its sequencer) waits while a creature plays
+        }
         let voice = &mut self.voice;
         let clock = voice.clock;
         self.beat.tick(clock, &mut |gs| voice.schedule(gs));

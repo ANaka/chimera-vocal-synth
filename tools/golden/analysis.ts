@@ -120,7 +120,7 @@ const peakCases = (() => {
     { name: "smooth", freqs: arr(f), mag: arr(smooth), minFreq: 80 },
     { name: "noisy", freqs: arr(f), mag: arr(noisy), minFreq: 200 },
     { name: "plateau", freqs: arr(f), mag: arr(plateau), minFreq: 0 },
-  ].map((c) => ({ ...c, peaks: peaks(findPeaks(c.freqs, c.mag, c.minFreq)) }));
+  ].map((c) => ({ ...c, peaks: peaks(findPeaks(c.freqs as number[], c.mag as number[], c.minFreq)) }));
 })();
 
 // ------------------------------------------------------------ signals

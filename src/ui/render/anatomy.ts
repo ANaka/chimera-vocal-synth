@@ -5,9 +5,9 @@
  * the airway, airflow particles at local particle velocity u = U/A, turbulence at the active
  * noise source. Handles for direct manipulation.
  */
-import type { HumanArtic, HumanFrame } from "../../engine/anatomy/human.ts";
-import type { Vec } from "../../engine/anatomy/geom.ts";
-import { rotateAbout, dist, catmullRom } from "../../engine/anatomy/geom.ts";
+import type { HumanArtic, HumanFrame } from "../../wasm/types.ts";
+import type { Vec } from "./geom.ts";
+import { rotateAbout, dist, catmullRom } from "./geom.ts";
 import type { TelemetryMessage } from "../../worklet/protocol.ts";
 import type { VoiceModel } from "../analysis.ts";
 import { C, hot, pressureLevel } from "../colors.ts";
@@ -115,7 +115,7 @@ export class AnatomyRenderer {
   }
 
   handles(model: VoiceModel, f: HumanFrame, a: HumanArtic): Handle[] {
-    const t = model.airway.tract;
+    const t = model.tract;
     const J = this.jawFn(model, a);
     const lips = { x: (f.upperLip[6].x + f.lowerLip[6].x) / 2 + 0.15, y: (f.upperLip[6].y + f.lowerLip[6].y) / 2 };
     return [
@@ -129,7 +129,7 @@ export class AnatomyRenderer {
   }
 
   private jawFn(model: VoiceModel, a: HumanArtic): (x: number, y: number) => Vec {
-    const t = model.airway.tract;
+    const t = model.tract;
     const k = t.scale;
     const condyle = t.P(-2.5, 10.5);
     const jawRef = t.P(6.95, 7.75);
@@ -196,7 +196,7 @@ export class AnatomyRenderer {
 
   private drawTissue(model: VoiceModel, f: HumanFrame, a: HumanArtic): void {
     const c = this.tctx;
-    const t = model.airway.tract;
+    const t = model.tract;
     const P = (x: number, y: number) => t.P(x, y);
     const J = this.jawFn(model, a);
     const k = t.scale;
@@ -212,7 +212,7 @@ export class AnatomyRenderer {
     // ---- head silhouette (skin + subcutaneous fat)
     // facial profile in true body coordinates (the oral-region x compression of P() would
     // flatten the nose): subnasale → nose tip → nasion → forehead
-    const ph = model.airway.body.pharynx;
+    const ph = model.bodyParams.pharynx;
     const B = (x: number, y: number): Vec => ({ x: x * k, y: (y < 7 ? 7 - (7 - y) * ph : y) * k });
     const neckFront = catmullRom([B(2.3, -4.6), B(2.38, -1.5), B(2.52, 0.4), B(3.0, 1.7), J(5.3, 3.0), J(7.25, 3.35), J(7.95, 4.6), J(7.55, 5.7)], 4);
     const face = catmullRom([ulOut[ulOut.length - 1], B(7.05, 10.6), B(7.75, 10.78), B(8.75, 11.05), B(9.25, 11.65), B(8.95, 12.6), B(8.35, 13.9), B(7.7, 15.0), B(7.95, 16.1), B(7.9, 18.1), B(6.9, 20.5)], 4);
@@ -358,7 +358,7 @@ export class AnatomyRenderer {
   }
 
   private palatePoints(model: VoiceModel): Vec[] {
-    const t = model.airway.tract;
+    const t = model.tract;
     const raw: [number, number][] = [[1.0, 9.6], [1.8, 9.92], [2.7, 10.18], [3.6, 10.3], [4.4, 10.25], [5.1, 10.05], [5.7, 9.72], [6.15, 9.36], [6.55, 9.15], [7.0, 9.6]];
     return raw.map(([x, y]) => t.P(x, y));
   }

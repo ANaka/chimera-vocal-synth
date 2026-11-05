@@ -1,6 +1,6 @@
 import { useCanvasLoop, font } from "../useCanvas.ts";
 import { useStore } from "../store.ts";
-import { creatureById } from "../../engine/creatures/index.ts";
+import { creatureById } from "../../wasm/engine.ts";
 import { liveTelemetry, previewTelemetry } from "../creatureLive.ts";
 import { C, hot, pressureLevel } from "../colors.ts";
 

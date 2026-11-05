@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { useCanvasLoop, font } from "../useCanvas.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
-import { creatureById } from "../../engine/creatures/index.ts";
+import { creatureById } from "../../wasm/engine.ts";
 import { liveTelemetry } from "../creatureLive.ts";
 import { C } from "../colors.ts";
 

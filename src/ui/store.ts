@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import { engine } from "../audio/AudioEngine.ts";
-import { DEFAULT_SOURCE, type VoiceSource } from "../engine/voice/humanVoice.ts";
-import { NEUTRAL, restTip, type HumanArtic } from "../engine/anatomy/human.ts";
+import { DEFAULT_SOURCE, type VoiceSource } from "../wasm/engine.ts";
+import { NEUTRAL, restTip, type HumanArtic } from "../wasm/engine.ts";
 import type { BodyName } from "../worklet/protocol.ts";
-import { creatureById } from "../engine/creatures/index.ts";
-import type { ParamDef } from "../engine/creatures/types.ts";
-import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../engine/phonetics/beatbox.ts";
+import { creatureById } from "../wasm/engine.ts";
+import type { ParamDef } from "../wasm/types.ts";
+import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../wasm/engine.ts";
 import { singNoteOn, singNoteOff, stopSinging, ensureDictionary } from "./singing.ts";
 import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
 

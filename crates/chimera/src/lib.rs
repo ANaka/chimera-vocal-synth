@@ -55,4 +55,6 @@ pub fn init() {
     phonetics::planner::init();
     phonetics::inventory::init();
     phonetics::beatbox::init();
+    phonetics::ipa::init();
+    creatures::init();
 }

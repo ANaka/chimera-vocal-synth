@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.ts";
 import { speakText, speakPhrases, stopSpeaking, onPlan, currentPlan } from "../speech.ts";
-import { tokenizeIpa } from "../../engine/phonetics/ipa.ts";
+import { tokenizeIpa } from "../../wasm/engine.ts";
 import { Slider, Toggle } from "./Controls.tsx";
 import { ScoreView } from "./ScoreView.tsx";
 

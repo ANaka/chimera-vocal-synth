@@ -16,7 +16,7 @@ import { CreatureView } from "./components/CreatureView.tsx";
 import { Spectrogram } from "./components/Spectrogram.tsx";
 import { Scope } from "./components/Scope.tsx";
 import { CreatureTubes } from "./components/CreatureTubes.tsx";
-import { creatureById } from "../engine/creatures/index.ts";
+import { creatureById } from "../wasm/engine.ts";
 import { BeatboxPanel, BeatOverlay } from "./components/BeatboxPanel.tsx";
 import { SingPanel } from "./components/SingPanel.tsx";
 import { playDemo, DEMO_SONGS } from "./singing.ts";

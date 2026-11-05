@@ -1,9 +1,9 @@
 /** Main-thread speech planning: text/IPA → phrases → gestural plan → worklet. */
-import { EnglishG2P, type Phrase } from "../engine/phonetics/english.ts";
-import { tokenizeIpa } from "../engine/phonetics/ipa.ts";
-import { planPhrases, type Plan, type Segment } from "../engine/phonetics/planner.ts";
+import { EnglishG2P, type Phrase } from "../wasm/engine.ts";
+import { tokenizeIpa } from "../wasm/engine.ts";
+import { planPhrases, type Plan, type Segment } from "../wasm/engine.ts";
 import { engine } from "../audio/AudioEngine.ts";
-import type { Gesture } from "../engine/control/score.ts";
+import type { Gesture } from "../wasm/types.ts";
 
 export const g2p = new EnglishG2P();
 

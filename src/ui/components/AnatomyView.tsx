@@ -4,7 +4,7 @@ import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
 import { VoiceModel } from "../analysis.ts";
 import { useModel } from "../useModel.ts";
-import type { HumanArtic } from "../../engine/anatomy/human.ts";
+import type { HumanArtic } from "../../wasm/types.ts";
 
 const BODY_LABEL = { male: "Human, adult male", female: "Human, adult female", child: "Human, child" } as const;
 
@@ -98,7 +98,7 @@ export function AnatomyView() {
     if (!r || !m) return;
     const rect = canvasRef.current!.getBoundingClientRect();
     const p = r.toBody(e.clientX - rect.left, e.clientY - rect.top);
-    const t = m.airway.tract;
+    const t = m.tract;
     const k = t.scale;
     const dx = (p.x - d.start.x) / k;
     const dy = (p.y - d.start.y) / k;

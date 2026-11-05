@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import { engine } from "../audio/AudioEngine.ts";
-import { CreatureVoice, type CreatureTelemetry } from "../engine/creatures/voice.ts";
-import type { CreatureDef } from "../engine/creatures/types.ts";
+import { creaturePreview, type CreatureTelemetry } from "../wasm/engine.ts";
+import type { CreatureDef } from "../wasm/types.ts";
 
 const previews = new Map<string, CreatureTelemetry>();
 
 /**
  * A still frame of a creature's airway at the given settings, for drawing before audio starts:
- * builds the simulation on the main thread (well under a millisecond) and reads its geometry.
+ * the engine builds the simulation on the main thread (well under a millisecond) and reads its geometry.
  */
 export function previewTelemetry(def: CreatureDef, params?: Record<string, number>): CreatureTelemetry {
   const key = def.id + JSON.stringify(params ?? {});
   let t = previews.get(key);
   if (!t) {
-    t = new CreatureVoice(def, 48000, params).telemetry();
+    t = creaturePreview(def.id, params);
     previews.set(key, t);
     if (previews.size > 48) previews.delete(previews.keys().next().value!);
   }

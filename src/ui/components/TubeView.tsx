@@ -23,11 +23,11 @@ export function TubeView() {
       orLen = tele.t.orLen;
       rms = tele.t.pressureRms;
     } else {
-      m.airway.apply(st.artic);
-      ph = m.airway.phAreas;
-      or = m.airway.orAreas;
-      phLen = m.airway.phLen;
-      orLen = m.airway.orLen;
+      const ar = m.areas(st.artic);
+      ph = ar.phAreas;
+      or = ar.orAreas;
+      phLen = ar.phLen;
+      orLen = ar.orLen;
     }
     const nPh = ph.length, nOr = or.length;
     const total = phLen + orLen;
@@ -41,7 +41,7 @@ export function TubeView() {
     const velum = tele ? tele.t.velumPort : m.frame(st.artic).velumPort;
     const naX0 = padL + phLen * sx;
     const naY = axisY - h * 0.36;
-    const naLen = 11.4 * m.airway.body.scale;
+    const naLen = 11.4 * m.bodyParams.scale;
     const nasalLit = Math.min(1, velum / 0.4);
     ctx.strokeStyle = `rgba(160,170,175,${0.25 + 0.5 * nasalLit})`;
     ctx.lineWidth = 1;
