@@ -11,11 +11,8 @@ import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
 import { Screen } from "./components/Screen.tsx";
 import { SpeakRight, speechInfo, speechSlots } from "./components/SpeakPanel.tsx";
-import { BestiaryPanel } from "./components/BestiaryPanel.tsx";
+import { BestiaryRight } from "./components/BestiaryPanel.tsx";
 import { CreatureView } from "./components/CreatureView.tsx";
-import { Spectrogram } from "./components/Spectrogram.tsx";
-import { Scope } from "./components/Scope.tsx";
-import { CreatureTubes } from "./components/CreatureTubes.tsx";
 import { creatureById } from "../wasm/engine.ts";
 import { BeatboxRight, BeatOverlay, beatInfo, beatSlots } from "./components/BeatboxPanel.tsx";
 import { SingRight, singInfo } from "./components/SingPanel.tsx";
@@ -190,32 +187,6 @@ function PlayRight() {
   );
 }
 
-/** Modes not yet redrawn in the vector style: their three instruments, as screens. */
-function LegacyRight() {
-  const mode = useStore((s) => s.mode);
-  const screens: [string, React.ReactNode][] =
-    mode === "beatbox"
-      ? [["Tube, glottis to lips", <TubeView key="t" />], ["Spectrogram", <Spectrogram key="s" />], ["Vocal folds, slowed down", <Stroboscope key="f" />]]
-      : mode === "bestiary"
-        ? [["Spectrogram", <Spectrogram key="s" />], ["Waveform, three cycles", <Scope key="w" />], ["Airway, each tube unrolled", <CreatureTubes key="a" />]]
-        : [["Tube, glottis to lips", <TubeView key="t" />], ["Vocal folds, slowed down", <Stroboscope key="f" />], ["Spectrum and resonances", <SpectrumView key="p" ring={mode === "sing"} />]];
-  return (
-    <div className="right right-legacy">
-      {screens.map(([title, node]) => (
-        <Screen key={title} title={title}>
-          {node}
-        </Screen>
-      ))}
-    </div>
-  );
-}
-
-function Deck() {
-  const mode = useStore((s) => s.mode);
-  if (mode === "bestiary") return <BestiaryPanel />;
-  return null;
-}
-
 export function App() {
   const mode = useStore((s) => s.mode);
   return (
@@ -223,9 +194,8 @@ export function App() {
       <TopBar />
       <main className={`wall wall-${mode}`}>
         <LeftScreen />
-        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : mode === "beatbox" ? <BeatboxRight /> : <LegacyRight />}
+        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : mode === "beatbox" ? <BeatboxRight /> : <BestiaryRight />}
       </main>
-      <Deck />
     </div>
   );
 }

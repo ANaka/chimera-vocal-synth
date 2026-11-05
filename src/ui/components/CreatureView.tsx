@@ -1,10 +1,11 @@
 import { useRef } from "react";
-import { useCanvasLoop, font } from "../useCanvas.ts";
+import { usePhosphor } from "../usePhosphor.ts";
 import { useStore } from "../store.ts";
 import { creatureById } from "../../wasm/engine.ts";
 import type { CreatureDef } from "../../wasm/types.ts";
 import { liveTelemetry, previewTelemetry } from "../creatureLive.ts";
-import { C, hot, pressureLevel } from "../colors.ts";
+import { V, SLOTS, heat, pressureLevel } from "../colors.ts";
+import { beamPts, dot, hfont, label, ring, seg, type Pt } from "../render/vector.ts";
 
 type P = [number, number];
 
@@ -68,155 +69,102 @@ function pointAt(t: TubeGeom, s: number): P {
   return [t.pts[i - 1][0] + (t.pts[i][0] - t.pts[i - 1][0]) * u, t.pts[i - 1][1] + (t.pts[i][1] - t.pts[i - 1][1]) * u];
 }
 
+/** a creature parameter's value for display */
+function fmtParam(v: number, p: CreatureDef["params"][number]): { value: string; unit: string } {
+  const digits = p.digits ?? (p.max - p.min <= 2 ? 2 : v < 100 && p.log ? 1 : 0);
+  return { value: v.toFixed(digits), unit: p.unit ?? "" };
+}
+
 /**
- * Creature cross-section in the same visual language as the human MRI view: tissue silhouette,
- * black airway channels whose width follows the simulated cross-section, acoustic pressure in
- * the hot scale, and source glyphs whose ripples follow the vibration.
+ * The creature as a vector drawing, in the language of the human face: the outline in bright blue,
+ * tissue dimmer, airway walls at the simulated width with cross-section rungs lit by sound
+ * pressure, sound sources as rings in slot colours with ripples paced by the pitch, and the first
+ * four parameters as readouts across the bottom.
  */
 export function CreatureView() {
-  const grainRef = useRef<CanvasPattern | null>(null);
   const glyph = useRef<{ peak: Record<string, number>; phase: Record<string, number> }>({ peak: {}, phase: {} });
-  const ref = useCanvasLoop(({ ctx, w, h, dt }) => {
+  const ref = usePhosphor(({ ctx, w, h, dt }) => {
     const st = useStore.getState();
     const def = creatureById(st.creature);
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, w, h);
     if (!def) return;
     const vis = def.visual;
     const geo = geometry(def);
     const live = liveTelemetry(def.id);
     const tele = live ?? previewTelemetry(def, st.cparams[def.id]);
+    const top = 64, slotH = Math.min(118, h * 0.2);
     const vw = vis.view.x1 - vis.view.x0, vh = vis.view.y1 - vis.view.y0;
-    const sc = Math.min((w * 0.84) / vw, (h * 0.7) / vh);
+    const sc = Math.min((w * 0.86) / vw, ((h - top - slotH) * 0.9) / vh);
     const ox = w / 2 - ((vis.view.x0 + vis.view.x1) / 2) * sc;
-    const oy = h * 0.53 + ((vis.view.y0 + vis.view.y1) / 2) * sc;
-    const X = (x: number) => ox + x * sc;
-    const Y = (y: number) => oy - y * sc;
-    if (!grainRef.current) {
-      const g = document.createElement("canvas");
-      g.width = g.height = 160;
-      const gc = g.getContext("2d")!;
-      const img = gc.createImageData(160, 160);
-      for (let i = 0; i < img.data.length; i += 4) {
-        const v = 128 + (Math.random() + Math.random() + Math.random() - 1.5) * 90;
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-        img.data[i + 3] = 255;
-      }
-      gc.putImageData(img, 0, 0);
-      grainRef.current = ctx.createPattern(g, "repeat");
-    }
-    const path = (pts: P[]) => {
-      ctx.beginPath();
-      pts.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
-      ctx.closePath();
-    };
-    // tissue: bright subcutaneous fat rim around darker muscle, T1-like
-    const span = Math.min(vw * sc, vh * sc * 2.5);
-    ctx.save();
-    path(geo.silhouette);
-    ctx.clip();
-    ctx.fillStyle = C.muscle;
-    ctx.fill();
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = C.fat;
-    ctx.lineWidth = Math.max(5, span * 0.018);
-    ctx.stroke();
-    ctx.strokeStyle = C.skin;
-    ctx.lineWidth = Math.max(2, span * 0.006);
-    ctx.stroke();
-    for (const part of geo.parts) {
-      path(part.pts);
-      const v = Math.round(part.shade * 255);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.fill();
-    }
-    if (grainRef.current) {
-      ctx.globalCompositeOperation = "overlay";
-      ctx.globalAlpha = 0.2;
-      ctx.fillStyle = grainRef.current;
-      ctx.fillRect(0, 0, w, h);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
-    }
-    ctx.restore();
-    // airway channels: drawn wider than life so narrow tubes stay legible
+    const oy = top + (h - top - slotH) / 2 + ((vis.view.y0 + vis.view.y1) / 2) * sc;
+    const S = ([x, y]: P): Pt => [ox + x * sc, oy - y * sc];
+
+    beamPts(ctx, geo.silhouette.map(S), V.blue, 1.7, { hot: true, close: true });
+    for (const part of geo.parts) beamPts(ctx, part.pts.map(S), part.shade > 0.5 ? V.blueMid : V.blueDim, 1, { close: true, alpha: 0.9 });
+
+    // airways: walls at the simulated width (drawn wider than life so narrow tubes stay legible)
     const exaggerate = vis.tubeScale ?? 1.6;
-    ctx.lineCap = "round";
-    const labels: { text: string; x: number; y: number }[] = [];
+    const labels: { text: string; x: number; y: number; color: string }[] = [];
     for (const tg of geo.tubes) {
       const data = tele.tubes[tg.tube];
       if (!data) continue;
       const n = data.areas.length;
-      const width = (k: number) => 2 * Math.sqrt(Math.max(0, data.areas[k]) / Math.PI) * exaggerate * sc;
-      // walls first (mucosa), then lumen, then pressure
-      for (let pass = 0; pass < 3; pass++) {
-        for (let k = 0; k < n; k++) {
-          const a = pointAt(tg, (k / n) * tg.length), b = pointAt(tg, ((k + 1) / n) * tg.length);
-          const d = width(k);
-          ctx.beginPath();
-          ctx.moveTo(X(a[0]), Y(a[1]));
-          ctx.lineTo(X(b[0]), Y(b[1]));
-          if (pass === 0) {
-            ctx.strokeStyle = C.mucosa;
-            ctx.lineWidth = d + 3;
-          } else if (pass === 1) {
-            ctx.strokeStyle = "#000";
-            ctx.lineWidth = Math.max(1.5, d);
-          } else {
-            if (!live || !st.view.pressure) break;
-            const lvl = pressureLevel(data.rms[k] * 0.6);
-            if (lvl < 0.02) continue;
-            const [r, g, bb] = hot(lvl);
-            ctx.strokeStyle = `rgba(${r | 0},${g | 0},${bb | 0},${0.5 + 0.5 * lvl})`;
-            ctx.lineWidth = Math.max(1.2, d - 1);
-          }
-          ctx.stroke();
-        }
+      const half = (k: number) => Math.sqrt(Math.max(0, data.areas[Math.min(n - 1, k)]) / Math.PI) * exaggerate;
+      const frame = (s: number) => {
+        const a = pointAt(tg, Math.max(0, s - 0.02 * tg.length)), b = pointAt(tg, Math.min(tg.length, s + 0.02 * tg.length));
+        const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+        return { p: pointAt(tg, s), nx: -dy / l, ny: dx / l };
+      };
+      const wallA: Pt[] = [], wallB: Pt[] = [];
+      for (let k = 0; k <= n; k++) {
+        const { p, nx, ny } = frame((k / n) * tg.length);
+        const r = half(k);
+        wallA.push(S([p[0] + nx * r, p[1] + ny * r]));
+        wallB.push(S([p[0] - nx * r, p[1] - ny * r]));
+      }
+      beamPts(ctx, wallA, V.blue, 1.2, { hot: true });
+      beamPts(ctx, wallB, V.blue, 1.2, { hot: true });
+      for (let k = 0; k < n; k++) {
+        const { p, nx, ny } = frame(((k + 0.5) / n) * tg.length);
+        const r = half(k);
+        const lvl = live && st.view.pressure ? Math.pow(pressureLevel(data.rms[k] * 0.6), 0.85) : 0;
+        const [x0, y0] = S([p[0] + nx * r, p[1] + ny * r]), [x1, y1] = S([p[0] - nx * r, p[1] - ny * r]);
+        seg(ctx, x0, y0, x1, y1, live ? heat(lvl) : V.blueDim, 1, { alpha: live ? 0.35 + 0.65 * lvl : 0.6 });
       }
       if (tg.label && tg.inView) {
-        const m = pointAt(tg, tg.length * 0.5);
-        labels.push({ text: tg.label, x: X(m[0]) + 10, y: Y(m[1]) - 10 });
+        const m = S(pointAt(tg, tg.length * 0.5));
+        labels.push({ text: tg.label.toUpperCase(), x: m[0] + 12, y: m[1] - 12, color: V.blueMid });
       }
     }
-    // source glyphs: a ring sized by the vibration envelope, ripples paced by the pitch
+
+    // sound sources: a ring sized by the vibration envelope, ripples paced by the pitch
     const pp = def.params.find((p) => p.role === "pitch");
-    const pitch = pp ? (live ? live.params[pp.key] : (st.cparams[def.id]?.[pp.key] ?? pp.default)) : 200;
+    const paramValue = (key: string, dflt: number) => (live ? (live.params[key] ?? dflt) : (st.cparams[def.id]?.[key] ?? dflt));
+    const pitch = pp ? paramValue(pp.key, pp.default) : 200;
     const rate = 1.2 + 4.8 * Math.max(0, Math.min(1, Math.log(pitch / 10) / Math.log(900)));
-    for (const s of vis.sources ?? []) {
+    (vis.sources ?? []).forEach((s, i) => {
+      const color = SLOTS[i % 4];
       const raw = Math.max(0, Math.min(1, live?.source[s.key] ?? 0));
       const pk = Math.max(raw, (glyph.current.peak[s.key] ?? 0) * Math.exp(-dt / 0.18));
       glyph.current.peak[s.key] = pk;
       const ph = ((glyph.current.phase[s.key] ?? 0) + dt * rate) % 1;
       glyph.current.phase[s.key] = ph;
-      const x = X(s.at[0]), y = Y(s.at[1]);
+      const [x, y] = S(s.at);
       const r0 = 3.5 + 6 * pk;
-      if (pk > 0.04) {
-        for (let j = 0; j < 3; j++) {
-          const u = (ph + j / 3) % 1;
-          ctx.beginPath();
-          ctx.arc(x, y, r0 + u * 24, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(242,207,91,${(1 - u) * Math.min(1, pk * 1.3) * 0.7})`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
+      if (pk > 0.04) for (let j = 0; j < 3; j++) {
+        const u = (ph + j / 3) % 1;
+        ring(ctx, x, y, r0 + u * 24, color, 1, { alpha: (1 - u) * Math.min(1, pk * 1.3) * 0.8 });
       }
-      ctx.beginPath();
-      ctx.arc(x, y, r0, 0, Math.PI * 2);
-      ctx.strokeStyle = C.caliper;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-      ctx.fillStyle = C.caliper;
-      ctx.fill();
-      labels.push({ text: s.label, x: x + 14, y: y + 18 });
-    }
+      ring(ctx, x, y, r0, color, 1.5, { hot: true });
+      dot(ctx, x, y, 1.8, color);
+      labels.push({ text: s.label.toUpperCase(), x: x + 14, y: y + 18, color });
+    });
+
     if (st.view.calipers) {
       // place labels, nudging down past any earlier label they would overlap
-      ctx.font = font(11.5);
+      ctx.font = hfont(10);
       const placed: { x0: number; x1: number; y0: number; y1: number }[] = [];
       for (const l of labels) {
-        const tw = ctx.measureText(l.text).width;
+        const tw = ctx.measureText(l.text).width + l.text.length * 1.5;
         const x = Math.min(w - tw - 6, l.x);
         let y = l.y;
         for (let guard = 0; guard < 8; guard++) {
@@ -225,30 +173,40 @@ export function CreatureView() {
           y = hit.y1 + 12;
         }
         placed.push({ x0: x, x1: x + tw, y0: y - 11, y1: y + 2 });
-        const isSource = (vis.sources ?? []).some((s) => s.label === l.text);
-        ctx.lineJoin = "round";
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = "rgba(0,0,0,0.85)";
-        ctx.strokeText(l.text, x, y);
-        ctx.fillStyle = isSource ? C.caliper : "rgba(232,234,235,0.82)";
-        ctx.fillText(l.text, x, y);
+        label(ctx, l.text, x, y, { size: 10, color: l.color, ls: 0.15 });
       }
     }
-    // corner overlays
-    ctx.font = font(14, 600, 112);
-    ctx.fillStyle = "rgba(232,234,235,0.9)";
-    ctx.fillText(def.name, 14, 26);
-    ctx.font = `italic ${font(12.5)}`;
-    ctx.fillStyle = C.textDim;
-    ctx.fillText(def.latin, 14, 44);
-    ctx.textAlign = "right";
-    ctx.font = font(12.5);
-    ctx.fillStyle = "rgba(232,234,235,0.85)";
-    if (pp) ctx.fillText(`${pitch.toFixed(pp.digits ?? (pitch < 100 ? 1 : 0))} ${pp.unit ?? ""}`.trim(), w - 14, 26);
+
+    // like a map's title: the name, the latin name, and what it is doing
+    label(ctx, def.name.toUpperCase(), 16, 34, { size: 24, color: V.blue, ls: 0.18 });
+    label(ctx, def.latin.toUpperCase(), 18, 54, { size: 10, color: V.blueMid, ls: 0.16 });
     const state = live ? (live.call ? (def.calls.find((c) => c.id === live.call)?.name ?? live.call) : live.gate > 0.05 ? "Sustaining" : "At rest") : "Not started";
-    ctx.fillStyle = C.textDim;
-    ctx.fillText(state, w - 14, 44);
-    ctx.textAlign = "left";
+    label(ctx, state.toUpperCase(), w - 16, 30, { size: 13, color: V.amber, align: "right", ls: 0.16 });
+    if (pp) {
+      const f = fmtParam(pitch, pp);
+      label(ctx, `${f.value} ${f.unit}`.trim().toUpperCase(), w - 16, 50, { size: 11, color: V.amber, align: "right", ls: 0.12, alpha: 0.8 });
+    }
+    // a scale bar: 1 drawing unit (about a centimetre)
+    const unit = vw > 60 ? 10 : 1;
+    const by = h - slotH - 10;
+    seg(ctx, 18, by, 18 + unit * sc, by, V.blueMid, 1.2);
+    seg(ctx, 18, by - 4, 18, by + 4, V.blueMid, 1.2);
+    seg(ctx, 18 + unit * sc, by - 4, 18 + unit * sc, by + 4, V.blueMid, 1.2);
+    label(ctx, `${unit} CM`, 26 + unit * sc, by + 3, { size: 9, color: V.blueMid, ls: 0.14 });
+
+    // the first four parameters, OP-1 style, across the bottom (the encoders on the right share the colours)
+    const params = def.params.slice(0, 4);
+    const cw = (w - 28) / Math.max(1, params.length);
+    const big = Math.max(18, Math.min(40, slotH * 0.36, cw * 0.2));
+    params.forEach((p, i) => {
+      const color = SLOTS[i];
+      const cx = 16 + i * cw, cy = h - slotH + 12;
+      dot(ctx, cx + 5, cy, 4, color);
+      label(ctx, p.label.toUpperCase(), cx + 15, cy + 4, { size: 10, color, ls: 0.16, alpha: 0.85 });
+      const f = fmtParam(paramValue(p.key, p.default), p);
+      label(ctx, f.value, cx, cy + 14 + big, { size: big, color, weight: "m", ls: 0.02 });
+      if (f.unit) label(ctx, f.unit.toUpperCase(), cx, cy + 32 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });
+    });
   });
-  return <canvas ref={ref} className="creature-canvas" aria-label="Creature airway cross-section" role="img" />;
+  return <canvas ref={ref} className="creature-canvas" aria-label="Creature airway: its outline, its airways lit by sound pressure, and its sound sources" role="img" />;
 }
