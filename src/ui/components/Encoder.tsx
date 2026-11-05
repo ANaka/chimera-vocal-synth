@@ -119,7 +119,7 @@ export function EncoderPages(props: { pages: EncoderPage[]; footer?: ReactNode; 
           ))}
         </div>
       )}
-      <div className="enc-row" role="group" aria-label={p.name} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+      <div className={`enc-row cols-${cols}`} role="group" aria-label={p.name}>
         {Array.from({ length: cols }, (_, i) => i).map((i) => (p.encoders[i] ? <Encoder key={`${p.name}-${p.encoders[i].label}`} {...p.encoders[i]} slot={i} /> : <div key={`empty-${i}`} className="encoder empty" aria-hidden="true" />))}
       </div>
       {props.footer && <div className="enc-footer">{props.footer}</div>}

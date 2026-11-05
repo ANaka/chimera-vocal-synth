@@ -1717,6 +1717,10 @@ button.ghost:hover,
   min-height: 0;
 }
 
+.enc-row.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .encoder {
   display: grid;
   justify-items: center;
