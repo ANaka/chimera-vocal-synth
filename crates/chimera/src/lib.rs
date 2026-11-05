@@ -9,6 +9,7 @@ pub mod physics;
 
 pub mod airway {
     pub mod decimator;
+    pub mod frequency;
     pub mod network;
 }
 
@@ -19,10 +20,13 @@ pub mod anatomy {
 
 pub mod sources {
     pub mod glottis;
+    pub mod syrinx;
+    pub mod valves;
 }
 
 pub mod control {
     pub mod articulators;
+    pub mod beat_player;
     pub mod score;
 }
 
@@ -30,3 +34,16 @@ pub mod voice {
     pub mod human_airway;
     pub mod human_voice;
 }
+
+pub mod analysis {
+    pub mod fft;
+    pub mod lpc;
+    pub mod pitch;
+}
+
+pub mod util {
+    pub mod optimize;
+}
+
+pub mod creatures;
+pub mod phonetics;
