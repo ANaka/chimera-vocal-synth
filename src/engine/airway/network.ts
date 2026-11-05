@@ -153,6 +153,8 @@ export class AirwayNetwork {
   enableVolumeSource = true;
   enableJunctionFloor = true;
   energySafe = true;
+  /** diagnostics: use the larger kinetic coefficient for both flow directions */
+  symmetricKinetic = false;
   /** current section length (cm) */
   dx!: Float64Array;
   private dxTarget!: Float64Array;
@@ -550,9 +552,16 @@ export class AirwayNetwork {
     const isJ = this.isJunction;
     const invLsum = this.invLsum;
 
-    // 1) geometry ramps; accumulate -dV/dt into the flow sums. A nearly closed node cannot hold
-    //    the air its walls displace: that share is pushed into its neighbours (mass-conserving).
+    // 1) geometry ramps and the moving-wall volume source. The raw −dV/dt of each node is first
+    //    split between the node and its open neighbours (a nearly closed cell cannot hold the air
+    //    its walls displace), THEN each node's total injection is low-passed: dV/dt is piecewise
+    //    constant across control blocks and the split switches as cells close, and the output is a
+    //    derivative of flow, so unfiltered steps would radiate as clicks. Linear filtering after
+    //    the split keeps mass conserved.
     const sq = this.squeezeArea;
+    const inj = this.spill; // reused as the per-node raw injection accumulator
+    const volOn = this.enableVolumeSource;
+    if (volOn) inj.fill(0);
     let anySpill = false;
     for (let k = 0; k < N; k++) {
       let a = area[k] + this.areaStep[k];
@@ -564,44 +573,41 @@ export class AirwayNetwork {
       const d = (dx[k] += this.dxStep[k]);
       invA[k] = 1 / (a > 1e-6 ? a : 1e-6);
       const v = (a > minA ? a : minA) * d;
-      // −dV/dt is piecewise constant across control blocks (and kinks at geometric vertices);
-      // its derivative would radiate as clicks, so it is low-passed (physical content is sub-audio)
-      let src = 0;
-      if (this.enableVolumeSource) {
+      if (volOn) {
         const raw = -(v - vol[k]) * invT;
-        const c = this.volLpCoef;
-        const s1 = (this.volSrc1[k] += c * (raw - this.volSrc1[k]));
-        src = this.volSrc2[k] += c * (s1 - this.volSrc2[k]);
+        const ae = amin[k] < a ? amin[k] : a; // a node sealed at its minimum cannot hold air either
+        if (raw !== 0 && ae < sq) {
+          const t = ae / sq;
+          const keep = t * t * (3 - 2 * t);
+          inj[k] += raw * keep;
+          const sp = raw * (1 - keep);
+          const s0 = this.nbrStart[k], s1 = this.nbrStart[k + 1];
+          let nOpen = 0;
+          for (let e = s0; e < s1; e++) {
+            const m = this.nbrList[e];
+            if (Math.min(area[m], amin[m]) >= sq || this.aminTarget[m] >= sq) nOpen++;
+          }
+          if (nOpen > 0) {
+            const share = sp / nOpen;
+            for (let e = s0; e < s1; e++) {
+              const m = this.nbrList[e];
+              if (Math.min(area[m], amin[m]) >= sq || this.aminTarget[m] >= sq) inj[m] += share;
+            }
+          } // else: fully sealed pocket, the squeezed air leaves laterally (absorbed)
+          anySpill = true;
+        } else inj[k] += raw;
       }
       vol[k] = v;
       invLsum[k] = 0;
-      if (a < sq && src !== 0) {
-        const t = a / sq;
-        const keep = t * t * (3 - 2 * t);
-        flowSum[k] = src * keep + this.extFlow[k];
-        this.spill[k] = src * (1 - keep);
-        anySpill = true;
-      } else {
-        flowSum[k] = src + this.extFlow[k];
-        this.spill[k] = 0;
-      }
+      flowSum[k] = this.extFlow[k];
       this.extFlow[k] = 0;
     }
-    if (anySpill) {
-      const cl = this.closedArea;
+    void anySpill;
+    if (volOn) {
+      const c = this.volLpCoef;
       for (let k = 0; k < N; k++) {
-        const sp = this.spill[k];
-        if (sp === 0) continue;
-        const s0 = this.nbrStart[k], s1 = this.nbrStart[k + 1];
-        // only open neighbours can receive displaced air
-        let nOpen = 0;
-        for (let e = s0; e < s1; e++) if (area[this.nbrList[e]] >= cl) nOpen++;
-        if (nOpen === 0) continue; // fully sealed pocket: the squeezed air is absorbed by contact
-        const share = sp / nOpen;
-        for (let e = s0; e < s1; e++) {
-          const m = this.nbrList[e];
-          if (area[m] >= cl) flowSum[m] += share;
-        }
+        const s1 = (this.volSrc1[k] += c * (inj[k] - this.volSrc1[k]));
+        flowSum[k] += this.volSrc2[k] += c * (s1 - this.volSrc2[k]);
       }
     }
 
@@ -684,6 +690,11 @@ export class AirwayNetwork {
       this.branchArea[j] = aEff;
       // energy-safe momentum transfer when the inertance changes: closing (L↑) conserves
       // momentum (flow drops), opening (L↓) conserves flow — never injects kinetic energy
+      if (this.symmetricKinetic) {
+        const km = kf > kb ? kf : kb;
+        kf = km;
+        kb = km;
+      }
       const Lp = Lprev[j];
       const m0 = this.energySafe && L < Lp ? L * U[j] : mom[j];
       const c = p[a] - p[b] + psrc[j] + m0 * invT;
@@ -730,18 +741,26 @@ export class AirwayNetwork {
     const cl = this.closedArea;
     for (let k = 0; k < N; k++) {
       if (this.fixed[k]) continue;
-      if (area[k] < cl) {
-        // sealed cell (tissue contact): no air of its own; follow the open neighbours' mean
-        let sum = 0, cnt = 0;
-        for (let e = this.nbrStart[k]; e < this.nbrStart[k + 1]; e++) {
-          const m = this.nbrList[e];
-          if (area[m] >= cl) {
-            sum += p[m];
-            cnt++;
-          }
-        }
-        if (cnt > 0) p[k] += 0.02 * (sum / cnt - p[k]);
+      // sealed if the cell itself, or its narrowest point, is closed (then all its series
+      // branches are closed too, and compressing its remaining volume would trap pressure)
+      if (area[k] < cl || amin[k] < cl) {
         const rr = this.radOf[k];
+        if (rr >= 0) {
+          // sealed aperture: its outer face is the atmosphere, so it relaxes to 0 (tracking the
+          // pressurised cavity behind would discharge as a radiated spike on reopening)
+          p[k] *= 0.98;
+        } else {
+          // sealed interior cell (tissue contact): no air of its own; follow open neighbours
+          let sum = 0, cnt = 0;
+          for (let e = this.nbrStart[k]; e < this.nbrStart[k + 1]; e++) {
+            const m = this.nbrList[e];
+            if (area[m] >= cl && amin[m] >= cl) {
+              sum += p[m];
+              cnt++;
+            }
+          }
+          if (cnt > 0) p[k] += 0.02 * (sum / cnt - p[k]);
+        }
         if (rr >= 0) {
           // sealed aperture: let the radiated flow die away smoothly (no derivative step)
           radUL[rr] *= 0.995;
@@ -769,12 +788,16 @@ export class AirwayNetwork {
         let ulPrev = radUL[r];
         if (Lp > 0 && Lr > Lp) ulPrev *= Lp / Lr;
         this.radLprev[r] = Lr;
-        const ul = ulPrev + (T / Lr) * pOld;
-        radUL[r] = ul;
+        // Crank–Nicolson coupling of the node and its parallel R–L load (A-stable, energy-
+        // conserving for the reactive part): Lr ∝ A^-½ against C ∝ A makes the explicit form
+        // unstable at small apertures. U_L lives at integer steps; the node sees its mean.
+        const h = T / (2 * Lr);
         const g = 0.5 / Rr;
-        const pNew = (pOld * (C * invT - g) + flowSum[k] - ul) / (C * invT + g);
+        const pNew = (pOld * (C * invT - 0.5 * h - g) + flowSum[k] - ulPrev) / (C * invT + 0.5 * h + g);
         p[k] = pNew;
-        const ur = ul + g * (pNew + pOld);
+        const ul = ulPrev + h * (pOld + pNew);
+        radUL[r] = ul;
+        const ur = 0.5 * (ulPrev + ul) + g * (pNew + pOld);
         this.radU[r] = ur;
         radTotal += ur;
       }

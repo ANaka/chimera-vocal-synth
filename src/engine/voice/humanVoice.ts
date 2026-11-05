@@ -9,6 +9,7 @@ import { Decimator } from "../airway/decimator.ts";
 import { BODY_MALE, type HumanArtic, type HumanBody } from "../anatomy/human.ts";
 import { CM_H2O } from "../physics.ts";
 import { clamp } from "../util/math.ts";
+import { GestureScore, type Blended, type Gesture } from "../control/score.ts";
 
 export interface VoiceSource {
   /** target fundamental frequency (Hz) */
@@ -65,6 +66,10 @@ export interface VoiceTelemetry {
   noiseLevel: number;
   noiseNode: number;
   gate: number;
+  /** voice clock (s) for score playheads */
+  clock: number;
+  /** labels of gestures active now (most recent first) */
+  active: string[];
 }
 
 const SCOPE_LEN = 4096;
@@ -103,6 +108,13 @@ export class HumanVoice {
   private outAcc = 0;
   private outCount = 0;
   private sub = 0;
+  /** gestural score and voice clock (s) */
+  readonly score = new GestureScore();
+  clock = 0;
+  private readonly tmpBlend: Blended = { value: 0, weight: 0, speed: 1 };
+  private baseAbduction = 0;
+  private baseClosure = 0;
+  private scoreF0: number | null = null;
 
   constructor(opts: { fsOut: number; body?: HumanBody; oversample?: number }) {
     this.fsOut = opts.fsOut;
@@ -133,6 +145,16 @@ export class HumanVoice {
     this.applySource();
   }
 
+  /** Add gestures (times on the voice clock). */
+  schedule(gestures: Gesture[]): void {
+    this.score.addAll(gestures);
+  }
+
+  /** Cancel scheduled gestures (speech stops; the voice returns to the performer's posture). */
+  cancelScore(): void {
+    this.score.clear();
+  }
+
   /** breath/voice on (1) or off (0); intermediate values scale the pressure */
   setGate(level: number): void {
     this.gateTarget = clamp(level, 0, 1.5);
@@ -144,6 +166,8 @@ export class HumanVoice {
     const k2 = this.airway.body.scale * this.airway.body.scale;
     g.amplitude = 0.17 * k2 * (s.voiced ? 1 : 0);
     g.abduction = (s.voiced ? 0.1 * s.breathiness * s.breathiness : 0.2 + 0.1 * s.breathiness) * k2;
+    this.baseAbduction = g.abduction;
+    this.baseClosure = 0;
     g.chink = (0.004 + 0.03 * s.breathiness) * k2;
     g.openQuotient = 0.78 - 0.36 * s.tension;
     g.closureSharpness = 0.25 + 0.7 * s.tension;
@@ -225,17 +249,51 @@ export class HumanVoice {
   /** Control-rate update: articulator dynamics, geometry → areas, breath, pitch. */
   private control(): void {
     const dt = this.ctrlEvery / this.fs;
-    this.artic.step(dt);
+    const t = this.clock;
+    const score = this.score;
+    const tmp = this.tmpBlend;
+    let breathAct = 0, breathVal = 0;
+    let f0Target = this.source.f0;
+    const gp = this.glottis.params;
+    if (score.size > 0) {
+      // performer's base posture keeps a small say on keys the score controls
+      this.artic.step(dt, (k) => score.blend(k, t, tmp), 0.05);
+      const k2 = this.airway.body.scale * this.airway.body.scale;
+      const ab = score.blend("abduction", t, tmp);
+      const abAct = ab.weight > 0 ? Math.min(1, ab.weight / 2) : 0;
+      gp.abduction = this.baseAbduction + ab.value * abAct * k2;
+      const cl = score.blend("closure", t, tmp);
+      gp.closure = Math.max(this.baseClosure, cl.weight > 0 ? cl.value * Math.min(1, cl.weight / 2) : 0);
+      const br = score.blend("breath", t, tmp);
+      if (br.weight > 0) {
+        breathAct = Math.min(1, br.weight);
+        breathVal = br.value;
+      }
+      const pf = score.blend("f0", t, tmp);
+      if (pf.weight > 0) {
+        f0Target = (this.source.f0 * 0.02 + pf.value * pf.weight) / (0.02 + pf.weight);
+        this.scoreF0 = f0Target;
+      } else this.scoreF0 = null;
+      if (((this.clock * 10) | 0) !== (((this.clock - dt) * 10) | 0)) score.prune(t - 0.2);
+    } else {
+      this.artic.step(dt);
+      gp.abduction = this.baseAbduction;
+      gp.closure = this.baseClosure;
+      this.scoreF0 = null;
+    }
+    this.clock += dt;
+    this.enforceContacts();
     this.airway.apply(this.artic.x, dt);
     this.airway.net.beginBlock(this.ctrlEvery);
     this.ctrlCounter = this.ctrlEvery;
-    // breath: fast attack, slower release
-    const tau = this.gateTarget > this.gate ? 0.025 : 0.07;
-    this.gate += (this.gateTarget - this.gate) * (1 - Math.exp(-dt / tau));
+    // breath: fast attack, slower release; a speaking score breathes on its own
+    const gateGoal = Math.max(this.gateTarget, breathVal * breathAct);
+    const tau = gateGoal > this.gate ? 0.025 : 0.07;
+    this.gate += (gateGoal - this.gate) * (1 - Math.exp(-dt / tau));
     this.pLung = this.source.pressure * CM_H2O * this.gate;
     // pitch glide
-    const g = Math.max(0.002, this.source.glide);
-    this.f0 *= Math.pow(this.source.f0 / this.f0, 1 - Math.exp(-dt / g));
+    const g = Math.max(0.002, this.scoreF0 !== null ? 0.03 : this.source.glide);
+    this.f0 *= Math.pow(f0Target / this.f0, 1 - Math.exp(-dt / g));
     this.glottis.params.f0 = this.f0;
     // smoothed mean flow per tract node (for particle speeds)
     const U = this.airway.net.U;
@@ -245,6 +303,39 @@ export class HumanVoice {
       const br = k < nPh ? this.airway.branchOf(this.airway.pharynx, k) : this.airway.branchOf(this.airway.oral, k - nPh);
       this.flowSm[k] += a * (U[br] - this.flowSm[k]);
     }
+  }
+
+  /** tissue may compress this far (cm) before the palate stops the articulator */
+  maxPenetration = 0.1;
+
+  /**
+   * Contact constraint: articulators cannot travel into the palate. Beyond `maxPenetration` of
+   * tissue compression, the tongue tip/body is projected back along the contact normal and its
+   * inward velocity removed (inelastic). Keeps held closures still (no air pumping), makes
+   * releases start at the surface, and keeps the drawn anatomy physical.
+   */
+  private enforceContacts(): void {
+    const tract = this.airway.tract;
+    const x = this.artic.x, vel = this.artic.v;
+    tract.compute(x);
+    const k = tract.scale;
+    const lim = -this.maxPenetration * k;
+    const fix = (d: number, n: { x: number; y: number }, kx: "ttX" | "tbX", ky: "ttY" | "tbY") => {
+      if (!(d < lim)) return;
+      const depth = lim - d; // > 0, body cm
+      // body → template displacement (oral x is compressed by 0.86 in the template map)
+      const sx = (x[kx] > 0.5 ? 1 / 0.86 : 1) / k;
+      const sy = 1 / k;
+      x[kx] += n.x * depth * sx;
+      x[ky] += n.y * depth * sy;
+      const vn = vel[kx] * n.x / sx + vel[ky] * n.y / sy; // normal velocity (body units)
+      if (vn < 0) {
+        vel[kx] -= vn * n.x * sx;
+        vel[ky] -= vn * n.y * sy;
+      }
+    };
+    fix(tract.contactTip, tract.contactTipN, "ttX", "ttY");
+    fix(tract.contactBody, tract.contactBodyN, "tbX", "tbY");
   }
 
   telemetry(): VoiceTelemetry {
@@ -305,6 +396,8 @@ export class HumanVoice {
       noiseLevel,
       noiseNode,
       gate: this.gate,
+      clock: this.clock,
+      active: this.score.activeAt(this.clock).filter((g) => g.label && g.label !== "breath" && g.label !== "pitch").map((g) => g.label as string).slice(0, 4),
     };
   }
 }

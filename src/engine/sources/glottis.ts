@@ -89,12 +89,19 @@ export class ParametricGlottis {
   f0Now = 110;
   /** phonation threshold pressure (dyn/cm²) */
   threshold = 2.5 * CM_H2O;
+  // per-sample smoothing of control-rate parameters (steps in the glottal area at high airflow
+  // radiate as clicks, because the output is the derivative of flow)
+  private staticSm = 0;
+  private closureSm = 0;
+  private ampSm = 0;
+  private readonly smCoef: number;
 
   constructor(fs: number) {
     this.fs = fs;
     this.drift = new Drift(fs / 64, 0.3, 4242);
     this.dpCoef = 1 - Math.exp(-TAU * 30 / fs);
     this.voiceCoef = 1 - Math.exp(-TAU * 25 / fs);
+    this.smCoef = 1 - Math.exp(-1 / (0.004 * fs));
   }
 
   /** Reset phase etc. */
@@ -127,8 +134,8 @@ export class ParametricGlottis {
 
     // voicing gate: pressure above threshold, adduction sufficient, not forcibly closed
     const pressureGate = smoothstep(this.threshold * 0.8, this.threshold * 1.6, this.dpSm);
-    const adductGate = 1 - smoothstep(0.08, 0.22, P.abduction);
-    const target = pressureGate * adductGate * (1 - P.closure);
+    const adductGate = 1 - smoothstep(0.08, 0.22, this.staticSm - P.chink);
+    const target = pressureGate * adductGate * (1 - this.closureSm);
     this.voicingSm += this.voiceCoef * (target - this.voicingSm);
     this.voicing = this.voicingSm;
 
@@ -153,8 +160,12 @@ export class ParametricGlottis {
       if (ph2 > 0) pulse += 0.55 * smoothstep(0.3, 0.8, P.fry) * this.shape(ph2, oq * 0.8, P.skew, P.closureSharpness);
     }
     const effortScale = 0.45 + 0.75 * P.effort;
-    const vib = P.amplitude * effortScale * this.cycleAmp * this.voicingSm * pulse;
-    const statics = (P.abduction + P.chink) * (1 - 0.92 * P.closure);
+    const sc = this.smCoef;
+    this.ampSm += sc * (P.amplitude * effortScale - this.ampSm);
+    this.closureSm += sc * (P.closure - this.closureSm);
+    this.staticSm += sc * (P.abduction + P.chink - this.staticSm);
+    const vib = this.ampSm * this.cycleAmp * this.voicingSm * pulse;
+    const statics = this.staticSm * (1 - 0.92 * this.closureSm);
     const a = Math.max(0, vib + statics);
     this.area = a;
     return a;

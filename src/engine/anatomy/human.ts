@@ -13,7 +13,7 @@
  * The epilarynx is a short parametric tube above the glottis.
  */
 import { type Vec, v, add, sub, scale, lerpV, polar, rotateAbout, Polyline, rayPolyline, bezier3, bezier2, arc, catmullRom, tangentAngle, dist, norm } from "./geom.ts";
-import { clamp, lerp } from "../util/math.ts";
+import { clamp, lerp, smoothstep } from "../util/math.ts";
 
 export interface HumanArtic {
   /** jaw opening at the incisors (cm) */
@@ -162,6 +162,12 @@ export class HumanVocalTract {
   private readonly polarC: Vec;
   private readonly polarC2: Vec;
   private readonly tmpT: number[] = new Array(64);
+  /** signed closest approach (cm) of tongue tip / dorsum to the oral roof in the last frame */
+  contactTip = 1;
+  contactBody = 1;
+  /** unit normals at the contacts, pointing from the roof into the airway (body coords) */
+  contactTipN = { x: 0, y: -1 };
+  contactBodyN = { x: 0, y: -1 };
   /** area-law coefficients per region [α, β] */
   areaLaw = {
     pharynx: [2.0, 1.4] as [number, number],
@@ -248,8 +254,10 @@ export class HumanVocalTract {
       if (p.y < uvY) outer.push(p);
     }
     // bridge to the uvula tip (velopharyngeal port window)
+    const roofStart = outer.length;
     for (let i = velOral.length - 1; i >= 0; i--) outer.push(velOral[i]);
     outer.append(this.palate, true);
+    const roofEnd = outer.length - 1;
     // upper lip
     const prot = clamp(a.lipProt, -0.2, 1.6) * k;
     const spreadW = clamp(a.lipWidth, 0, 1);
@@ -391,6 +399,58 @@ export class HumanVocalTract {
       grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, region: 3 });
     }
 
+    // ---- soft-tissue contact model: the gap near the closest approach of the tongue (tip/blade,
+    // and dorsum) to the oral roof follows a curved-body profile d = δ + Δs²/2R (δ < 0 = pressed in),
+    // giving monotonic constriction areas and seals whose length grows with contact pressure.
+    const roof = { xs: outer.xs.slice(roofStart, roofEnd + 1), ys: outer.ys.slice(roofStart, roofEnd + 1) };
+    const cum = new Float64Array(roof.xs.length);
+    for (let i = 1; i < roof.xs.length; i++) cum[i] = cum[i - 1] + Math.hypot(roof.xs[i] - roof.xs[i - 1], roof.ys[i] - roof.ys[i - 1]);
+    const tipPts = [...blade.slice(2), ...under.slice(1, 3)];
+    const tipC = closestApproach(roof, cum, tipPts);
+    const bodyC = closestApproach(roof, cum, arcPts);
+    this.contactTip = tipC.d;
+    this.contactBody = bodyC.d;
+    this.contactTipN = tipC.n;
+    this.contactBodyN = bodyC.n;
+    // Near a close approach the contact model *defines* the gap (one parabolic constriction):
+    // the raw ray crossings of the tissue polygon can leave sealed pockets beside the contact,
+    // and a jet released into such a pocket water-hammers. Blended back to the rays with distance.
+    if (tipC.d < 0.6 * k || bodyC.d < 0.6 * k) {
+      const Rt = 0.45 * k, Rb = 1.6 * k;
+      const apply = (g: GridSample, c: { d: number; s: number }, R: number, sArc: number, win: number) => {
+        const ds = sArc - c.s;
+        const ad = Math.abs(ds);
+        if (ad > 2 * win) return;
+        const dc = Math.max(0, c.d + (ds * ds) / (2 * R));
+        // override weight: full inside the window, fading out to 2× window; strongest when pressed in
+        const near = 1 - smoothstep(win, 2 * win, ad);
+        const regime = 1 - smoothstep(0.15 * k, 0.6 * k, c.d);
+        const w = near * regime;
+        const dm = Math.min(g.d, dc);
+        g.d = dm + (dc - dm) * w;
+      };
+      for (const g of grid) {
+        if (g.region === 0) continue;
+        const pr = projectOn(roof, cum, g.outer.x, g.outer.y);
+        if (pr.dist > 0.25 * k) continue; // this ray's outer point is not on the oral roof
+        if (g.region >= 2 && tipC.d < 0.6 * k) apply(g, tipC, Rt, pr.s, 0.9 * k);
+        if (bodyC.d < 0.6 * k) apply(g, bodyC, Rb, pr.s, 1.6 * k);
+      }
+    }
+
+    // lip contact: between the lips the gap follows aperture + Δx²/2R back from the lip edge, so
+    // compressed lips (aperture < 0) seal over a length that grows with compression
+    {
+      const edgeX = Math.min(ulEdge.x, llEdge.x);
+      const Rl = 0.6 * k;
+      const apEff = lab > 0.5 ? Infinity : ap; // labiodental uses its own geometry
+      for (const g of grid) {
+        if (g.region !== 3 || g.mid.x < this.palate[this.palate.length - 1].x) continue;
+        const dxl = Math.max(0, edgeX - g.mid.x);
+        g.d = Math.min(g.d, Math.max(0, apEff + (dxl * dxl) / (2 * Rl)));
+      }
+    }
+
     // ---- areas
     const [aP, bP] = this.areaLaw.pharynx;
     const [aO, bO] = this.areaLaw.oral;
@@ -501,6 +561,7 @@ export class HumanVocalTract {
     const fill = (s0: number, s1: number, n: number, out: Float64Array, mins?: Float64Array) => {
       const d = (s1 - s0) / n;
       const sub = 8;
+      let gi = 0;
       for (let i = 0; i < n; i++) {
         let inv = 0;
         let closed = false;
@@ -514,8 +575,15 @@ export class HumanVocalTract {
           }
           inv += 1 / A;
         }
+        // actual grid samples inside the section (a point closure must seal the section)
+        const a0 = s0 + d * i, a1 = s0 + d * (i + 1) + (i === n - 1 ? 1e-6 : 0);
+        while (gi < g.length && g[gi].s < a0) gi++;
+        for (let q = gi; q < g.length && g[q].s <= a1; q++) {
+          if (g[q].area < mn) mn = g[q].area;
+          if (g[q].area <= 1e-5) closed = true;
+        }
         out[i] = closed ? 0 : sub / inv;
-        if (mins) mins[i] = closed ? 0 : mn;
+        if (mins) mins[i] = closed ? 0 : Math.min(mn, out[i]);
       }
     };
     const sp = f.pharynxLength;
@@ -523,4 +591,57 @@ export class HumanVocalTract {
     fill(sp, f.lipS, nOr, outOr, minOr);
     return { phLen: sp, orLen: f.lipS - sp };
   }
+}
+
+/** Project a point onto a polyline: arc position, distance, and the side (cross<0 = airway side). */
+function projectOn(pl: { xs: number[]; ys: number[] }, cum: Float64Array, px: number, py: number): { s: number; dist: number; signed: number; x: number; y: number; seg: number } {
+  let best = Infinity, bs = 0, bx = 0, by = 0, sign = 1, bseg = 0;
+  for (let i = 0; i < pl.xs.length - 1; i++) {
+    const ax = pl.xs[i], ay = pl.ys[i];
+    const ex = pl.xs[i + 1] - ax, ey = pl.ys[i + 1] - ay;
+    const L2 = ex * ex + ey * ey;
+    if (L2 < 1e-12) continue;
+    let t = ((px - ax) * ex + (py - ay) * ey) / L2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = ax + ex * t, qy = ay + ey * t;
+    const d = Math.hypot(px - qx, py - qy);
+    if (d < best) {
+      best = d;
+      bs = cum[i] + t * Math.sqrt(L2);
+      bx = qx;
+      by = qy;
+      const cross = ex * (py - ay) - ey * (px - ax);
+      sign = cross < 0 ? 1 : -1;
+      bseg = i;
+    }
+  }
+  return { s: bs, dist: best, signed: sign * best, x: bx, y: by, seg: bseg };
+}
+
+/** Closest approach of a set of tissue points to the roof: signed gap δ (negative = pressed in) and arc position. */
+function closestApproach(pl: { xs: number[]; ys: number[] }, cum: Float64Array, pts: Vec[]): { d: number; s: number; n: { x: number; y: number } } {
+  let d = Infinity, sAt = 0, seg = 0;
+  for (const p of pts) {
+    const pr = projectOn(pl, cum, p.x, p.y);
+    if (pr.signed < d) {
+      d = pr.signed;
+      sAt = pr.s;
+      seg = pr.seg;
+    }
+  }
+  // inward normal of the roof segment (airway side is to the right of travel: (ey, −ex))
+  const ex = pl.xs[seg + 1] - pl.xs[seg], ey = pl.ys[seg + 1] - pl.ys[seg];
+  const L = Math.hypot(ex, ey) || 1;
+  return { d, s: sAt, n: { x: ey / L, y: -ex / L } };
+}
+
+/** Clamp drawn tissue points that penetrate a wall onto its surface (drawing only). */
+export function clampToWall(points: Vec[], wall: Vec[]): Vec[] {
+  const pl = { xs: wall.map((p) => p.x), ys: wall.map((p) => p.y) };
+  const cum = new Float64Array(wall.length);
+  for (let i = 1; i < wall.length; i++) cum[i] = cum[i - 1] + Math.hypot(wall[i].x - wall[i - 1].x, wall[i].y - wall[i - 1].y);
+  return points.map((p) => {
+    const pr = projectOn(pl, cum, p.x, p.y);
+    return pr.signed < 0 && pr.dist < 1.5 ? { x: pr.x, y: pr.y } : p;
+  });
 }

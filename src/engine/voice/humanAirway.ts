@@ -40,7 +40,7 @@ export class HumanAirway {
   phLen = 8.8;
   orLen = 8.3;
   /** noise gains (tunable) */
-  noiseGain = { glottis: 2.4e-6, constriction: 3.0e-6, teeth: 9e-6 };
+  noiseGain = { glottis: 3.2e-6, constriction: 2.2e-6, teeth: 3.0e-6 };
 
   constructor(opts: HumanAirwayOptions) {
     const body = (this.body = opts.body ?? BODY_MALE);
@@ -96,26 +96,40 @@ export class HumanAirway {
   }
 
   /** max area change rate (cm²/s, body-scaled): a physiological guard against geometric jumps */
-  maxAreaRate = 160;
+  maxAreaRate = 45;
+  /** additional rate per cm² of current area (1/s) */
+  areaRateGain = 40;
 
   /** Geometry → targets for the next block. Returns the computed frame. `dt` enables slew limiting. */
   apply(a: HumanArtic, dt = 0): HumanFrame {
     const f = (this.frame = this.tract.compute(a));
     const oldPh = dt > 0 ? Float64Array.from(this.phAreas) : null;
     const oldOr = dt > 0 ? Float64Array.from(this.orAreas) : null;
+    const oldPhMin = dt > 0 ? Float64Array.from(this.phMin) : null;
+    const oldOrMin = dt > 0 ? Float64Array.from(this.orMin) : null;
     const { phLen, orLen } = this.tract.resample(a, f, this.nPh, this.nOr, this.phAreas, this.orAreas, this.phMin, this.orMin);
-    if (oldPh && oldOr) {
-      const lim = this.maxAreaRate * this.body.scale * this.body.scale * dt;
-      const clampArr = (cur: Float64Array, old: Float64Array, mins: Float64Array) => {
+    if (oldPh && oldOr && oldPhMin && oldOrMin) {
+      // both section areas and sub-section minima are rate-limited: the minima set the jet
+      // (Borda–Carnot) losses ∝ 1/A², so a fast drop chokes the flow within a block
+      // rate limit grows with cross-section: wide cavities reshape fast, narrow constrictions
+      // (lateral extent ~1–2 cm) open and close at physiological rates (sets burst sharpness)
+      const k2 = this.body.scale * this.body.scale;
+      const clampArr = (cur: Float64Array, old: Float64Array, mins: Float64Array, oldMins: Float64Array) => {
         for (let i = 0; i < cur.length; i++) {
+          const lim = (this.maxAreaRate * k2 + this.areaRateGain * Math.max(old[i], cur[i])) * dt;
           const d = cur[i] - old[i];
           if (d > lim) cur[i] = old[i] + lim;
           else if (d < -lim) cur[i] = old[i] - lim;
+          const limM = (this.maxAreaRate * k2 + this.areaRateGain * Math.max(oldMins[i], mins[i])) * dt;
+          const dm = mins[i] - oldMins[i];
+          if (dm > limM) mins[i] = oldMins[i] + limM;
+          else if (dm < -limM) mins[i] = oldMins[i] - limM;
           if (mins[i] > cur[i]) mins[i] = cur[i];
+          if (mins[i] < 0) mins[i] = 0;
         }
       };
-      clampArr(this.phAreas, oldPh, this.phMin);
-      clampArr(this.orAreas, oldOr, this.orMin);
+      clampArr(this.phAreas, oldPh, this.phMin, oldPhMin);
+      clampArr(this.orAreas, oldOr, this.orMin, oldOrMin);
     }
     this.phLen = phLen;
     this.orLen = orLen;
@@ -131,7 +145,7 @@ export class HumanAirway {
     const g = this.noiseGain;
     const list: { src: number; fwd: number; bwd: number; gain: number; lowpassHz?: number; highpassHz?: number }[] = [];
     // aspiration: jet from the glottis hits the epilarynx/ventricular region
-    list.push({ src: this.glottisPort, fwd: this.branchOf(this.pharynx, 1), bwd: this.branchOf(this.trachea, this.trachea.n - 2), gain: g.glottis, lowpassHz: 6000, highpassHz: 500 });
+    list.push({ src: this.glottisPort, fwd: this.branchOf(this.pharynx, 1), bwd: this.branchOf(this.trachea, this.trachea.n - 2), gain: g.glottis, lowpassHz: 3500, highpassHz: 300 });
     // narrowest open point in pharynx+oral (global position index p over concatenated tubes)
     const nPh = this.nPh, nOr = this.nOr;
     let minA = Infinity, minI = -1;
@@ -155,17 +169,17 @@ export class HumanAirway {
       const fwd = toBranch(Math.min(nPh + nOr - 2, minI + off));
       const bwd = toBranch(Math.max(0, minI - off));
       if (src >= 0 && fwd >= 0 && bwd >= 0) {
-        list.push({ src, fwd, bwd, gain: g.constriction * wArea, lowpassHz: 9000, highpassHz: 700 });
+        list.push({ src, fwd, bwd, gain: g.constriction * wArea, lowpassHz: 2600, highpassHz: 350 });
         // obstacle source: a narrow anterior jet impinging on the incisors (sibilants)
         const sMin = minI < nPh ? (minI + 0.5) * dxPh : this.phLen + (minI - nPh + 0.5) * dxOr;
         const behind = (f.teethS - sMin) / this.body.scale;
-        const wDist = smooth(0.15, 0.5, behind) * (1 - smooth(1.8, 3.0, behind));
-        const wJet = 1 - smooth(0.12 * k2, 0.35 * k2, minA);
+        const wDist = smooth(0.15, 0.5, behind) * (1 - smooth(2.6, 4.0, behind));
+        const wJet = 1 - smooth(0.2 * k2, 0.5 * k2, minA);
         const wt = wDist * wJet;
         if (wt > 1e-3) {
           const teethI = nPh + Math.min(nOr - 2, Math.max(0, Math.round((f.teethS - this.phLen) / dxOr)));
           const tb = toBranch(teethI);
-          if (tb >= 0) list.push({ src, fwd: tb, bwd, gain: g.teeth * wt, lowpassHz: 11000, highpassHz: 1800 });
+          if (tb >= 0) list.push({ src, fwd: tb, bwd, gain: g.teeth * wt, lowpassHz: 5000, highpassHz: 1200 });
         }
       }
     }

@@ -76,18 +76,44 @@ export class ArticulatorBank {
     }
   }
 
-  step(dt: number): void {
+  /** effective targets used in the last step (base blended with gestures), for telemetry */
+  readonly effective: HumanArtic = { ...NEUTRAL };
+
+  /**
+   * Advance the dynamics. `blend(k)` may return a gesture blend for key k: weighted mean value,
+   * total weight and a speed multiplier. The performer's base target joins with weight `baseWeight`.
+   */
+  step(dt: number, blend?: (k: ArticKey) => { value: number; weight: number; speed: number } | null, baseWeight = 1): void {
+    let restX = 0, restY = 0;
     if (this.tipFree) {
       const tip = restTip(this.x.jaw, this.x.tbX, this.x.tbY);
+      restX = tip.x;
+      restY = tip.y;
       this.target.ttX = tip.x;
       this.target.ttY = tip.y;
     }
     for (const k of ARTIC_KEYS) {
-      const w = this.omega[k] * this.speed[k];
+      let tgt = this.target[k];
+      let sp = this.speed[k];
+      if (blend) {
+        const b = blend(k);
+        if (b && b.weight > 0) {
+          const bw = baseWeight;
+          tgt = (tgt * bw + b.value * b.weight) / (bw + b.weight);
+          sp *= b.speed;
+        }
+      }
+      const s = ARTIC_SPECS[k];
+      if (tgt < s.min) tgt = s.min;
+      else if (tgt > s.max) tgt = s.max;
+      this.effective[k] = tgt;
+      const w = this.omega[k] * sp;
       // semi-implicit Euler on x'' = w²(T − x) − 2w x'  (stable for w·dt < 1)
-      const acc = w * w * (this.target[k] - this.x[k]) - 2 * w * this.v[k];
+      const acc = w * w * (tgt - this.x[k]) - 2 * w * this.v[k];
       this.v[k] += acc * dt;
       this.x[k] += this.v[k] * dt;
     }
+    void restX;
+    void restY;
   }
 }
