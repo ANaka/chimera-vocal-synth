@@ -36,7 +36,8 @@ export function VowelMap() {
     const F1 = Math.exp(Math.log(r.f1[0]) + v * (Math.log(r.f1[1]) - Math.log(r.f1[0])));
     return { F1, F2 };
   };
-  const trail = useRef<{ x: number; y: number }[]>([]);
+  /** recent (F1, F2) of the live tract, so the trail survives resizes and fades out */
+  const trail = useRef<{ F1: number; F2: number; t: number; body: string }[]>([]);
   const ref = usePhosphor(({ ctx, w, h }) => {
     const m = model.current;
     if (!m) return;
@@ -55,12 +56,15 @@ export function VowelMap() {
       ipaGlyph(ctx, p.x, p.y + 5, v.ipa, 15, V.blueMid);
     }
     if (live) {
-      // where the tongue has been: a fading trail of the last second or so
-      const tr = trail.current;
+      // where the tongue has been: a trail of the last 1.5 s, fading with age
+      const now = performance.now();
+      const tr = (trail.current = trail.current.filter((p) => p.body === st.body && now - p.t < 1500));
       const last = tr[tr.length - 1];
-      if (!last || Math.hypot(last.x - live.x, last.y - live.y) > 0.5) tr.push(live);
-      if (tr.length > 40) tr.shift();
-      for (let i = 1; i < tr.length; i++) seg(ctx, tr[i - 1].x, tr[i - 1].y, tr[i].x, tr[i].y, V.green, 1.2, { alpha: 0.08 + (0.6 * i) / tr.length });
+      if (!last || Math.abs(Math.log(last.F1 / fm[0])) + Math.abs(Math.log(last.F2 / fm[1])) > 0.004) tr.push({ F1: fm[0], F2: fm[1], t: now, body: st.body });
+      for (let i = 1; i < tr.length; i++) {
+        const p0 = toXY(tr[i - 1].F1, tr[i - 1].F2, w, h), p1 = toXY(tr[i].F1, tr[i].F2, w, h);
+        seg(ctx, p0.x, p0.y, p1.x, p1.y, V.green, 1.2, { alpha: 0.7 * (1 - (now - tr[i].t) / 1500) });
+      }
       handle(ctx, live.x, live.y, V.green, 8);
       ipaGlyph(ctx, live.x + 20, live.y - 8, near, 17, V.green);
     }

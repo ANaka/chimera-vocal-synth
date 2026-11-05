@@ -20,8 +20,8 @@ const SPAN = (270 * Math.PI) / 180;
 /**
  * OP-1 style encoder: a dial and a big numeral in its slot colour, over a native range input
  * that does the work (label, keyboard incl. Home/End and Page keys, aria-valuetext). Dragging the
- * dial is relative: up or right raises the value. touch-action: pan-y keeps vertical swipes
- * scrolling the page on touch screens, so only horizontal drags edit there.
+ * dial is relative: up or right raises the value. On touch, vertical swipes scroll the page
+ * (touch-action: pan-y) and only horizontal drags edit.
  */
 export function Encoder(props: EncoderSpec & { slot: number }) {
   const { label, value, min, max, log, onChange, format, slot } = props;
@@ -34,7 +34,7 @@ export function Encoder(props: EncoderSpec & { slot: number }) {
   };
   const pos = Math.min(1, Math.max(0, toPos(value)));
   const shown = format(value);
-  const drag = useRef<{ x: number; y: number; pos: number; id: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; pos: number; id: number; touch: boolean } | null>(null);
   const at = (u: number, r: number) => [Math.cos(A0 - u * SPAN) * r, -Math.sin(A0 - u * SPAN) * r];
   const [x0, y0] = at(0, 30), [x1, y1] = at(pos, 30), [px, py] = at(pos, 23);
   const arc = pos > 0.002 ? `M${x0.toFixed(2)} ${y0.toFixed(2)}A30 30 0 ${pos * 270 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}` : "";
@@ -48,13 +48,17 @@ export function Encoder(props: EncoderSpec & { slot: number }) {
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           (e.currentTarget as Element).setPointerCapture(e.pointerId);
-          drag.current = { x: e.clientX, y: e.clientY, pos, id: e.pointerId };
+          drag.current = { x: e.clientX, y: e.clientY, pos, id: e.pointerId, touch: e.pointerType === "touch" };
           document.getElementById(id)?.focus({ preventScroll: true });
         }}
         onPointerMove={(e) => {
           const d = drag.current;
           if (!d || d.id !== e.pointerId) return;
-          const delta = (e.clientX - d.x - (e.clientY - d.y)) / (e.shiftKey ? 600 : 160);
+          const dx = e.clientX - d.x, dy = e.clientY - d.y;
+          // a vertical touch swipe is the page scrolling (pan-y), not an edit: touch uses dx only,
+          // past a small dead zone; mouse and pen also take vertical movement
+          if (d.touch && Math.abs(dx) < 6) return;
+          const delta = (d.touch ? dx : dx - dy) / (e.shiftKey ? 600 : 160);
           onChange(fromPos(d.pos + delta));
         }}
         onPointerUp={() => (drag.current = null)}
