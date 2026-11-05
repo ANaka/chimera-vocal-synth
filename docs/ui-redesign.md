@@ -53,7 +53,7 @@ A hook, `usePhosphor(draw)`, replaces `useCanvasLoop` for the vector screens: DP
 | Beatbox | face with the hit's big symbol | step sequencer, waterfall spectrogram, pads, transport encoders + presets, compact keys |
 | Bestiary | creature (`CreatureView`) | creature gallery, waterfall spectrogram, calls, creature encoders, unrolled airway, compact keys |
 
-`Keys` also owns the computer-keyboard listeners and the MIDI connect button, so every mode keeps at least a compact keys strip.
+`Keys` also owns the computer-keyboard listeners and the MIDI connect button, so every mode that has keys today keeps at least a compact keys strip. (Speak never had them: it plays text, not notes.)
 
 The mockup generator (`docs/mockups/gen/`) is the reference implementation for each drawing: the same geometry, colours and layout rules, written against the live data the app already has (`HumanFrame`, telemetry, transfer functions, plans, creature visuals).
 

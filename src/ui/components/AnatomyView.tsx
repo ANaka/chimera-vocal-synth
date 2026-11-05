@@ -53,7 +53,7 @@ export function AnatomyView(props: { slots?: SlotsFn }) {
     const glow = new Glow();
     rendererRef.current = r;
     let w = 0, h = 0, dpr = 1;
-    const ro = new ResizeObserver(() => {
+    const fit = () => {
       const b = wrap.getBoundingClientRect();
       dpr = Math.min(2, window.devicePixelRatio || 1);
       w = b.width;
@@ -61,7 +61,8 @@ export function AnatomyView(props: { slots?: SlotsFn }) {
       canvas.width = Math.max(1, Math.round(w * dpr));
       canvas.height = Math.max(1, Math.round(h * dpr));
       r.resize(w, h);
-    });
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(wrap);
     let raf = 0;
     let last = performance.now();
@@ -70,6 +71,7 @@ export function AnatomyView(props: { slots?: SlotsFn }) {
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      if (Math.min(2, window.devicePixelRatio || 1) !== dpr) fit();
       const st = useStore.getState();
       const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
       const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
