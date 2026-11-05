@@ -43,7 +43,6 @@ fn the_audio_thread_abi_does_not_allocate() {
     let h = engine_new(48000.0);
     // planned off the audio thread
     let plan = plan_utterance(&tokenize_ipa("ˈhɛloʊ ˈwɝld ʃi sɛlz"), &PlanOptions { body: "male".into(), t0: 0.0, f0: Some(110.0), ..Default::default() });
-    let creature_req = br#"{"id":"elephant","params":{"pitch":20}}"#.to_vec();
     unsafe {
         let render = |blocks: usize| {
             for b in 0..blocks {
@@ -85,23 +84,27 @@ fn the_audio_thread_abi_does_not_allocate() {
         render(50);
         assert_eq!(allocs() - before, 0, "the human voice's audio path allocated");
 
-        // a creature switch allocates; what follows must not
-        assert_eq!(engine_set_creature(h, creature_req.as_ptr(), creature_req.len()), 0);
-        let before = allocs();
-        for b in 0..600 {
-            engine_render(h, 128);
-            if b % 6 == 0 {
-                assert!(!engine_creature_telemetry(h).is_null());
+        // a creature switch allocates; what follows must not (every creature)
+        for def in chimera::creatures::CREATURES.iter() {
+            let req = format!(r#"{{"id":"{}","params":{{}}}}"#, def.id).into_bytes();
+            assert_eq!(engine_set_creature(h, req.as_ptr(), req.len()), 0);
+            let before = allocs();
+            for b in 0..400 {
+                engine_render(h, 128);
+                if b % 6 == 0 {
+                    assert!(!engine_creature_telemetry(h).is_null());
+                }
+                match b {
+                    30 => engine_set_gate(h, 1.0),
+                    50 => engine_play_call(h, 0, f64::NAN, f64::NAN),
+                    150 => engine_creature_param(h, 0, def.params[0].default * 1.1),
+                    200 => engine_play_call(h, def.calls.len() - 1, 1.2 * def.params[0].default, 0.8),
+                    300 => engine_stop_call(h),
+                    _ => {}
+                }
             }
-            match b {
-                50 => engine_play_call(h, 0, f64::NAN, f64::NAN),
-                200 => engine_creature_param(h, 0, 30.0),
-                300 => engine_play_call(h, 1, 25.0, 0.8),
-                400 => engine_stop_call(h),
-                _ => {}
-            }
+            assert_eq!(allocs() - before, 0, "{}: the creature's audio path allocated", def.id);
         }
-        assert_eq!(allocs() - before, 0, "the creature's audio path allocated");
         engine_free(h);
     }
 }

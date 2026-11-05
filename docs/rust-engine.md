@@ -239,7 +239,8 @@ render call and so it isn't needed.
   - creatures: within 2e-10, including the chaotic and self-oscillating modes;
   - plans and beat sequences: bit-exact apart from 1-ulp `f0` values;
   - G2P, IPA and syllables: exact on about 3 200 cases;
-  - geometry and analysis: within 1e-12 relative.
+  - geometry: within 8e-14 relative; analysis (transfer functions, formants, FFT, LPC): within
+    1e-10 relative (the UI's dB curve 9.7e-11, formants 1.1e-12).
 - **The bun tests** that were about the engine are now `cargo test`s with the same thresholds.
   The UI's live paths (Sing keys, worklet ordering, creature telemetry layout) run on the wasm
   build.
