@@ -11,6 +11,7 @@ import { engine } from "../audio/AudioEngine.ts";
 import { g2p } from "./speech.ts";
 import { lyricsToSyllables, type Syllable } from "../engine/phonetics/syllables.ts";
 import { planSong, planNoteOn, planNoteOff, planMelisma } from "../engine/phonetics/sing.ts";
+import { EXHALE_LABEL } from "../engine/phonetics/planner.ts";
 import { DEMO_SONGS } from "../engine/phonetics/songs.ts";
 import type { Gesture } from "../engine/control/score.ts";
 import type { BodyName } from "../worklet/protocol.ts";
@@ -93,6 +94,8 @@ let sounding: Sounding | null = null;
 let keys: number[] = [];
 /** gesture tags: a note uses tag (articulation, breath) and tag + 1 (pitch, vibrato) */
 let nextTag = 2;
+/** the last note's ending (glide, coda) still playing: tag, and tag + 1 for its exhale */
+let tail: number | null = null;
 
 /** breath level for a key velocity (1 at the on-screen keys' default of 96) */
 const breathFor = (velocity: number) => 0.62 + 0.4 * Math.min(1, Math.max(0, velocity / 96)) + 0.12 * Math.max(0, (velocity - 96) / 31);
@@ -118,6 +121,8 @@ function startNote(syl: Syllable, midi: number, velocity: number, body: BodyName
   const t = now();
   const tag = nextTag;
   nextTag += 2;
+  // the previous note's coda may finish, but its breath-out must not open the folds on this onset
+  if (tail !== null) engine.release(tail + 1);
   const from = sounding;
   if (from) {
     engine.release(from.tag);
@@ -170,8 +175,12 @@ export function singNoteOff(midi: number, body: BodyName): void {
   // a melisma comes next: this vowel carries on there, and the coda waits for the chain's end
   const st = useSing.getState();
   if (st.syllables[st.cursor]?.melisma) return;
-  const tail = planNoteOff(s.syl, midi, body);
-  if (tail.length) engine.scheduleGestures(tail);
+  const gs = planNoteOff(s.syl, midi, body);
+  if (!gs.length) return;
+  const tag = nextTag;
+  nextTag += 2;
+  engine.scheduleGestures(gs.map((g) => ({ ...g, tag: g.label === EXHALE_LABEL ? tag + 1 : tag })));
+  tail = tag;
 }
 
 // ---- demo songs
@@ -188,6 +197,8 @@ interface DemoRun {
 }
 
 let demoRun: DemoRun | null = null;
+/** bumped by every stop: a demo still waiting for audio or the dictionary then gives up */
+let demoToken = 0;
 
 engine.onPlanned((m) => {
   const d = demoRun;
@@ -196,15 +207,19 @@ engine.onPlanned((m) => {
   d.times.forEach(([a, b], k) => addNote(d.midi[k], m.t0 + a, d.text[k], true, m.t0 + b - 0.02));
 });
 
-export async function playDemo(name: string, body: BodyName): Promise<void> {
+/** Sing a demo song (after `ready`, e.g. audio startup, resolves; unless stopped meanwhile). */
+export async function playDemo(name: string, body: BodyName, ready?: () => Promise<void>): Promise<void> {
   const song = DEMO_SONGS.find((s) => s.name === name);
   if (!song) return;
   stopSinging();
+  const token = demoToken;
+  await ready?.();
   try {
     await g2p.load();
   } catch {
     // letter-to-sound rules
   }
+  if (token !== demoToken) return;
   const syl = lyricsToSyllables(song.lyrics, g2p);
   if (!syl.length) return;
   const shift = song.octave[body] * 12;
@@ -224,6 +239,7 @@ export async function playDemo(name: string, body: BodyName): Promise<void> {
 }
 
 function stopDemo(): void {
+  demoToken++;
   const d = demoRun;
   if (!d) return;
   demoRun = null;
@@ -250,7 +266,7 @@ export function tickSinging(): void {
   if (k !== useSing.getState().demoAt) useSing.setState({ demoAt: k });
 }
 
-/** Stop everything sung (leaving Sing mode, changing body). */
+/** Stop everything sung (leaving Sing mode, changing body): demo, notes and endings. */
 export function stopSinging(): void {
   stopDemo();
   if (sounding) {
@@ -258,6 +274,11 @@ export function stopSinging(): void {
     engine.release(sounding.tag + 1);
     sounding.note.t1 = now();
     sounding = null;
+  }
+  if (tail !== null) {
+    engine.release(tail);
+    engine.release(tail + 1);
+    tail = null;
   }
   keys = [];
 }

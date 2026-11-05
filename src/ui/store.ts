@@ -276,6 +276,16 @@ export const useStore = create<State>((set, get) => ({
     const held = get().heldNotes.filter((n) => n !== midi).concat(midi);
     set({ heldNotes: held });
     const s = get();
+    // a sung note or a call is a one-off message, lost if sent before the audio exists (held
+    // pitches and breath are resent at startup): send it once audio is up, if the key is still down
+    if (!s.started && (s.mode === "sing" || (s.mode === "bestiary" && s.keyCall))) {
+      const mode = s.mode;
+      void s.start().then(() => {
+        const t = get();
+        if (t.started && t.mode === mode && t.heldNotes.includes(midi)) t.noteOn(midi, velocity);
+      });
+      return;
+    }
     if (s.mode === "sing") singNoteOn(midi, velocity, s.body);
     else if (s.mode === "bestiary") {
       const pp = creatureById(s.creature)?.params.find((p) => p.role === "pitch");
@@ -315,7 +325,7 @@ export const useStore = create<State>((set, get) => ({
   setMidi: (on) => {
     const noteOff = (n: number) => get().noteOff(n);
     if (!on) {
-      disconnectMidi({ noteOff });
+      disconnectMidi();
       set({ midi: { status: "off", inputs: [] } });
       return;
     }
@@ -329,6 +339,8 @@ export const useStore = create<State>((set, get) => ({
       },
       noteOff,
       inputs: (names) => set({ midi: { status: "on", inputs: names } }),
-    }).catch(() => set({ midi: { status: "denied", inputs: [] } }));
+    }).catch(() => {
+      if (get().midi.status === "connecting") set({ midi: { status: "denied", inputs: [] } });
+    });
   },
 }));

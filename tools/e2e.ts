@@ -177,6 +177,24 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   await page.close();
 }
 
+// the very first key in Sing mode, before audio has started, still sings once audio is up
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on("pageerror", (e) => errors.push(`[first-key] pageerror: ${e.message}`));
+  await page.goto(url, { waitUntil: "networkidle" });
+  await page.getByRole("radio", { name: "Sing" }).click();
+  await page.keyboard.down("d");
+  await page.waitForTimeout(1200);
+  const level = await page.evaluate(() => {
+    // @ts-expect-error debug handle
+    return window.__chimeraEngine?.latest?.t?.outRms ?? -1;
+  });
+  await page.keyboard.up("d");
+  logs.push(`[first-key] sing before start: rms ${level.toFixed(4)}`);
+  if (!(level > 0.01)) errors.push(`[first-key] the first sung key, pressed before audio started, made no sound (${level})`);
+  await page.close();
+}
+
 await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();

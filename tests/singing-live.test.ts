@@ -6,7 +6,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { HumanVoice } from "../src/engine/voice/humanVoice.ts";
 import { midiToHz } from "../src/engine/phonetics/sing.ts";
-import type { Gesture } from "../src/engine/control/score.ts";
+import { activation, type Gesture } from "../src/engine/control/score.ts";
 
 const FS = 48000;
 let voice = new HumanVoice({ fsOut: FS });
@@ -28,7 +28,8 @@ const fakeEngine = {
   stopSpeech: () => voice.cancelScore(),
 };
 mock.module("../src/audio/AudioEngine.ts", () => ({ engine: fakeEngine }));
-const { useSing, singNoteOn, singNoteOff } = await import("../src/ui/singing.ts");
+const { useSing, singNoteOn, singNoteOff, playDemo, stopSinging } = await import("../src/ui/singing.ts");
+const gesturesOf = () => (voice.score as unknown as { gestures: Gesture[] }).gestures;
 
 /** Render `sec` seconds; per 2.7 ms block: f0, voicing, output RMS, narrowest oral area. */
 function run(sec: number) {
@@ -117,5 +118,48 @@ describe("Sing mode, live keys", () => {
     const soft = level(30), hard = level(127);
     if (process.env.SING_VERBOSE) console.log(`hard vs soft key: ${(20 * Math.log10(hard.rms / soft.rms)).toFixed(1)} dB`);
     expect(hard.rms / soft.rms).toBeGreaterThan(1.6); // > 4 dB
+  });
+
+  test("a demo still waiting for audio or the dictionary is cancelled by a stop", async () => {
+    voice = new HumanVoice({ fsOut: FS });
+    let scheduled = 0;
+    const schedule = fakeEngine.schedule;
+    fakeEngine.schedule = (plan) => (scheduled++, schedule(plan));
+    let go!: () => void;
+    const waiting = playDemo("Made of air", "male", () => new Promise<void>((r) => (go = r)));
+    stopSinging(); // e.g. the mode changed while audio was starting
+    go();
+    await waiting;
+    expect(scheduled).toBe(0);
+    expect(useSing.getState().demo).toBeNull();
+    await playDemo("Made of air", "male", () => Promise.resolve());
+    expect(scheduled).toBe(1);
+    expect(useSing.getState().demo).toBe("Made of air");
+    stopSinging();
+    fakeEngine.schedule = schedule;
+  });
+
+  test("a quick next note drops the last one's breath-out; leaving Sing cancels a pending ending", () => {
+    voice = new HumanVoice({ fsOut: FS });
+    useSing.getState().setVibrato(0);
+    useSing.getState().setLyrics("cat dog");
+    run(0.05);
+    singNoteOn(50, 96, "male");
+    run(0.4);
+    singNoteOff(50, "male"); // "cat": its /t/ and the breath-out are scheduled
+    expect(gesturesOf().some((g) => g.label === "exhale")).toBe(true);
+    run(0.02);
+    singNoteOn(52, 96, "male"); // "dog" straight after
+    expect(gesturesOf().some((g) => g.label === "exhale")).toBe(false);
+    const d = run(0.4);
+    expect(Math.min(...d.late(d.voicing))).toBeGreaterThan(0.5);
+    singNoteOff(52, "male"); // "dog": its /g/ ending is scheduled...
+    run(0.01);
+    stopSinging(); // ...and the mode changes at once
+    run(0.06);
+    // the cancelled ending's breath is gone (the note's own breath is at the end of its 70 ms fade)
+    let breath = 0;
+    for (const g of voice.score.activeAt(voice.clock)) if (g.targets.breath !== undefined) breath += activation(g, voice.clock) * g.strength;
+    expect(breath).toBeLessThan(0.01);
   });
 });

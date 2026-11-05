@@ -83,8 +83,7 @@ function SongAndVoice() {
                 stopSinging();
                 return;
               }
-              await start();
-              await playDemo(s.name, body);
+              await playDemo(s.name, body, start);
             }}
           >
             {demo === s.name ? `Stop “${s.name}”` : s.name}

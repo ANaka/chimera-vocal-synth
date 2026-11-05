@@ -79,12 +79,23 @@ export class GestureScore {
     this.end = 0;
   }
 
-  /** End every gesture with this tag at time t (those already ended are left alone). */
+  /**
+   * End every gesture with this tag at time t. One not yet begun is dropped; one still ramping
+   * in turns round and ramps out from its present activation (no later rise); one at full
+   * strength starts its ramp-out now. Those already ending are left alone.
+   */
   release(tag: number, t: number): void {
-    for (const g of this.gestures)
-      if (g.tag === tag && g.t1 > t) {
-        g.t1 = Math.max(g.t0, t);
-      }
+    this.gestures = this.gestures.filter((g) => g.tag !== tag || t > g.t0 - g.rampIn);
+    for (const g of this.gestures) {
+      if (g.tag !== tag || g.t1 <= t) continue;
+      if (t < g.t0) {
+        // the point on the ramp-out curve whose value is the present activation
+        const a = activation(g, t);
+        const u = Math.acos(Math.min(1, Math.max(-1, 2 * a - 1))) / Math.PI;
+        g.t1 = t - u * Math.max(1e-6, g.rampOut);
+        g.t0 = g.t1;
+      } else g.t1 = t;
+    }
     let end = 0;
     for (const g of this.gestures) end = Math.max(end, g.t1 + g.rampOut + (g.releaseHold ?? 0));
     this.end = end;

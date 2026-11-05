@@ -34,6 +34,8 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   private pendingCall: { id: string; pitch?: number; amp?: number } | null = null;
   private gateLevel = 0;
   private beat = new BeatPlayer();
+  /** score messages that arrived while a body change was pending: they belong to the new voice */
+  private afterBody: ToWorklet[] = [];
 
   constructor() {
     super();
@@ -53,6 +55,10 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   }
 
   private onMessage(m: ToWorklet): void {
+    if (this.pendingBody && (m.type === "schedule" || m.type === "release" || m.type === "stopSpeech" || m.type === "beatHit")) {
+      this.afterBody.push(m);
+      return;
+    }
     switch (m.type) {
       case "body":
         this.pendingBody = m.body;
@@ -146,6 +152,9 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       // the performer's breath, not the voice's (which includes breath from the score)
       this.voice.setGate(this.gateLevel);
       this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
+      const queued = this.afterBody;
+      this.afterBody = [];
+      for (const q of queued) this.onMessage(q);
     }
     if (this.pendingCreature !== null) {
       const id = this.pendingCreature;

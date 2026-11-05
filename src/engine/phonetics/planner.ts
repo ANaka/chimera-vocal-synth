@@ -52,6 +52,9 @@ export interface Plan {
   end: number;
 }
 
+/** label of the end-of-breath-group abduction (a live note can drop it when the next one starts) */
+export const EXHALE_LABEL = "exhale";
+
 const VOWEL_KEYS = ["tbX", "tbY", "jaw", "lipAp", "lipProt", "lipWidth", "root", "larynx", "ttCurl"] as const;
 type VTable = Record<string, Record<string, { artic: Partial<HumanArtic> }>>;
 const VT = vowelTable as unknown as VTable;
@@ -209,7 +212,7 @@ export function planUtterance(input: Segment[], o: PlanOptions): Plan {
     const last = segs[segs.length - 1];
     const sonorant = !!last?.vowel || ["nasal", "approximant", "lateral", "tap", "trill"].includes(last?.def?.manner ?? "");
     const at = end + (sonorant ? 0.045 : 0.015);
-    gestures.push({ t0: at, t1: end + 0.1, rampIn: 0.03, rampOut: 0.06, strength: 6, targets: { abduction: 0.22 }, label: "exhale" });
+    gestures.push({ t0: at, t1: end + 0.1, rampIn: 0.03, rampOut: 0.06, strength: 6, targets: { abduction: 0.22 }, label: EXHALE_LABEL });
   }
   // ---- intonation: pitch targets on vowels
   const f0 = o.f0 ?? 110;
