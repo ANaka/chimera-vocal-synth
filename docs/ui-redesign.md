@@ -12,29 +12,30 @@ The approved mockups are in `docs/mockups/` (open `index.html`). This plan says 
 
 ## Rendering
 
-**Canvas 2D, with a cheap shared glow.** Every renderer today is Canvas 2D (`useCanvasLoop`, `AnatomyRenderer`), so the drawings stay Canvas 2D and the glow becomes one shared step:
+**Canvas 2D, with one cheap shared glow.** Every renderer today is Canvas 2D (`useCanvasLoop`, `AnatomyRenderer`), so the drawings stay Canvas 2D and the glow becomes one shared step:
 
 1. Draw sharp lines and text with `globalCompositeOperation = "lighter"`, so crossings add up like a beam.
-2. Copy the canvas down to 1/4 and 1/16 size, blur each small copy by about 1 px, and add both back on top with `"lighter"` (alpha about 0.9 and 0.6). The small blurs cost a sixteenth and a 256th of a full-size blur, which is what made the app lag before.
-3. Skip the frame when nothing changed (a dirty flag per screen), so idle screens cost nothing.
+2. Copy the canvas down to one reduced-resolution layer, blur it there, and add it back on top with `"lighter"`. The blur runs on a fraction of the pixels; the full-resolution composite is the remaining cost, and it gets measured.
+3. Screens keep drawing every frame, as today. Telemetry, afterglow, scrolling views and `tickSinging()` all change outside the store, so skipping frames needs an invalidation contract first, and only if measurement asks for it.
 
-A hook, `usePhosphor(draw)`, replaces `useCanvasLoop` for the vector screens: DPR, resize, the rAF loop, the glow pass, the dirty flag, and a small kit (`beam(path, colour, width)`, `label(text, …)` in the Hershey font, `ipa(glyph, …)`).
+A hook, `usePhosphor(draw)`, replaces `useCanvasLoop` for the vector screens: DPR, resize, the rAF loop, the glow pass, and a small kit (`beam(path, colour, width)`, `label(text, …)` in the Hershey font). One convention everywhere: the context is pre-scaled so drawing and hit-testing are in CSS pixels, with DPR capped at 2. The anatomy renderer moves to it from its backing-pixel coordinates.
 
 **DOM for chrome.** Screen frames, titles, chips, tabs, text fields and encoders are DOM, in the Hershey font with CSS glow (`text-shadow`, `box-shadow`). They stay accessible and need no canvas work.
 
-**WebGL only if measured.** If the full Play screen can't hold 60 fps on the target machine (integrated GPU, 2× DPR), move the line drawing to one shared WebGL2 context. Nothing above needs to change for that except the hook's internals.
+**WebGL only if a trace says so.** The renderers use paths, text, gradients and image data, so a WebGL move would change them too. It waits until a trace shows Canvas 2D is the bottleneck.
 
-**Budget.** Under 8 ms of main-thread time per frame for the Play screen at 2× DPR, measured with the e2e harness and a Chromium trace, before and after.
+**Budget.** Under 8 ms of main-thread time per frame for the Play screen at 2× DPR, attributed with a Chromium trace on this machine, recording canvas sizes, DPR and the graphics backend. The Play screen is benchmarked as soon as it exists, before the other modes are ported.
 
 ## Layout
 
 - `App` becomes a top bar plus a grid: the tall left screen and a right column. Each mode defines its right column (as in the mockups).
 - Below about 1100 px wide, the screens stack in one column: the left screen first, then the rest in reading order. Phones get the same stack.
-- A `Screen` component draws the frame, title and subtitle; `focus` brightens the frame of the screen the encoders are bound to.
+- A `Screen` component draws the frame, title and subtitle; `focus` brightens the frame of the screen the encoders are bound to. Its content area always has a positive size (a minimum height per screen), and canvases fill it absolutely, so nothing collapses when stacked.
+- Wide content (the consonant chart, the sequencer) scrolls horizontally inside its screen on narrow layouts.
 
 ## Controls
 
-- **Encoders replace sliders.** `Encoder` is a dial with a big numeral in its slot colour. It is `role="slider"` with `aria-valuetext`, takes vertical drag, the wheel, arrow keys and page up/down, and can be bound to MIDI CC later.
+- **Encoders replace sliders.** `Encoder` draws a dial with a big numeral in its slot colour over a native `<input type="range">` that does the work: a visible label, keyboard (arrows, Page Up/Down, Home/End), `aria-valuetext`, pointer capture and cancellation. Logarithmic values (pitch, glide) keep the current mapping. `touch-action: pan-y` keeps vertical swipes scrolling the page, and the wheel doesn't change values. Values stay in the existing stores; the page shown is presentation only. MIDI CC (the app's MIDI handles notes only today) comes later.
 - **Pages of four.** An encoder screen shows four and pages through the rest:
   - Play: VOICE (pitch, breath, pressed, vibrato), TONE (breathy, rough, fry, glide), MOUTH (lip round, lip open, protrude, jaw), THROAT (tongue root, tip curl, velum, larynx), LARYNX (twang, false folds).
   - Sing: vibrato depth, rate, breathy, ring. Beatbox: tempo, swing, mic, bass note. Bestiary: the creature's params, four per page.
@@ -49,8 +50,10 @@ A hook, `usePhosphor(draw)`, replaces `useCanvasLoop` for the vector screens: DP
 | Play | face (`AnatomyView`) | tube, vocal folds, spectrum, vowels, voice encoders, keys |
 | Speak | face | say (text field, chips, transcription), gestural score, consonant chart, tube, vocal folds |
 | Sing | face | piano roll, lyrics chips, spectrum with the ring zone, song encoders, keys |
-| Beatbox | face with the hit's big symbol | step sequencer, waterfall spectrogram, pads, transport encoders + presets |
-| Bestiary | creature (`CreatureView`) | creature gallery, waterfall spectrogram, calls, creature encoders, unrolled airway |
+| Beatbox | face with the hit's big symbol | step sequencer, waterfall spectrogram, pads, transport encoders + presets, compact keys |
+| Bestiary | creature (`CreatureView`) | creature gallery, waterfall spectrogram, calls, creature encoders, unrolled airway, compact keys |
+
+`Keys` also owns the computer-keyboard listeners and the MIDI connect button, so every mode keeps at least a compact keys strip.
 
 The mockup generator (`docs/mockups/gen/`) is the reference implementation for each drawing: the same geometry, colours and layout rules, written against the live data the app already has (`HumanFrame`, telemetry, transfer functions, plans, creature visuals).
 
@@ -58,21 +61,22 @@ The mockup generator (`docs/mockups/gen/`) is the reference implementation for e
 
 Each phase is a commit on `t3/ui-mockup-inspiration`, pushed, with the app working at every step.
 
-1. **Foundations.** Hershey fonts in `public/fonts`, colour tokens (CSS and `colors.ts`), `Screen`, `Chip`, `Encoder`, `usePhosphor`, the app shell and top bar, the start overlay. Restyle everything else coarsely (black, frames, Hershey) so no screen looks broken.
-2. **Play.** The face renderer in outlines (afterglow, turbulence, slots), tube, vocal folds, spectrum, vowel chart, encoders, keys.
-3. **Speak, Sing, Beatbox, Bestiary.** Independent, so they can be built in parallel, each owning its own components and CSS file.
-4. **Finish.** Performance check against the budget, the narrow layout, keyboard and screen-reader pass, e2e test names, a PR.
+1. **Foundations.** Hershey fonts in `public/fonts`, colour tokens (CSS and `colors.ts`), `Screen`, `Chip` (keeping button, radio and toggle semantics), `Encoder`, `usePhosphor`, the app shell and top bar, the start overlay. Restyle everything else coarsely (black, frames, Hershey) so no screen looks broken.
+2. **Play.** The face renderer in outlines (afterglow, turbulence, slots), tube, vocal folds, spectrum, vowel chart, encoders, keys. Then the benchmark, at 2× DPR and at phone width.
+3. **Speak, Sing, Beatbox, Bestiary, one at a time.** They share renderers (anatomy, spectrum variants, the waterfall, keys), so those settle first and each mode then owns only its composition and scoped styles.
+4. **PR.** Each phase already checks the narrow layout, keyboard use and performance; this one is the final pass and the PR.
 
 ## Testing
 
 - `bun run typecheck`, `bun test tests`, `cargo test --workspace` (the engine doesn't change).
-- `tools/e2e.ts`: loads every mode, plays, checks for console errors, saves screenshots. Update it for the new button names.
-- Compare each mode's screenshot with its mockup.
-- Frame-time measurement from the e2e harness (rAF deltas and long tasks), Play and Beatbox, at 1× and 2× DPR.
+- `tools/e2e.ts`: loads every mode, plays, saves screenshots. It now exits non-zero when it collected errors, keeps its audio assertions, and adds checks for encoder changes, touch cancellation, resizing, and switching modes while playing. Fresh start-up in each mode, including the retry path.
+- Chrome text keeps its natural case in the DOM (capitals come from CSS), so accessible names and the e2e selectors don't change.
+- Compare each mode's screenshot with its mockup at the same viewport and a similar state; the waveforms won't match the old TS engine's exactly.
+- The frame budget comes from a Chromium trace, not rAF deltas.
 
 ## Risks and open questions
 
 - **Software rendering.** Headless Chromium has no GPU, so e2e frame times will be pessimistic; the budget is for the real machine.
-- **IPA in canvases.** The Hershey font has no IPA, so the chart, transcriptions and slots need the stroke glyphs (from `docs/mockups/gen/speak-ipa.ts` and `lib.ts`).
-- **Bestiary keys.** The mockup dropped the on-screen keys for that mode. The computer keyboard and MIDI still play it; touch users would lose it. A thin keys strip may be needed.
-- **Encoders on touch.** Vertical drag on a small dial is fiddly on a phone; the stacked layout may need wider dials.
+- **IPA.** Text stays Unicode everywhere (inputs, chart buttons, transcriptions), in the font stack `Hershey, Archivo`: Archivo already covers IPA Extensions. Stroke glyphs (from `docs/mockups/gen/`) are only for decorative canvas symbols, with text equivalents. Canvases redraw when fonts finish loading.
+- **Start-up order.** `main.tsx` loads the wasm module before any UI module, because the engine facade reads its catalogue at import. Shared helpers must not import the facade earlier.
+- **Encoders on touch.** A small dial is fiddly on a phone; the stacked layout gives each encoder a wider cell.
