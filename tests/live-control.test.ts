@@ -48,6 +48,29 @@ describe("worklet ordering", () => {
     const voice = (p as unknown as { voice: HumanVoice }).voice;
     expect(voice.airway.body.scale).toBeLessThan(1); // the new (female) voice
     expect(voice.score.size).toBe(1); // holding the note
+
+    // a beat stop sent after a hit, during a body change, still cancels that hit
+    send({ type: "beat", steps: [{ id: "B" }, null, null, null], bpm: 96, playing: true });
+    for (let i = 0; i < 20; i++) p.process([], [[new Float32Array(128)]]);
+    send({ type: "body", body: "male" });
+    send({ type: "beatHit", id: "B" });
+    send({ type: "beat", playing: false });
+    p.process([], [[new Float32Array(128)]]);
+    const v2 = (p as unknown as { voice: HumanVoice }).voice;
+    expect(v2.airway.body.scale).toBe(1);
+    expect(v2.score.size).toBe(0);
+
+    // a backlog replays in order, one full-size schedule per block
+    const big = Array.from({ length: 4000 }, (_, i) => ({ ...breath, t0: 1 + i * 1e-3, t1: 1.5 + i * 1e-3, label: `g${i}` }));
+    send({ type: "body", body: "child" });
+    for (let k = 0; k < 3; k++) send({ type: "schedule", gestures: big, segments: [], end: 1, id: 10 + k, replace: false });
+    send({ type: "stopSpeech" }); // must come after all three
+    const sizes: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      p.process([], [[new Float32Array(128)]]);
+      sizes.push((p as unknown as { voice: HumanVoice }).voice.score.size);
+    }
+    expect(sizes).toEqual([4000, 8000, 12000, 0]);
   });
 });
 

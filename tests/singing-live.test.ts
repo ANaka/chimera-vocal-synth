@@ -27,7 +27,16 @@ const fakeEngine = {
   release: (tag: number) => voice.release(tag),
   stopSpeech: () => voice.cancelScore(),
 };
-mock.module("../src/audio/AudioEngine.ts", () => ({ engine: fakeEngine }));
+let startAudio: () => void = () => {};
+const engineStub = new Proxy(
+  {
+    ...fakeEngine,
+    start: () => new Promise<void>((r) => (startAudio = r)),
+  } as Record<string, unknown>,
+  // every other engine call the store makes (volume, body, gate…) does nothing here
+  { get: (t, k) => (k in t ? t[k as string] : () => {}), set: (t, k, v) => ((t[k as string] = v), true) },
+);
+mock.module("../src/audio/AudioEngine.ts", () => ({ engine: engineStub }));
 const { useSing, singNoteOn, singNoteOff, playDemo, stopSinging } = await import("../src/ui/singing.ts");
 const gesturesOf = () => (voice.score as unknown as { gestures: Gesture[] }).gestures;
 
@@ -123,8 +132,8 @@ describe("Sing mode, live keys", () => {
   test("a demo still waiting for audio or the dictionary is cancelled by a stop", async () => {
     voice = new HumanVoice({ fsOut: FS });
     let scheduled = 0;
-    const schedule = fakeEngine.schedule;
-    fakeEngine.schedule = (plan) => (scheduled++, schedule(plan));
+    const schedule = engineStub.schedule as typeof fakeEngine.schedule;
+    engineStub.schedule = (plan: { gestures: Gesture[] }) => (scheduled++, schedule(plan));
     let go!: () => void;
     const waiting = playDemo("Made of air", "male", () => new Promise<void>((r) => (go = r)));
     stopSinging(); // e.g. the mode changed while audio was starting
@@ -136,7 +145,7 @@ describe("Sing mode, live keys", () => {
     expect(scheduled).toBe(1);
     expect(useSing.getState().demo).toBe("Made of air");
     stopSinging();
-    fakeEngine.schedule = schedule;
+    engineStub.schedule = schedule;
   });
 
   test("a quick next note drops the last one's breath-out; leaving Sing cancels a pending ending", () => {
@@ -161,5 +170,62 @@ describe("Sing mode, live keys", () => {
     let breath = 0;
     for (const g of voice.score.activeAt(voice.clock)) if (g.targets.breath !== undefined) breath += activation(g, voice.clock) * g.strength;
     expect(breath).toBeLessThan(0.01);
+  });
+
+  test("overlapping endings all stay owned: a stop cancels every one", () => {
+    voice = new HumanVoice({ fsOut: FS });
+    useSing.getState().setLyrics("cats dogs");
+    run(0.05);
+    singNoteOn(50, 96, "male");
+    run(0.3);
+    singNoteOff(50, "male"); // "cats": /ts/ and breath-out
+    run(0.01);
+    singNoteOn(52, 96, "male");
+    run(0.03);
+    singNoteOff(52, "male"); // "dogs" released quickly, while the /ts/ is still going
+    run(0.01);
+    stopSinging();
+    run(0.08);
+    let breath = 0;
+    for (const g of voice.score.activeAt(voice.clock)) if (g.targets.breath !== undefined) breath += activation(g, voice.clock) * g.strength;
+    expect(breath).toBeLessThan(0.01);
+  });
+});
+
+describe("keys pressed before the audio has started", () => {
+  test("only the press still down sings, once, and not after the body changed", async () => {
+    const { useStore } = await import("../src/ui/store.ts");
+    voice = new HumanVoice({ fsOut: FS });
+    useStore.setState({ started: false, mode: "play" });
+    useStore.getState().setMode("sing");
+    useSing.getState().setLyrics("one two three");
+    let scheduled = 0;
+    const sg = engineStub.scheduleGestures as typeof fakeEngine.scheduleGestures;
+    engineStub.scheduleGestures = (gs: Gesture[], lead?: number) => (scheduled++, sg(gs, lead));
+    const st = useStore.getState();
+    // press, release and press again while audio starts: one note, one syllable
+    st.noteOn(50);
+    st.noteOff(50);
+    st.noteOn(50);
+    startAudio();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useStore.getState().started).toBe(true);
+    expect(scheduled).toBe(1);
+    expect(useSing.getState().cursor).toBe(1);
+    useStore.getState().noteOff(50);
+
+    // a press waiting for audio is dropped by a body change
+    useStore.setState({ started: false });
+    scheduled = 0;
+    const before = useSing.getState().cursor;
+    useStore.getState().noteOn(52);
+    useStore.getState().setBody("female");
+    startAudio();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(scheduled).toBe(0);
+    expect(useSing.getState().cursor).toBe(before);
+    engineStub.scheduleGestures = sg;
   });
 });

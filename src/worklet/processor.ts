@@ -19,6 +19,8 @@ declare class AudioWorkletProcessor {
 
 const BODIES: Record<BodyName, HumanBody> = { male: BODY_MALE, female: BODY_FEMALE, child: BODY_CHILD };
 const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
+/** gestures taken from one schedule message (and replayed per block) */
+const MAX_GESTURES = 4000;
 
 class ChimeraProcessor extends AudioWorkletProcessor {
   private voice: HumanVoice;
@@ -34,7 +36,10 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   private pendingCall: { id: string; pitch?: number; amp?: number } | null = null;
   private gateLevel = 0;
   private beat = new BeatPlayer();
-  /** score messages that arrived while a body change was pending: they belong to the new voice */
+  /**
+   * Score messages that arrived while a body change was pending (they belong to the new voice),
+   * replayed in order within a per-block budget; later ones wait behind them.
+   */
   private afterBody: ToWorklet[] = [];
 
   constructor() {
@@ -55,10 +60,28 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   }
 
   private onMessage(m: ToWorklet): void {
-    if (this.pendingBody && (m.type === "schedule" || m.type === "release" || m.type === "stopSpeech" || m.type === "beatHit")) {
+    const ordered = m.type === "schedule" || m.type === "release" || m.type === "stopSpeech" || m.type === "beatHit" || m.type === "beat";
+    if (ordered && (this.pendingBody || this.afterBody.length)) {
       this.afterBody.push(m);
       return;
     }
+    this.handle(m);
+  }
+
+  /** Replay held-back score messages: at most one full-size schedule's worth per block. */
+  private replay(): void {
+    let spent = 0;
+    while (this.afterBody.length) {
+      const m = this.afterBody[0];
+      const cost = m.type === "schedule" ? Math.min(MAX_GESTURES, m.gestures.length) : 1;
+      if (spent > 0 && spent + cost > MAX_GESTURES) break;
+      this.afterBody.shift();
+      this.handle(m);
+      spent += cost;
+    }
+  }
+
+  private handle(m: ToWorklet): void {
     switch (m.type) {
       case "body":
         this.pendingBody = m.body;
@@ -97,7 +120,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "schedule": {
         // O(n) time shift onto the voice clock; planning happened on the main thread
         const off = this.voice.clock + (m.lead ?? 0.03);
-        const gs = m.gestures.slice(0, 4000);
+        const gs = m.gestures.slice(0, MAX_GESTURES);
         for (const g of gs) {
           g.t0 += off;
           g.t1 += off;
@@ -152,10 +175,8 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       // the performer's breath, not the voice's (which includes breath from the score)
       this.voice.setGate(this.gateLevel);
       this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
-      const queued = this.afterBody;
-      this.afterBody = [];
-      for (const q of queued) this.onMessage(q);
     }
+    if (this.afterBody.length && !this.pendingBody) this.replay();
     if (this.pendingCreature !== null) {
       const id = this.pendingCreature;
       this.pendingCreature = null;

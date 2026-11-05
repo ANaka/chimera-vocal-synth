@@ -102,6 +102,14 @@ function updateGate(s: { hold: boolean; heldNotes: number[]; mode: Mode; keyCall
 
 let startPromise: Promise<void> | null = null;
 
+/**
+ * A key pressed before the audio exists is sent once it does: only if that same press is still
+ * down (not a later press of the same key) and the mode and body have not changed since.
+ */
+let pressSerial = 0;
+const pressOf = new Map<number, number>();
+let session = 0;
+
 const FIRST_BEAT = BEAT_PRESETS[0];
 
 export const useStore = create<State>((set, get) => ({
@@ -123,6 +131,7 @@ export const useStore = create<State>((set, get) => ({
   setMode: (m) => {
     const prev = get().mode;
     if (prev === m) return;
+    session++;
     // notes held across the switch would keep breathing into the other voice
     set({ mode: m, heldNotes: [] });
     // speech belongs to Speak: under a creature the human clock stops and it would resume later
@@ -250,6 +259,7 @@ export const useStore = create<State>((set, get) => ({
     return startPromise;
   },
   setBody: (b) => {
+    session++;
     // the new voice starts without the old one's score: a sung note would hang
     if (get().mode === "sing") stopSinging();
     const f0 = DEFAULT_F0[b];
@@ -276,13 +286,15 @@ export const useStore = create<State>((set, get) => ({
     const held = get().heldNotes.filter((n) => n !== midi).concat(midi);
     set({ heldNotes: held });
     const s = get();
+    const press = ++pressSerial;
+    pressOf.set(midi, press);
     // a sung note or a call is a one-off message, lost if sent before the audio exists (held
-    // pitches and breath are resent at startup): send it once audio is up, if the key is still down
+    // pitches and breath are resent at startup): send it once audio is up, if still pressed
     if (!s.started && (s.mode === "sing" || (s.mode === "bestiary" && s.keyCall))) {
-      const mode = s.mode;
+      const sess = session;
       void s.start().then(() => {
         const t = get();
-        if (t.started && t.mode === mode && t.heldNotes.includes(midi)) t.noteOn(midi, velocity);
+        if (t.started && session === sess && pressOf.get(midi) === press) t.noteOn(midi, velocity);
       });
       return;
     }
@@ -301,6 +313,7 @@ export const useStore = create<State>((set, get) => ({
     updateGate(get());
   },
   noteOff: (midi) => {
+    pressOf.delete(midi);
     const held = get().heldNotes.filter((n) => n !== midi);
     set({ heldNotes: held });
     const s = get();

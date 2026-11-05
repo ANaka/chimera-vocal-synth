@@ -125,11 +125,12 @@ function StartPrompt() {
         className="primary large"
         disabled={starting}
         onClick={async () => {
+          // the demo waits for audio itself, so a stop meanwhile (body, mode) cancels it
+          if (mode === "sing") return void playDemo(DEMO_SONGS[0].name, useStore.getState().body, start);
           await start();
           const first = creatureById(creature)?.calls[0];
           if (mode === "bestiary" && first) playCall(first.id);
           else if (mode === "beatbox") setBeatPlaying(true);
-          else if (mode === "sing" && useStore.getState().mode === "sing") void playDemo(DEMO_SONGS[0].name, useStore.getState().body);
           else if (mode === "play") setHold(true);
         }}
       >

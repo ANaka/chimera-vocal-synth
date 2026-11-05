@@ -94,8 +94,10 @@ let sounding: Sounding | null = null;
 let keys: number[] = [];
 /** gesture tags: a note uses tag (articulation, breath) and tag + 1 (pitch, vibrato) */
 let nextTag = 2;
-/** the last note's ending (glide, coda) still playing: tag, and tag + 1 for its exhale */
-let tail: number | null = null;
+/** endings (glide, coda) that may still be playing: tag, and tag + 1 for the breath-out */
+const tails: number[] = [];
+/** endings whose breath-out has not been dropped by a following note */
+let exhalesLive = false;
 
 /** breath level for a key velocity (1 at the on-screen keys' default of 96) */
 const breathFor = (velocity: number) => 0.62 + 0.4 * Math.min(1, Math.max(0, velocity / 96)) + 0.12 * Math.max(0, (velocity - 96) / 31);
@@ -121,8 +123,9 @@ function startNote(syl: Syllable, midi: number, velocity: number, body: BodyName
   const t = now();
   const tag = nextTag;
   nextTag += 2;
-  // the previous note's coda may finish, but its breath-out must not open the folds on this onset
-  if (tail !== null) engine.release(tail + 1);
+  // earlier codas may finish, but their breath-out must not open the folds on this onset
+  if (exhalesLive) for (const t of tails) engine.release(t + 1);
+  exhalesLive = false;
   const from = sounding;
   if (from) {
     engine.release(from.tag);
@@ -180,7 +183,9 @@ export function singNoteOff(midi: number, body: BodyName): void {
   const tag = nextTag;
   nextTag += 2;
   engine.scheduleGestures(gs.map((g) => ({ ...g, tag: g.label === EXHALE_LABEL ? tag + 1 : tag })));
-  tail = tag;
+  tails.push(tag);
+  if (tails.length > 8) tails.shift(); // long finished by now
+  exhalesLive = true;
 }
 
 // ---- demo songs
@@ -275,11 +280,12 @@ export function stopSinging(): void {
     sounding.note.t1 = now();
     sounding = null;
   }
-  if (tail !== null) {
-    engine.release(tail);
-    engine.release(tail + 1);
-    tail = null;
+  for (const t of tails) {
+    engine.release(t);
+    engine.release(t + 1);
   }
+  tails.length = 0;
+  exhalesLive = false;
   keys = [];
 }
 
