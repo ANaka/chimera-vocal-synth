@@ -41,8 +41,14 @@ export class AnatomyRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private grain: CanvasPattern | null = null;
+  /** tissue shapes, drawn sharp */
   private tissue: HTMLCanvasElement;
   private tctx: CanvasRenderingContext2D;
+  /** the tissue layer softened by one blur pass, with film grain (what gets drawn) */
+  private soft: HTMLCanvasElement;
+  private sctx: CanvasRenderingContext2D;
+  /** what the tissue layer was last drawn for: an unchanged frame needs no redraw */
+  private tissueFor: { model: VoiceModel; f: HumanFrame } | null = null;
   private particles: Particle[] = [];
   private scale = 20;
   private ox = 0;
@@ -56,6 +62,8 @@ export class AnatomyRenderer {
     this.ctx = canvas.getContext("2d")!;
     this.tissue = document.createElement("canvas");
     this.tctx = this.tissue.getContext("2d")!;
+    this.soft = document.createElement("canvas");
+    this.sctx = this.soft.getContext("2d")!;
     this.canFilter = typeof this.tctx.filter === "string";
     this.makeGrain();
     for (let i = 0; i < 170; i++) this.particles.push({ s: Math.random() * 17, u: Math.random() * 2 - 1, life: Math.random(), px: NaN, py: NaN });
@@ -81,6 +89,9 @@ export class AnatomyRenderer {
     this.canvas.height = Math.round(h * dpr);
     this.tissue.width = this.canvas.width;
     this.tissue.height = this.canvas.height;
+    this.soft.width = this.canvas.width;
+    this.soft.height = this.canvas.height;
+    this.tissueFor = null;
     const sx = w / (VIEW.x1 - VIEW.x0);
     const sy = h / (VIEW.y1 - VIEW.y0);
     this.scale = Math.min(sx, sy) * dpr;
@@ -155,11 +166,14 @@ export class AnatomyRenderer {
   draw(model: VoiceModel, f: HumanFrame, a: HumanArtic, tele: TelemetryMessage | null, view: ViewFlags, opts: { hover: HandleId | null; drag: HandleId | null; dt: number; bodyLabel: string; formants: number[] }): void {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
-    this.drawTissue(model, f, a);
+    if (!this.tissueFor || this.tissueFor.f !== f || this.tissueFor.model !== model) {
+      this.drawTissue(model, f, a);
+      this.tissueFor = { model, f };
+    }
     ctx.globalCompositeOperation = "source-over";
     ctx.fillStyle = C.black;
     ctx.fillRect(0, 0, W, H);
-    ctx.drawImage(this.tissue, 0, 0);
+    ctx.drawImage(this.soft, 0, 0);
 
     // acoustic energy inside the airway (section-wise projection of the 1D simulation)
     if (view.pressure && tele) this.drawPressure(model, f, tele);
@@ -190,7 +204,6 @@ export class AnatomyRenderer {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalCompositeOperation = "source-over";
     c.clearRect(0, 0, this.tissue.width, this.tissue.height);
-    if (this.canFilter) c.filter = `blur(${(0.55 * this.dpr).toFixed(2)}px)`;
 
     const ulOut = f.upperLip.slice(7); // edge → nose
     const llOut = f.lowerLip.slice(7); // edge → chin
@@ -323,16 +336,24 @@ export class AnatomyRenderer {
     // vocal folds
     this.fill(c, [{ x: g.x - 0.62 * k, y: g.y + 0.05 }, { x: g.x - 0.1, y: g.y + 0.12 * k }, { x: g.x - 0.62 * k, y: g.y + 0.32 * k }], "#8a8a8a");
     this.fill(c, [{ x: g.x + 0.72 * k, y: g.y + 0.05 }, { x: g.x + 0.12, y: g.y + 0.12 * k }, { x: g.x + 0.72 * k, y: g.y + 0.32 * k }], "#8a8a8a");
-    c.filter = "none";
-    // film grain over tissue (multiplicative-ish)
+    // soft edges: one blur pass over the finished layer. A filter set while drawing blurs every
+    // fill separately (~60 full-canvas passes a frame), which held the app at a few fps.
+    const s = this.sctx;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.globalCompositeOperation = "source-over";
+    s.clearRect(0, 0, this.soft.width, this.soft.height);
+    if (this.canFilter) s.filter = `blur(${(0.55 * this.dpr).toFixed(2)}px)`;
+    s.drawImage(this.tissue, 0, 0);
+    s.filter = "none";
+    // film grain over tissue (multiplicative-ish), not blurred
     if (this.grain) {
-      c.globalCompositeOperation = "overlay";
-      c.globalAlpha = 0.22;
-      c.fillStyle = this.grain;
-      this.path(c, head);
-      c.fill();
-      c.globalAlpha = 1;
-      c.globalCompositeOperation = "source-over";
+      s.globalCompositeOperation = "overlay";
+      s.globalAlpha = 0.22;
+      s.fillStyle = this.grain;
+      this.path(s, head);
+      s.fill();
+      s.globalAlpha = 1;
+      s.globalCompositeOperation = "source-over";
     }
   }
 
