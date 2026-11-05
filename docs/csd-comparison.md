@@ -58,7 +58,7 @@ measurement window would hold the wrong sound. The report gives the count.
 | measure | what it tells you |
 |---|---|
 | pitch vs score, synth vs singer (cents) | intonation; YIN searched ±7 semitones around the score note, so it cannot jump octaves |
-| vibrato share, depth (peak cents) and rate (Hz) | over the note's longest unbroken voiced run, if it lasts 0.4 s: the detrended contour counts as vibrato only if its autocorrelation peaks at 0.5 or more between 4 and 9 Hz. The share is how many such notes have vibrato |
+| vibrato share, depth (peak cents) and rate (Hz) | over the note's longest unbroken voiced run, if it lasts 0.4 s: the detrended contour counts as vibrato only if its fundamental period (the first autocorrelation peak of 0.5 or more) gives a rate of 4–9 Hz. The share is how many such notes have vibrato |
 | aperiodicity | YIN's aperiodicity: noise and roughness in the voice |
 | H1−H2 (dB) | first minus second harmonic, the standard voice-quality measure: high is breathy or lax, low is pressed. Measured in each voiced frame at that frame's own f0, then the median is taken |
 | voiced share | share of steady frames the synth actually voices; a frame is voiced when YIN finds a period and it is within 35 dB of the signal's loud level |

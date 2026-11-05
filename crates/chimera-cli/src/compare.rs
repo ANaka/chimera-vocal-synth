@@ -59,6 +59,8 @@ const N_MEL: usize = 40;
 const HOP: f64 = 0.005;
 /// shortest unbroken voiced run (s) searched for vibrato
 const VIB_MIN_RUN: f64 = 0.4;
+/// rates (Hz) accepted as vibrato
+const VIB_RATE: (f64, f64) = (4.0, 9.0);
 /// a note whose planned vowel start is this far (s) from its annotated start is left out
 const MAX_MISALIGN: f64 = 0.03;
 /// frames this far (dB) below a signal's loud level count as silent
@@ -626,8 +628,8 @@ impl Analyzer {
 
 /// Vibrato of a note from its voiced pitch frames (index on the HOP grid, cents): over the
 /// longest unbroken voiced run, if it lasts VIB_MIN_RUN, the contour is detrended and its
-/// normalised autocorrelation searched for a peak at 4–9 Hz. A peak of at least 0.5 is
-/// vibrato: rate from the peak's lag, depth (peak cents) from the residual's RMS (a sine of
+/// normalised autocorrelation searched for its fundamental period. A peak of at least 0.5 at a
+/// rate within VIB_RATE is vibrato: rate from the peak's lag, depth (peak cents) from the residual's RMS (a sine of
 /// peak A has RMS A/√2). Returns (depth, rate, eligible); depth and rate are NaN without vibrato.
 fn vibrato(voiced: &[(usize, f64)]) -> (f64, f64, bool) {
     let none = (f64::NAN, f64::NAN);
@@ -667,29 +669,26 @@ fn vibrato(voiced: &[(usize, f64)]) -> (f64, f64, bool) {
     let ac = |lag: usize| {
         (0..n - lag).map(|i| r[i] * r[i + lag]).sum::<f64>() / (n - lag) as f64 / energy
     };
-    let (lo, hi) = (
-        (1.0 / (9.0 * HOP)).floor() as usize,
-        (1.0 / (4.0 * HOP)).ceil() as usize,
-    );
-    let vals: Vec<f64> = (lo - 1..=hi + 1).map(ac).collect();
-    // the strongest local maximum inside [lo, hi]
-    let peak = (1..vals.len() - 1)
-        .filter(|&j| vals[j] >= vals[j - 1] && vals[j] >= vals[j + 1])
-        .max_by(|&p, &q| vals[p].total_cmp(&vals[q]));
-    match peak {
-        Some(j) if vals[j] >= 0.5 => {
-            let (a, b, c) = (vals[j - 1], vals[j], vals[j + 1]);
-            let den = a - 2.0 * b + c;
-            let shift = if den < 0.0 { 0.5 * (a - c) / den } else { 0.0 };
-            let lag = (lo - 1 + j) as f64 + shift;
-            (
-                energy.sqrt() * std::f64::consts::SQRT_2,
-                1.0 / (lag * HOP),
-                true,
-            )
-        }
-        _ => (none.0, none.1, true),
+    // the fundamental period is the first local maximum of at least 0.5, searched from the
+    // shortest lag the grid resolves up to the slowest rate accepted (a later peak can be a
+    // multiple of a faster period); its rate must then fall within VIB_RATE
+    let hi = (1.0 / (VIB_RATE.0 * HOP)).ceil() as usize;
+    let vals: Vec<f64> = (0..=(hi + 1).min(n - 1))
+        .map(|l| if l == 0 { 1.0 } else { ac(l) })
+        .collect();
+    let peak = (2..vals.len() - 1)
+        .find(|&j| vals[j] >= 0.5 && vals[j] >= vals[j - 1] && vals[j] >= vals[j + 1]);
+    let Some(j) = peak else {
+        return (none.0, none.1, true);
+    };
+    let (a, b, c) = (vals[j - 1], vals[j], vals[j + 1]);
+    let den = a - 2.0 * b + c;
+    let shift = if den < 0.0 { 0.5 * (a - c) / den } else { 0.0 };
+    let rate = 1.0 / ((j as f64 + shift) * HOP);
+    if rate < VIB_RATE.0 || rate > VIB_RATE.1 {
+        return (none.0, none.1, true);
     }
+    (energy.sqrt() * std::f64::consts::SQRT_2, rate, true)
 }
 
 /// Level envelope: RMS in dB (floor −80) of 10 ms frames.
@@ -1210,15 +1209,43 @@ mod tests {
         a.note(x, &held_note(midi, 0.1, 1.9))
     }
 
+    fn sine_vibrato(rate: f64) -> NoteMeas {
+        let x = tone(67.0, &[1.0], |t| {
+            50.0 * (2.0 * std::f64::consts::PI * rate * t).sin()
+        });
+        measure(&x, 67.0)
+    }
+
     #[test]
     fn vibrato_reads_rate_and_depth_of_a_periodic_modulation() {
-        let x = tone(67.0, &[1.0], |t| {
-            50.0 * (2.0 * std::f64::consts::PI * 5.5 * t).sin()
-        });
-        let m = measure(&x, 67.0);
-        assert!(m.vib_eligible);
-        assert!((m.vib_rate - 5.5).abs() < 0.3, "rate {}", m.vib_rate);
-        assert!((m.vib_depth - 50.0).abs() < 8.0, "depth {}", m.vib_depth);
+        for rate in [4.5, 5.5, 8.5] {
+            let m = sine_vibrato(rate);
+            assert!(m.vib_eligible);
+            assert!(
+                (m.vib_rate - rate).abs() < 0.3,
+                "{rate} Hz: rate {}",
+                m.vib_rate
+            );
+            assert!(
+                (m.vib_depth - 50.0).abs() < 8.0,
+                "{rate} Hz: depth {}",
+                m.vib_depth
+            );
+        }
+    }
+
+    #[test]
+    fn periodic_modulation_outside_the_vibrato_range_is_not_vibrato() {
+        // a 10 Hz or 40 Hz wobble also correlates at multiples of its period, inside 4–9 Hz
+        for rate in [10.0, 12.0, 40.0] {
+            let m = sine_vibrato(rate);
+            assert!(
+                m.vib_depth.is_nan(),
+                "{rate} Hz read as {} c at {} Hz",
+                m.vib_depth,
+                m.vib_rate
+            );
+        }
     }
 
     #[test]
