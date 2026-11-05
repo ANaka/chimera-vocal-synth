@@ -43,6 +43,11 @@ export interface GlottisParams {
   diplophonia: number;
   /** extra glottal closure force 0..1 (glottal stop / ejective: holds the folds shut) */
   closure: number;
+  /**
+   * bifurcation 0..1: a logistic map drives per-cycle period and amplitude. Rising values walk
+   * through period doubling (subharmonics, ~0.3), period four (~0.55) into deterministic chaos (>0.62).
+   */
+  chaos: number;
 }
 
 export const DEFAULT_GLOTTIS: GlottisParams = {
@@ -62,6 +67,7 @@ export const DEFAULT_GLOTTIS: GlottisParams = {
   fry: 0,
   diplophonia: 0,
   closure: 0,
+  chaos: 0,
 };
 
 export class ParametricGlottis {
@@ -71,6 +77,7 @@ export class ParametricGlottis {
   private cycleAmp = 1;
   private cyclePeriodScale = 1;
   private cycleIndex = 0;
+  private chaosX = 0.37;
   private vibPhase = 0;
   private readonly rng = new Rng(777);
   private readonly drift: Drift;
@@ -147,9 +154,18 @@ export class ParametricGlottis {
       this.phase -= 1;
       this.cycleIndex++;
       const alt = this.cycleIndex & 1 ? 1 : -1;
-      this.cyclePeriodScale = 1 + P.jitter * this.rng.gauss() + P.diplophonia * 0.08 * alt;
-      this.cyclePeriodScale = clamp(this.cyclePeriodScale, 0.7, 1.4);
-      this.cycleAmp = Math.max(0.2, 1 + P.shimmer * this.rng.gauss() - P.diplophonia * 0.35 * (alt > 0 ? 1 : 0));
+      let chaosP = 0, chaosA = 0;
+      if (P.chaos > 0) {
+        const r = 2.9 + 1.1 * Math.min(1, P.chaos);
+        this.chaosX = r * this.chaosX * (1 - this.chaosX);
+        if (!(this.chaosX > 0 && this.chaosX < 1)) this.chaosX = 0.37;
+        const dev = this.chaosX - 0.5;
+        chaosP = 0.45 * P.chaos * dev;
+        chaosA = 1.1 * P.chaos * dev;
+      }
+      this.cyclePeriodScale = 1 + P.jitter * this.rng.gauss() + P.diplophonia * 0.08 * alt + chaosP;
+      this.cyclePeriodScale = clamp(this.cyclePeriodScale, 0.55, 1.8);
+      this.cycleAmp = Math.max(0.12, 1 + P.shimmer * this.rng.gauss() - P.diplophonia * 0.35 * (alt > 0 ? 1 : 0) + chaosA);
     }
 
     // pulse shape within the cycle

@@ -3,7 +3,7 @@
  * parameter messages (at most one per animation frame per kind) and telemetry fan-out.
  */
 import workletUrl from "../worklet/processor.ts?worker&url";
-import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName, PlannedMessage } from "../worklet/protocol.ts";
+import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName, PlannedMessage, CreatureTelemetryMessage } from "../worklet/protocol.ts";
 import type { HumanArtic } from "../engine/anatomy/human.ts";
 import type { VoiceSource } from "../engine/voice/humanVoice.ts";
 
@@ -13,13 +13,21 @@ export class AudioEngine {
   ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   analyser: AnalyserNode | null = null;
+  /** unsmoothed, short-window analyser for the spectrogram */
+  analyserFast: AnalyserNode | null = null;
+  /** long time-domain window for the waveform scope */
+  analyserScope: AnalyserNode | null = null;
   private master: GainNode | null = null;
   latest: TelemetryMessage | null = null;
+  latestCreature: CreatureTelemetryMessage | null = null;
+  /** load of the most recent telemetry of either kind */
+  load = 0;
   sampleRate = 48000;
   private listeners = new Set<Listener>();
   private pendingArtic: Partial<HumanArtic> | null = null;
   private pendingTipFree: boolean | undefined;
   private pendingSource: Partial<VoiceSource> | null = null;
+  private pendingCParams: Record<string, number> | null = null;
   private flushScheduled = false;
   private readyListeners = new Set<() => void>();
   private plannedListeners = new Set<(p: PlannedMessage) => void>();
@@ -50,14 +58,29 @@ export class AudioEngine {
     analyser.fftSize = 4096;
     analyser.smoothingTimeConstant = 0.6;
     this.analyser = analyser;
+    const fast = ctx.createAnalyser();
+    fast.fftSize = 2048;
+    fast.smoothingTimeConstant = 0;
+    this.analyserFast = fast;
+    const scope = ctx.createAnalyser();
+    scope.fftSize = 16384;
+    this.analyserScope = scope;
     node.connect(master);
     master.connect(ctx.destination);
     master.connect(analyser);
+    master.connect(fast);
+    master.connect(scope);
     node.port.onmessage = (e: MessageEvent<FromWorklet>) => {
       const m = e.data;
       if (m.type === "telemetry") {
         this.latest = m;
+        this.latestCreature = null;
+        this.load = m.load;
         for (const l of this.listeners) l(m);
+      } else if (m.type === "ctelemetry") {
+        this.latestCreature = m;
+        this.latest = null;
+        this.load = m.load;
       } else if (m.type === "planned") {
         this.lastPlan = m;
         for (const l of this.plannedListeners) l(m);
@@ -86,6 +109,26 @@ export class AudioEngine {
     const id = ++this.speakId;
     this.send({ type: "schedule", gestures: plan.gestures, segments: plan.segments, end: plan.end, id, replace });
     return id;
+  }
+
+  /** Switch voice ("human" or a creature id), starting the creature from the given settings. */
+  setCreature(id: string, params?: Record<string, number>): void {
+    // settings still waiting for the next frame belong to the previous creature
+    this.pendingCParams = null;
+    this.send({ type: "creature", id, params });
+  }
+
+  setCreatureParams(values: Record<string, number>): void {
+    this.pendingCParams = { ...(this.pendingCParams ?? {}), ...values };
+    this.scheduleFlush();
+  }
+
+  playCall(id: string, pitch?: number, amp?: number): void {
+    this.send({ type: "call", id, pitch, amp });
+  }
+
+  stopCall(): void {
+    this.send({ type: "stopCall" });
   }
 
   stopSpeech(): void {
@@ -138,6 +181,10 @@ export class AudioEngine {
       if (this.pendingSource) {
         this.send({ type: "source", values: this.pendingSource });
         this.pendingSource = null;
+      }
+      if (this.pendingCParams) {
+        this.send({ type: "cparams", values: this.pendingCParams });
+        this.pendingCParams = null;
       }
     };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);

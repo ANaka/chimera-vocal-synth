@@ -11,6 +11,12 @@ import { ArticPanel } from "./components/ArticPanel.tsx";
 import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
 import { SpeakPanel } from "./components/SpeakPanel.tsx";
+import { BestiaryPanel } from "./components/BestiaryPanel.tsx";
+import { CreatureView } from "./components/CreatureView.tsx";
+import { Spectrogram } from "./components/Spectrogram.tsx";
+import { Scope } from "./components/Scope.tsx";
+import { CreatureTubes } from "./components/CreatureTubes.tsx";
+import { creatureById } from "../engine/creatures/index.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
@@ -26,7 +32,7 @@ function TopBar() {
   const setMode = useStore((s) => s.setMode);
   const [load, setLoad] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setLoad(engine.latest?.load ?? 0), 500);
+    const id = setInterval(() => setLoad(engine.load), 500);
     return () => clearInterval(id);
   }, []);
   return (
@@ -42,18 +48,21 @@ function TopBar() {
         options={[
           { value: "play", label: "Play" },
           { value: "speak", label: "Speak" },
+          { value: "bestiary", label: "Bestiary" },
         ]}
       />
-      <Segmented<BodyName>
-        label="Body"
-        value={body}
-        onChange={setBody}
-        options={[
-          { value: "male", label: "Adult male" },
-          { value: "female", label: "Adult female" },
-          { value: "child", label: "Child" },
-        ]}
-      />
+      {mode !== "bestiary" && (
+        <Segmented<BodyName>
+          label="Body"
+          value={body}
+          onChange={setBody}
+          options={[
+            { value: "male", label: "Adult male" },
+            { value: "female", label: "Adult female" },
+            { value: "child", label: "Child" },
+          ]}
+        />
+      )}
       <div className="topbar-right">
         <label className="volume">
           <span>Volume</span>
@@ -76,12 +85,13 @@ function TopBar() {
 function ViewToggles() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
+  const bestiary = useStore((s) => s.mode === "bestiary");
   return (
     <div className="view-toggles">
       <Toggle label="Sound pressure" checked={view.pressure} onChange={(v) => setView({ pressure: v })} />
-      <Toggle label="Airflow" checked={view.particles} onChange={(v) => setView({ particles: v })} />
-      <Toggle label="Measurements" checked={view.calipers} onChange={(v) => setView({ calipers: v })} />
-      <Toggle label="Grid" checked={view.grid} onChange={(v) => setView({ grid: v })} />
+      {!bestiary && <Toggle label="Airflow" checked={view.particles} onChange={(v) => setView({ particles: v })} />}
+      <Toggle label={bestiary ? "Labels" : "Measurements"} checked={view.calipers} onChange={(v) => setView({ calipers: v })} />
+      {!bestiary && <Toggle label="Grid" checked={view.grid} onChange={(v) => setView({ grid: v })} />}
     </div>
   );
 }
@@ -92,21 +102,30 @@ function StartPrompt() {
   const err = useStore((s) => s.startError);
   const start = useStore((s) => s.start);
   const setHold = useStore((s) => s.setHold);
+  const bestiary = useStore((s) => s.mode === "bestiary");
+  const playCall = useStore((s) => s.playCall);
+  const creature = useStore((s) => s.creature);
   if (started) return null;
   return (
     <div className="start-prompt">
-      <p>Every sound here is produced by simulating air moving through a throat, mouth and nose.</p>
+      <p>{bestiary ? "Each animal's sound comes from a simulation of its own sound source and airway." : "Every sound here is produced by simulating air moving through a throat, mouth and nose."}</p>
       <button
         className="primary large"
         disabled={starting}
         onClick={async () => {
           await start();
-          setHold(true);
+          const first = creatureById(creature)?.calls[0];
+          if (bestiary && first) playCall(first.id);
+          else if (!bestiary) setHold(true);
         }}
       >
-        {starting ? "Starting…" : "Breathe in and start"}
+        {starting ? "Starting…" : bestiary ? "Start and hear a call" : "Breathe in and start"}
       </button>
-      {err ? <p className="error">Audio could not start: {err}. Reload the page and try again.</p> : <p className="hint">Then drag the tongue, lips or jaw, or play the keys.</p>}
+      {err ? (
+        <p className="error">Audio could not start: {err}. Reload the page and try again.</p>
+      ) : (
+        <p className="hint">{bestiary ? "Then play its calls, or hold the keys to sustain it at a pitch." : "Then drag the tongue, lips or jaw, or play the keys."}</p>
+      )}
     </div>
   );
 }
@@ -114,6 +133,7 @@ function StartPrompt() {
 function Deck() {
   const mode = useStore((s) => s.mode);
   if (mode === "speak") return <SpeakPanel />;
+  if (mode === "bestiary") return <BestiaryPanel />;
   return (
     <>
       <section className="deck">
@@ -131,30 +151,61 @@ function Deck() {
   );
 }
 
+function Instruments() {
+  const bestiary = useStore((s) => s.mode === "bestiary");
+  if (bestiary)
+    return (
+      <aside className="instruments">
+        <figure className="instrument">
+          <figcaption>Spectrogram</figcaption>
+          <Spectrogram />
+        </figure>
+        <figure className="instrument">
+          <figcaption>Waveform, three cycles</figcaption>
+          <Scope />
+        </figure>
+        <figure className="instrument">
+          <figcaption>Airway, each tube unrolled</figcaption>
+          <CreatureTubes />
+        </figure>
+      </aside>
+    );
+  return (
+    <aside className="instruments">
+      <figure className="instrument">
+        <figcaption>Tube, glottis to lips</figcaption>
+        <TubeView />
+      </figure>
+      <figure className="instrument">
+        <figcaption>Vocal folds, slowed down</figcaption>
+        <Stroboscope />
+      </figure>
+      <figure className="instrument">
+        <figcaption>Spectrum and resonances</figcaption>
+        <SpectrumView />
+      </figure>
+    </aside>
+  );
+}
+
+function Viewport() {
+  const bestiary = useStore((s) => s.mode === "bestiary");
+  return (
+    <section className="viewport" aria-label={bestiary ? "Live creature airway" : "Live vocal tract"}>
+      {bestiary ? <CreatureView /> : <AnatomyView />}
+      <StartPrompt />
+      <ViewToggles />
+    </section>
+  );
+}
+
 export function App() {
   return (
     <div className="app">
       <TopBar />
       <main className="stage">
-        <section className="viewport" aria-label="Live vocal tract">
-          <AnatomyView />
-          <StartPrompt />
-          <ViewToggles />
-        </section>
-        <aside className="instruments">
-          <figure className="instrument">
-            <figcaption>Tube, glottis to lips</figcaption>
-            <TubeView />
-          </figure>
-          <figure className="instrument">
-            <figcaption>Vocal folds, slowed down</figcaption>
-            <Stroboscope />
-          </figure>
-          <figure className="instrument">
-            <figcaption>Spectrum and resonances</figcaption>
-            <SpectrumView />
-          </figure>
-        </aside>
+        <Viewport />
+        <Instruments />
       </main>
       <Deck />
     </div>

@@ -5,6 +5,8 @@
 import { HumanVoice } from "../engine/voice/humanVoice.ts";
 import { BODY_MALE, BODY_FEMALE, BODY_CHILD, type HumanBody } from "../engine/anatomy/human.ts";
 import type { ToWorklet, FromWorklet, BodyName } from "./protocol.ts";
+import { CreatureVoice } from "../engine/creatures/voice.ts";
+import { creatureById } from "../engine/creatures/index.ts";
 
 // Minimal AudioWorkletGlobalScope typings
 declare const sampleRate: number;
@@ -24,12 +26,18 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   private blocks = 0;
   private load = 0;
   private pendingBody: BodyName | null = null;
+  private creature: CreatureVoice | null = null;
+  private pendingCreature: string | null = null;
+  /** params and a call that arrived while a creature switch was pending */
+  private pendingCreatureParams: Record<string, number> = {};
+  private pendingCall: { id: string; pitch?: number; amp?: number } | null = null;
+  private gateLevel = 0;
 
   constructor() {
     super();
     this.voice = this.makeVoice("male");
     this.port.onmessage = (e: MessageEvent<ToWorklet>) => this.onMessage(e.data);
-    this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+    this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: "human" });
   }
 
   private makeVoice(body: BodyName): HumanVoice {
@@ -54,7 +62,26 @@ class ChimeraProcessor extends AudioWorkletProcessor {
         this.voice.setSource(m.values);
         break;
       case "gate":
+        this.gateLevel = m.level;
         this.voice.setGate(m.level);
+        this.creature?.setGate(m.level);
+        break;
+      case "creature":
+        this.pendingCreature = m.id;
+        this.pendingCreatureParams = { ...(m.params ?? {}) };
+        this.pendingCall = null;
+        break;
+      case "cparams":
+        if (this.pendingCreature !== null) Object.assign(this.pendingCreatureParams, m.values);
+        else this.creature?.setParams(m.values);
+        break;
+      case "call":
+        if (this.pendingCreature !== null) this.pendingCall = { id: m.id, pitch: m.pitch, amp: m.amp };
+        else this.creature?.playCall(m.id, m.pitch, m.amp);
+        break;
+      case "stopCall":
+        if (this.pendingCreature !== null) this.pendingCall = null;
+        else this.creature?.stopCall();
         break;
       case "telemetry":
         this.telemetryOn = m.enabled;
@@ -90,12 +117,29 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       this.voice.setSource({ ...prev.source, f0: DEFAULT_F0[this.body] });
       this.voice.setArticulation({ ...prev.artic.target }, prev.artic.tipFree);
       this.voice.setGate(prev.gate > 0.5 ? 1 : 0);
-      this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+      this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
+    }
+    if (this.pendingCreature !== null) {
+      const id = this.pendingCreature;
+      this.pendingCreature = null;
+      if (id === "human") this.creature = null;
+      else {
+        const def = creatureById(id);
+        if (def) {
+          this.creature = new CreatureVoice(def, sampleRate, this.pendingCreatureParams);
+          this.creature.setGate(this.gateLevel);
+          if (this.pendingCall) this.creature.playCall(this.pendingCall.id, this.pendingCall.pitch, this.pendingCall.amp);
+        }
+      }
+      this.pendingCreatureParams = {};
+      this.pendingCall = null;
+      this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
     }
     const ch0 = out[0];
     const t0 = Date.now();
     try {
-      this.voice.render(ch0, 0, ch0.length);
+      if (this.creature) this.creature.render(ch0, 0, ch0.length);
+      else this.voice.render(ch0, 0, ch0.length);
     } catch (err) {
       ch0.fill(0);
       this.post({ type: "error", message: String(err) });
@@ -105,7 +149,8 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     const budget = (ch0.length / sampleRate) * 1000;
     this.load += 0.05 * (dt / budget - this.load);
     if (this.telemetryOn && ++this.blocks % 6 === 0) {
-      this.post({ type: "telemetry", t: this.voice.telemetry(), load: this.load, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+      if (this.creature) this.post({ type: "ctelemetry", t: this.creature.telemetry(), load: this.load });
+      else this.post({ type: "telemetry", t: this.voice.telemetry(), load: this.load, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
     }
     return true;
   }

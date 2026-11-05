@@ -66,6 +66,43 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   await page.locator("button.ipa", { hasText: "ʃ" }).first().click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${outDir}/${tag}-4-pad.png` });
+  // bestiary: every creature, its first call, a key in held-voice mode, and the sustain toggle
+  await page.getByRole("radio", { name: "Bestiary" }).click();
+  await page.waitForTimeout(300);
+  const names = await page.locator(".specimen-name").allTextContents();
+  for (const [i, name] of names.entries()) {
+    await page.locator(".specimen").nth(i).click();
+    await page.waitForTimeout(250);
+    await page.locator(".call").first().click();
+    await page.waitForTimeout(1300);
+    const slug = name.toLowerCase().replace(/[^a-z]+/g, "-");
+    if (tag === "desktop" || i === 0) await page.screenshot({ path: `${outDir}/${tag}-5-${slug}.png`, fullPage: tag !== "desktop" });
+    const state = await page.evaluate(() => {
+      // @ts-expect-error debug handle
+      const e = window.__chimeraEngine;
+      const t = e?.latestCreature?.t;
+      return t ? { id: t.id, rms: t.outRms, call: t.call, load: e.load } : null;
+    });
+    logs.push(`[${tag}] creature ${name}: ${JSON.stringify(state)}`);
+  }
+  await page.keyboard.down("g");
+  await page.waitForTimeout(600);
+  const held = await page.evaluate(() => {
+    // @ts-expect-error debug handle
+    const t = window.__chimeraEngine?.latestCreature?.t;
+    return t ? { gate: t.gate, rms: t.outRms } : null;
+  });
+  await page.keyboard.up("g");
+  logs.push(`[${tag}] held key: ${JSON.stringify(held)}`);
+  // back to the human voice
+  await page.getByRole("radio", { name: "Play" }).click();
+  await page.waitForTimeout(600);
+  const human = await page.evaluate(() => {
+    // @ts-expect-error debug handle
+    const e = window.__chimeraEngine;
+    return { human: !!e?.latest, creature: !!e?.latestCreature };
+  });
+  logs.push(`[${tag}] back to play: ${JSON.stringify(human)}`);
   await page.close();
 }
 
@@ -73,4 +110,4 @@ await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
-console.log(logs.filter((l) => /load|warn|transcription/i.test(l)).slice(0, 20).join("\n"));
+console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to/i.test(l)).slice(0, 40).join("\n"));

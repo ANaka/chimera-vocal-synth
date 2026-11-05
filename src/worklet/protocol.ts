@@ -3,6 +3,7 @@ import type { HumanArtic } from "../engine/anatomy/human.ts";
 import type { VoiceSource, VoiceTelemetry } from "../engine/voice/humanVoice.ts";
 import type { Segment, PlannedSegment } from "../engine/phonetics/planner.ts";
 import type { Gesture } from "../engine/control/score.ts";
+import type { CreatureTelemetry } from "../engine/creatures/voice.ts";
 
 export interface PhraseMsg {
   segments: Segment[];
@@ -20,7 +21,12 @@ export type ToWorklet =
   | { type: "telemetry"; enabled: boolean }
   /** gestures planned on the main thread with times relative to "now" (the worklet adds its clock) */
   | { type: "schedule"; gestures: Gesture[]; segments: PlannedSegment[]; end: number; id: number; replace: boolean }
-  | { type: "stopSpeech" };
+  | { type: "stopSpeech" }
+  /** switch the active voice: "human" or a creature id */
+  | { type: "creature"; id: string; params?: Record<string, number> }
+  | { type: "cparams"; values: Record<string, number> }
+  | { type: "call"; id: string; pitch?: number; amp?: number }
+  | { type: "stopCall" };
 
 export interface TelemetryMessage {
   type: "telemetry";
@@ -40,4 +46,15 @@ export interface PlannedMessage {
   segments: PlannedSegment[];
 }
 
-export type FromWorklet = { type: "ready"; sampleRate: number; body: BodyName; nPh: number; nOr: number } | TelemetryMessage | PlannedMessage | { type: "error"; message: string };
+export interface CreatureTelemetryMessage {
+  type: "ctelemetry";
+  t: CreatureTelemetry;
+  load: number;
+}
+
+export type FromWorklet =
+  | { type: "ready"; sampleRate: number; body: BodyName; nPh: number; nOr: number; creature: string }
+  | TelemetryMessage
+  | CreatureTelemetryMessage
+  | PlannedMessage
+  | { type: "error"; message: string };
