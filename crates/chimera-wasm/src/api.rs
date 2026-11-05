@@ -75,6 +75,7 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
                 "glottisPort": a.glottis_port,
             }))
         }
+        "restTip" => to_json(&chimera::anatomy::human::rest_tip(arg(req, "jaw")?, arg(req, "tbX")?, arg(req, "tbY")?)),
         "frame" => {
             let a: HumanArtic = arg(req, "artic")?;
             let m = model(st, req)?;
