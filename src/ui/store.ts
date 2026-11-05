@@ -282,7 +282,7 @@ export const useStore = create<State>((set, get) => ({
     const held = get().heldNotes.filter((n) => n !== midi);
     set({ heldNotes: held });
     const s = get();
-    if (s.mode === "beatbox" && !held.length) s.setArtic({ lipAp: beatReady(s.body).lipAp, velum: 0 });
+    if (s.mode === "beatbox" && !held.length) s.setArtic({ lipAp: beatReady(s.body).lipAp, velum: NEUTRAL.velum });
     if (held.length) {
       // fall back to the most recent note still held (legato)
       const last = held[held.length - 1];

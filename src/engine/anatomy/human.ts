@@ -79,7 +79,7 @@ export const NEUTRAL: HumanArtic = {
   lipProt: 0.2,
   lipWidth: 0.5,
   labiodental: 0,
-  velum: 0,
+  velum: -0.15,
   larynx: 0,
   epilarynx: 0,
   ventricular: 0,

@@ -18,20 +18,27 @@ export interface ArticSpec {
   hz: number;
 }
 
+/** keys blended as base + min(1, w/2)·(value − base) instead of a weighted mean */
+const BOUNDED = new Set<ArticKey>(["velum"]);
+
 export const ARTIC_SPECS: Record<ArticKey, ArticSpec> = {
-  jaw: { min: -0.1, max: 2.6, hz: 5 },
-  tbX: { min: 1.0, max: 4.8, hz: 6.5 },
-  tbY: { min: 4.8, max: 9.2, hz: 6.5 },
+  // vowel articulators fast enough to reach their targets in Klatt-length vowels (VocalTractLab's
+  // fitted time constants are mostly 5–40 ms; second-order ω = 2π·hz here)
+  jaw: { min: -0.1, max: 2.6, hz: 10 },
+  tbX: { min: 1.0, max: 4.8, hz: 12 },
+  tbY: { min: 4.8, max: 9.2, hz: 12 },
   ttX: { min: 3.5, max: 8.0, hz: 13 },
   ttY: { min: 5.0, max: 10.8, hz: 13 },
   ttCurl: { min: 0, max: 1, hz: 9 },
-  root: { min: -1, max: 1, hz: 5 },
+  root: { min: -1, max: 1, hz: 9 },
   lipAp: { min: -0.4, max: 2.4, hz: 11 },
-  lipProt: { min: -0.2, max: 1.5, hz: 7 },
-  lipWidth: { min: 0, max: 1, hz: 7 },
+  lipProt: { min: -0.2, max: 1.5, hz: 11 },
+  lipWidth: { min: 0, max: 1, hz: 11 },
   labiodental: { min: 0, max: 1, hz: 10 },
-  velum: { min: 0, max: 1.4, hz: 5 },
-  larynx: { min: -1.6, max: 1.6, hz: 3.5 },
+  // the velum moves fast (it must seal within a few tens of ms after a nasal) and rests a
+  // little past closed, so a closure seals in finite time instead of creeping to zero
+  velum: { min: -0.25, max: 1.4, hz: 12 },
+  larynx: { min: -1.6, max: 1.6, hz: 8 },
   epilarynx: { min: 0, max: 1, hz: 6 },
   ventricular: { min: 0, max: 1, hz: 6 },
   lateral: { min: 0, max: 1, hz: 10 },
@@ -98,8 +105,15 @@ export class ArticulatorBank {
       if (blend) {
         const b = blend(k);
         if (b && b.weight > 0) {
-          const bw = baseWeight;
-          tgt = (tgt * bw + b.value * b.weight) / (bw + b.weight);
+          if (BOUNDED.has(k)) {
+            // keys only consonant gestures touch (the velum): follow the gesture's own ramps
+            // (with the weighted mean, a strength-4 gesture at 5 % activation already took 80 %
+            // of the step, so nasality spread far into neighbouring vowels)
+            tgt += Math.min(1, b.weight / 2) * (b.value - tgt);
+          } else {
+            const bw = baseWeight;
+            tgt = (tgt * bw + b.value * b.weight) / (bw + b.weight);
+          }
           sp *= b.speed;
         }
       }

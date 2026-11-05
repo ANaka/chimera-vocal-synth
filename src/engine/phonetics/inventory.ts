@@ -48,7 +48,9 @@ const DENT_STOP = { ttX: 6.85, ttY: 9.0 };
 const POSTALV_STOP = { ttX: 5.75, ttY: 10.0 };
 const RETRO_STOP = { ttX: 5.45, ttY: 10.05, ttCurl: 0.95 };
 const PAL_STOP = { tbX: 3.75, tbY: 8.45 };
-const VEL_STOP = { tbX: 2.3, tbY: 7.85 };
+// velar closure: aimed past contact (the contact model caps penetration) so it seals wherever the
+// vowel puts the tongue body front–back, and the jaw rises part-way (open-vowel contexts leaked)
+const VEL_STOP = { tbX: 2.3, tbY: 8.35, jaw: 0.7 };
 const UVU_STOP = { tbX: 1.55, tbY: 7.6 };
 
 const BASE: PhonemeDef[] = [

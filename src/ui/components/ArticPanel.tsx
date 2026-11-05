@@ -16,7 +16,7 @@ export function ArticPanel() {
       <Slider label="Jaw opening" value={a.jaw} min={0} max={2.4} onChange={(v) => set({ jaw: v })} format={cm} />
       <Slider label="Tongue root" value={a.root} min={-0.9} max={0.9} onChange={(v) => set({ root: v })} format={(v) => (v >= 0 ? `+${v.toFixed(2)} cm` : `${v.toFixed(2)} cm`)} />
       <Slider label="Tip curl" value={a.ttCurl} min={0} max={1} onChange={(v) => set({ ttCurl: v })} format={pct} />
-      <Slider label="Soft palate opening" value={a.velum} min={0} max={1.2} onChange={(v) => set({ velum: v })} format={(v) => `${v.toFixed(2)} cm²`} />
+      <Slider label="Soft palate opening" value={a.velum} min={-0.25} max={1.2} onChange={(v) => set({ velum: v })} format={(v) => (v <= 0 ? "Closed" : `${v.toFixed(2)} cm²`)} />
       <Slider label="Larynx height" value={a.larynx} min={-1.5} max={1.5} onChange={(v) => set({ larynx: v })} format={(v) => (v >= 0 ? `+${v.toFixed(2)} cm` : `${v.toFixed(2)} cm`)} />
       <Slider label="Twang (epilarynx)" value={a.epilarynx} min={0} max={1} onChange={(v) => set({ epilarynx: v })} format={pct} />
       <Slider label="False folds" value={a.ventricular} min={0} max={1} onChange={(v) => set({ ventricular: v })} format={pct} />

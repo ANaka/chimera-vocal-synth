@@ -135,7 +135,7 @@ export const BEAT_SOUNDS: BeatSound[] = [
     role: "snare",
     airstream: "ejective",
     hint: "Back of the tongue bursts on larynx-compressed air",
-    latency: 0.009,
+    latency: -0.0165,
     build: (body, o) => [...snap(oral(body, "k", -0.08, 0, 2, "K", { jaw: 0.35 }), 4, 0.008), ...ejective(-0.08, o.accent, "K")],
   },
   {
@@ -144,7 +144,7 @@ export const BEAT_SOUNDS: BeatSound[] = [
     role: "snare",
     airstream: "ingressive",
     hint: "A sharp breath in past the back of the tongue",
-    latency: -0.002,
+    latency: -0.014,
     build: (body, o) => [
       ...snap(oral(body, "k", -0.06, 0, 2, "^K", { jaw: 0.35 }), 4, 0.008),
       ...after(oral(body, "x", 0.012, 0.085, 1.4, "^K", { tbY: 7.35 })),
@@ -161,8 +161,10 @@ export const BEAT_SOUNDS: BeatSound[] = [
     hint: "Tongue seals a pocket, hollows it and pops",
     latency: -0.007,
     build: (body) => [
-      ...snap(oral(body, "t", -0.12, 0, 2, "!")),
-      ...oral(body, "k", -0.12, 0.035, 2, "!"),
+      // the tip seals without the alveolar's fronted tongue body (that would close the pocket)
+      ...snap(oral(body, "t", -0.12, 0, 2, "!")).filter((x) => x.targets.tbX === undefined),
+      // the back seal sits low, leaving a pocket for the dorsum to hollow
+      ...oral(body, "k", -0.12, 0.035, 2, "!", { tbY: 7.85, jaw: 0.4 }),
       g(-0.03, 0.006, 0.04, 0.03, 40, { dorsum: 1 }, "!", 2),
     ],
   },
@@ -172,7 +174,7 @@ export const BEAT_SOUNDS: BeatSound[] = [
     role: "perc",
     airstream: "click",
     hint: "Sealed lips, the jaw drops, the lips pop open",
-    latency: 0.013,
+    latency: -0.001,
     build: (body) => [
       // a light seal (pressing the lips squeezes the pocket before the suction starts)
       ...snap(oral(body, "p", -0.12, 0, 2, "P!", { lipAp: -0.08 }), 5, 0.006),
@@ -187,7 +189,7 @@ export const BEAT_SOUNDS: BeatSound[] = [
     role: "hat",
     airstream: "pulmonic",
     hint: "Back-of-tongue release into a long rounded hiss",
-    latency: -0.001,
+    latency: -0.013,
     build: (body, o) => {
       const end = Math.max(0.14, Math.min(0.34, o.len * 2));
       return [...snap(oral(body, "k", -0.06, 0, 2, "kch"), 4, 0.008), ...after(oral(body, "ʃ", 0.014, end, 1.4, "kch")), ...blow(-0.035, end, 1.45 * o.accent, 0.45, "kch", 0.14)];
@@ -199,7 +201,7 @@ export const BEAT_SOUNDS: BeatSound[] = [
     role: "bass",
     airstream: "voiced",
     hint: "Hummed bass note through the nose",
-    latency: 0.012,
+    latency: 0.0056,
     build: (body, o) => {
       const end = Math.max(0.06, o.len * 0.92);
       return [
