@@ -42,7 +42,9 @@ export const articulatorSlots: SlotsFn = (m, a, f, formants) => [
   f.velumPort > 0.02 ? { label: "Soft palate", value: f.velumPort.toFixed(2), unit: "cm²", color: V.white } : { label: "Soft palate", value: "Shut", color: V.white },
 ];
 
-export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn }) {
+export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormants?: boolean }) {
+  const formantsRef = useRef(props.showFormants ?? true);
+  formantsRef.current = props.showFormants ?? true;
   const slotsRef = useRef<SlotsFn>(props.slots ?? articulatorSlots);
   slotsRef.current = props.slots ?? articulatorSlots;
   const infoRef = useRef<InfoFn>(props.info ?? tractInfo);
@@ -96,7 +98,7 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn }) {
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        r.draw(ctx, m, f, a, tele, st.view, { hover: hoverRef.current, drag: dragRef.current?.id ?? null, dt, formants, slots: slotsRef.current(m, a, f, formants, tele), info: info.map((s) => s.toUpperCase()) });
+        r.draw(ctx, m, f, a, tele, st.view, { hover: hoverRef.current, drag: dragRef.current?.id ?? null, dt, formants: formantsRef.current ? formants : [], slots: slotsRef.current(m, a, f, formants, tele), info: info.map((s) => s.toUpperCase()) });
         glow.apply(canvas, ctx, dpr);
       }
       raf = requestAnimationFrame(loop);

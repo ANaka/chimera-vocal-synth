@@ -17,7 +17,7 @@ import { Spectrogram } from "./components/Spectrogram.tsx";
 import { Scope } from "./components/Scope.tsx";
 import { CreatureTubes } from "./components/CreatureTubes.tsx";
 import { creatureById } from "../wasm/engine.ts";
-import { BeatboxPanel, BeatOverlay } from "./components/BeatboxPanel.tsx";
+import { BeatboxRight, BeatOverlay, beatInfo, beatSlots } from "./components/BeatboxPanel.tsx";
 import { SingRight, singInfo } from "./components/SingPanel.tsx";
 import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
@@ -157,7 +157,7 @@ function LeftScreen() {
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >
-      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : mode === "sing" ? <AnatomyView info={singInfo} /> : <AnatomyView />}
+      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : mode === "sing" ? <AnatomyView info={singInfo} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
       {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
     </Screen>
@@ -213,7 +213,6 @@ function LegacyRight() {
 function Deck() {
   const mode = useStore((s) => s.mode);
   if (mode === "bestiary") return <BestiaryPanel />;
-  if (mode === "beatbox") return <BeatboxPanel />;
   return null;
 }
 
@@ -224,7 +223,7 @@ export function App() {
       <TopBar />
       <main className={`wall wall-${mode}`}>
         <LeftScreen />
-        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : <LegacyRight />}
+        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : mode === "beatbox" ? <BeatboxRight /> : <LegacyRight />}
       </main>
       <Deck />
     </div>
