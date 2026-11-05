@@ -113,7 +113,7 @@ export function planNoteOn(syl: Syllable, midi: number, o: { body: string; vibra
   segs.push(...consonants(syl.onset, o.body, 0.7));
   const parts = diphthongParts(syl.nucleus.ipa);
   segs.push({ ipa: parts ? parts[0] : syl.nucleus.ipa, dur: HOLD, f0: hz, stress: 1 });
-  const plan = planUtterance(segs, { body: o.body, t0: LIVE_T0, f0: hz, intonation: "flat" });
+  const plan = planUtterance(segs, { body: o.body, t0: LIVE_T0, f0: hz, intonation: "flat", openEnd: true });
   const vowel = plan.segments[plan.segments.length - 1];
   const out: Gesture[] = plan.gestures.map((g) => ({ ...g, tag: g.targets.f0 !== undefined ? o.tag + 1 : o.tag }));
   out.push(vibratoGesture(vowel.t0, vowel.t1, o.vibrato, o.tag + 1));

@@ -431,7 +431,11 @@ export class HumanVocalTract {
         const near = 1 - smoothstep(win, 2 * win, ad);
         const regime = 1 - smoothstep(0.15 * k, 0.6 * k, c.d);
         const w = near * regime;
-        const dm = Math.min(g.d, dc);
+        // the parabola also caps the ray gap; the cap fades out at the edges of the window and
+        // of the contact regime, so the gap stays continuous as the tongue moves (a cap that
+        // switched on at full strength made the area jump, heard as a tick)
+        const cap = (1 - smoothstep(1.5 * win, 2 * win, ad)) * (1 - smoothstep(0.45 * k, 0.6 * k, c.d));
+        const dm = g.d + (Math.min(g.d, dc) - g.d) * cap;
         g.d = dm + (dc - dm) * w;
       };
       for (const g of grid) {

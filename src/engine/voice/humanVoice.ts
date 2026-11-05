@@ -89,6 +89,8 @@ export class HumanVoice {
   /** breath gate 0..1 (note on/off) */
   gate = 0;
   private gateTarget = 0;
+  /** time left (s) during which a release of the gate follows the score's own breath ramp */
+  private scoreBreathHold = 0;
   private pLung = 0;
   private f0 = DEFAULT_SOURCE.f0;
   outputGain = 5.5e-7;
@@ -314,9 +316,11 @@ export class HumanVoice {
     // a negative breath gesture (ingressive: inward K snares, gasps) overrides the performer's breath
     const scoreBreath = breathVal * breathAct;
     const gateGoal = scoreBreath < 0 ? scoreBreath : Math.max(this.gateTarget, scoreBreath);
-    // a score shapes its own breath ramps (beatbox hits end their breath abruptly); the slow
+    // a score shapes its own breath ramps (beatbox hits end their breath abruptly, phrases end
+    // into silence), including the moments just after its breath gesture has ended; the slow
     // release is for the performer's note-offs
-    const tau = gateGoal > this.gate ? 0.025 : breathAct > 0 ? 0.02 : 0.07;
+    this.scoreBreathHold = breathAct > 0 ? 0.15 : Math.max(0, this.scoreBreathHold - dt);
+    const tau = gateGoal > this.gate ? 0.025 : this.scoreBreathHold > 0 ? 0.02 : 0.07;
     this.gate += (gateGoal - this.gate) * (1 - Math.exp(-dt / tau));
     this.pLung = this.source.pressure * CM_H2O * this.gate;
     // pitch glide

@@ -112,7 +112,8 @@ function StartPrompt() {
   const copy = {
     bestiary: ["Each animal's sound comes from a simulation of its own sound source and airway.", "Start and hear a call", "Then play its calls, or hold the keys to sustain it at a pitch."],
     beatbox: ["Every drum here is a mouth sound: lips, tongue and larynx pushing, sealing and sucking air.", "Start the beat", "Then edit the pattern, tap the pads, or hum a bass note on the keys."],
-  }[mode as "bestiary" | "beatbox"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
+    speak: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start the voice", "Then type something and press Speak, or tap a sound in the chart."],
+  }[mode as "bestiary" | "beatbox" | "speak"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
   return (
     <div className="start-prompt">
       <p>{copy[0]}</p>
@@ -124,7 +125,7 @@ function StartPrompt() {
           const first = creatureById(creature)?.calls[0];
           if (mode === "bestiary" && first) playCall(first.id);
           else if (mode === "beatbox") setBeatPlaying(true);
-          else setHold(true);
+          else if (mode === "play") setHold(true);
         }}
       >
         {starting ? "Starting…" : copy[1]}

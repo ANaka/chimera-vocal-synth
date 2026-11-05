@@ -63,6 +63,19 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   await page.screenshot({ path: `${outDir}/${tag}-3-speak.png`, fullPage: true });
   const trans = await page.locator(".transcription").textContent();
   logs.push(`[${tag}] transcription: ${trans}`);
+  // speech breathes by itself: Play's held breath must not drone on once the phrase is over
+  const speechRms: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    await page.waitForTimeout(250);
+    speechRms.push(
+      await page.evaluate(() => {
+        // @ts-expect-error debug handle
+        return window.__chimeraEngine?.latest?.t?.outRms ?? -1;
+      }),
+    );
+  }
+  logs.push(`[${tag}] speech rms then silence ${speechRms.map((r) => r.toFixed(4)).join(",")}`);
+  if (!(Math.max(...speechRms.slice(-3)) < 1e-3)) errors.push(`[${tag}] voice still sounding after the phrase: ${speechRms.slice(-3).join(",")}`);
   await page.locator("button.ipa", { hasText: "ʃ" }).first().click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${outDir}/${tag}-4-pad.png` });
@@ -132,4 +145,4 @@ await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
-console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox/i.test(l)).slice(0, 40).join("\n"));
+console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox|silence/i.test(l)).slice(0, 40).join("\n"));

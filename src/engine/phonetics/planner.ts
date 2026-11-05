@@ -33,6 +33,8 @@ export interface PlanOptions {
   intonation?: "statement" | "question" | "flat";
   /** pitch excursion for stressed syllables (fraction) */
   accent?: number;
+  /** the last segment is held open-ended (a sung note): no end-of-breath release */
+  openEnd?: boolean;
 }
 
 export interface PlannedSegment {
@@ -199,7 +201,16 @@ export function planUtterance(input: Segment[], o: PlanOptions): Plan {
     void prevVowel;
   });
   // ---- breath: on through the utterance
-  gestures.push({ t0: o.t0 + 0.04, t1: end, rampIn: 0.04, rampOut: 0.07, strength: 1, targets: { breath: 1 }, label: "breath" });
+  gestures.push({ t0: o.t0 + 0.04, t1: end, rampIn: 0.04, rampOut: o.openEnd ? 0.07 : 0.05, strength: 1, targets: { breath: 1 }, label: "breath" });
+  // ---- end of the breath group: the folds part as the breath stops, so a final obstruent is
+  // released into silence instead of into an added vowel ("cat-uh"). After a vowel or sonorant
+  // they part once the pressure has fallen, so the voice fades out instead of ending in an [h].
+  if (!o.openEnd) {
+    const last = segs[segs.length - 1];
+    const sonorant = !!last?.vowel || ["nasal", "approximant", "lateral", "tap", "trill"].includes(last?.def?.manner ?? "");
+    const at = end + (sonorant ? 0.045 : 0.015);
+    gestures.push({ t0: at, t1: end + 0.1, rampIn: 0.03, rampOut: 0.06, strength: 6, targets: { abduction: 0.22 }, label: "exhale" });
+  }
   // ---- intonation: pitch targets on vowels
   const f0 = o.f0 ?? 110;
   const accent = o.accent ?? 0.14;

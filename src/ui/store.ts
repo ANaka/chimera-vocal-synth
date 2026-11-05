@@ -132,6 +132,8 @@ export const useStore = create<State>((set, get) => ({
       get().setBeatPlaying(false);
       engine.setMic(false);
     }
+    // speech breathes by itself: a held breath would drone under it and through every pause
+    if (m === "speak") set({ hold: false });
     if (m === "beatbox") {
       // a beatboxer waits with the jaw nearly closed; the sounds bring their own breath
       set({ hold: false });
