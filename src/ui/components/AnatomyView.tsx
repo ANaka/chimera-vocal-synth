@@ -11,6 +11,15 @@ import type { TelemetryMessage } from "../../worklet/protocol.ts";
 
 /** What the four readouts under the chin show; a mode can pass its own. */
 export type SlotsFn = (m: VoiceModel, a: HumanArtic, f: HumanFrame, formants: number[], tele: TelemetryMessage | null) => Slot[];
+/** The small lines under the formants; a mode can pass its own. */
+export type InfoFn = (m: VoiceModel, f: HumanFrame, tele: TelemetryMessage | null) => string[];
+
+/** the tract's length and mouth opening, then the live pitch and lungs */
+export const tractInfo: InfoFn = (_m, f, tele) => {
+  const info = [`Tract ${f.length.toFixed(1)} cm`, `Mouth ${f.lipArea.toFixed(1)} cm²`];
+  if (tele) info.push(`F0 ${tele.t.f0.toFixed(1)} Hz`, `Lungs ${tele.t.pLung.toFixed(1)} cmH₂O`);
+  return info;
+};
 
 /** the calibrated vowel nearest to (F1, F2), same metric as the vowel map */
 export function nearestVowel(m: VoiceModel, F1: number, F2: number): string {
@@ -33,9 +42,11 @@ export const articulatorSlots: SlotsFn = (m, a, f, formants) => [
   f.velumPort > 0.02 ? { label: "Soft palate", value: f.velumPort.toFixed(2), unit: "cm²", color: V.white } : { label: "Soft palate", value: "Shut", color: V.white },
 ];
 
-export function AnatomyView(props: { slots?: SlotsFn }) {
+export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn }) {
   const slotsRef = useRef<SlotsFn>(props.slots ?? articulatorSlots);
   slotsRef.current = props.slots ?? articulatorSlots;
+  const infoRef = useRef<InfoFn>(props.info ?? tractInfo);
+  infoRef.current = props.info ?? tractInfo;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const model = useModel();
@@ -79,8 +90,7 @@ export function AnatomyView(props: { slots?: SlotsFn }) {
       if (m && w > 0 && h > 0) {
         const f = m.frame(a);
         if (++fTick % 4 === 0 || formants.length === 0) formants = m.transfer(a).formants;
-        const info = [`Tract ${f.length.toFixed(1)} cm`, `Mouth ${f.lipArea.toFixed(1)} cm²`];
-        if (tele) info.push(`F0 ${tele.t.f0.toFixed(1)} Hz`, `Lungs ${tele.t.pLung.toFixed(1)} cmH₂O`);
+        const info = infoRef.current(m, f, tele);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalCompositeOperation = "source-over";
         ctx.fillStyle = "#000";

@@ -195,6 +195,9 @@ export function ipaGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, ip
     case "ʊ": return stroke(`M${f(x - r * 1.15)} ${f(y - xh)}Q${f(x - r * 0.5)} ${f(y - xh * 0.9)} ${f(x - r * 0.75)} ${f(cy)}Q${f(x - r)} ${f(y)} ${f(x)} ${f(y)}Q${f(x + r)} ${f(y)} ${f(x + r * 0.75)} ${f(cy)}Q${f(x + r * 0.5)} ${f(y - xh * 0.9)} ${f(x + r * 1.15)} ${f(y - xh)}`);
     case "ʌ": return stroke(`M${f(x - r)} ${f(y)}L${f(x)} ${f(y - xh)}L${f(x + r)} ${f(y)}`);
     case "ɤ": return stroke(`M${f(x - r)} ${f(y - xh)}L${f(x)} ${f(y - xh * 0.1)}L${f(x + r)} ${f(y - xh)}M${f(x)} ${f(y - xh * 0.1)}Q${f(x - r * 0.5)} ${f(y + xh * 0.4)} ${f(x)} ${f(y + xh * 0.45)}Q${f(x + r * 0.5)} ${f(y + xh * 0.4)} ${f(x)} ${f(y - xh * 0.1)}`);
+    case "ʃ": return stroke(`M${f(x + r * 0.9)} ${f(y - xh * 1.9)}Q${f(x)} ${f(y - xh * 2.2)} ${f(x)} ${f(y - xh)}L${f(x)} ${f(y + xh * 0.3)}Q${f(x)} ${f(y + xh * 0.95)} ${f(x - r * 0.9)} ${f(y + xh * 0.7)}`);
+    case "θ": return stroke(`M${f(x + r)} ${f(y - xh)}A${f(r)} ${f(xh)} 0 1 0 ${f(x - r)} ${f(y - xh)}A${f(r)} ${f(xh)} 0 1 0 ${f(x + r)} ${f(y - xh)}M${f(x - r)} ${f(y - xh)}L${f(x + r)} ${f(y - xh)}`);
+    case "ŋ": return stroke(`M${f(x - r)} ${f(y)}L${f(x - r)} ${f(y - xh)}M${f(x - r)} ${f(y - xh * 0.6)}Q${f(x - r * 0.2)} ${f(y - xh * 1.1)} ${f(x + r * 0.6)} ${f(y - xh * 0.9)}Q${f(x + r)} ${f(y - xh * 0.75)} ${f(x + r)} ${f(y - xh * 0.4)}L${f(x + r)} ${f(y + xh * 0.4)}Q${f(x + r)} ${f(y + xh * 0.85)} ${f(x + r * 0.3)} ${f(y + xh * 0.8)}`);
     case "ə": return stroke(`M${f(x - r)} ${f(cy)}L${f(x + r)} ${f(cy)}A${f(r)} ${f(xh / 2)} 0 1 1 ${f(x - r * 0.75)} ${f(y - xh * 0.85)}`);
     case "ɐ": return glyph("a", turned);
     case "ɔ": return glyph("c", mirrored);

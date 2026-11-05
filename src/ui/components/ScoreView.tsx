@@ -1,16 +1,18 @@
 import { useEffect, useRef } from "react";
-import { useCanvasLoop, font } from "../useCanvas.ts";
+import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { currentPlan, onPlan, type SpokenPlan } from "../speech.ts";
 import { activation, type Gesture } from "../../wasm/engine.ts";
-import { C } from "../colors.ts";
+import { V } from "../colors.ts";
+import { beam, beamPts, label, seg, type Pt } from "../render/vector.ts";
 
-const ROWS: { name: string; keys: string[] }[] = [
-  { name: "Lips", keys: ["lipAp", "lipProt", "lipWidth", "labiodental"] },
-  { name: "Tongue tip", keys: ["ttX", "ttY", "ttCurl", "lateral"] },
-  { name: "Tongue body", keys: ["tbX", "tbY", "root"] },
-  { name: "Soft palate", keys: ["velum"] },
-  { name: "Glottis", keys: ["abduction", "closure"] },
+/** rows of the score, coloured like the articulators on the face (lips pink, tongue green, soft palate white, glottis amber) */
+const ROWS: { name: string; keys: string[]; color: string }[] = [
+  { name: "Lips", keys: ["lipAp", "lipProt", "lipWidth", "labiodental"], color: V.pink },
+  { name: "Tongue tip", keys: ["ttX", "ttY", "ttCurl", "lateral"], color: V.green },
+  { name: "Tongue body", keys: ["tbX", "tbY", "root"], color: V.green },
+  { name: "Soft palate", keys: ["velum"], color: V.white },
+  { name: "Glottis", keys: ["abduction", "closure"], color: V.amber },
 ];
 
 function rowOf(g: Gesture): number {
@@ -23,37 +25,31 @@ function rowOf(g: Gesture): number {
   return -1;
 }
 
-/** Gestural score of the current utterance (Articulatory Phonology), with live playhead. */
+/** current time on the plan's clock (s), or -1 when nothing is playing */
+export function planNow(sp: SpokenPlan | null): number {
+  const tele = engine.latest;
+  return sp && sp.offset !== null && tele ? tele.t.clock - sp.offset : -1;
+}
+
+/** Gestural score of the current utterance (Articulatory Phonology), with a live playhead. */
 export function ScoreView() {
   const planRef = useRef<SpokenPlan | null>(currentPlan());
   useEffect(() => onPlan((p) => (planRef.current = p)), []);
-  const ref = useCanvasLoop(({ ctx, w, h }) => {
-    ctx.clearRect(0, 0, w, h);
+  const ref = usePhosphor(({ ctx, w, h }) => {
     const sp = planRef.current;
-    const left = 92, right = w - 8, top = 8, bottom = h - 30;
+    const left = 104, right = w - 14, top = 18, bottom = h - 26;
     const rowH = (bottom - top) / (ROWS.length + 1);
-    ctx.font = font(12);
-    ctx.fillStyle = C.textDim;
-    ROWS.forEach((r, i) => ctx.fillText(r.name, 4, top + rowH * (i + 0.62)));
-    ctx.fillText("Pitch", 4, top + rowH * (ROWS.length + 0.62));
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    for (let i = 0; i <= ROWS.length + 1; i++) {
-      ctx.beginPath();
-      ctx.moveTo(left, top + rowH * i);
-      ctx.lineTo(right, top + rowH * i);
-      ctx.stroke();
-    }
+    ROWS.forEach((r, i) => label(ctx, r.name.toUpperCase(), 14, top + rowH * (i + 0.62), { size: 9, color: r.color, ls: 0.16, alpha: 0.85 }));
+    label(ctx, "PITCH", 14, top + rowH * (ROWS.length + 0.62), { size: 9, color: V.amber, ls: 0.16, alpha: 0.85 });
+    for (let i = 1; i <= ROWS.length + 1; i++) seg(ctx, left, top + rowH * i, right, top + rowH * i, V.frame, 1);
     if (!sp) {
-      ctx.fillStyle = C.textDim;
-      ctx.fillText("Speak something to see its gestures: which articulator moves, when, and how they overlap.", left, h / 2);
+      label(ctx, "SPEAK SOMETHING TO SEE ITS GESTURES: WHICH ARTICULATOR MOVES, WHEN, AND HOW THEY OVERLAP.", left, top + rowH * 2.6, { size: 10, color: V.blueMid, ls: 0.12 });
       return;
     }
     const plan = sp.plan;
     const T0 = -0.05, T1 = plan.end + 0.15;
     const X = (t: number) => left + ((t - T0) / (T1 - T0)) * (right - left);
-    const tele = engine.latest;
-    const now = sp.offset !== null && tele ? tele.t.clock - sp.offset : -1;
-    // gestures
+    const now = planNow(sp);
     const f0s: { t: number; f: number }[] = [];
     for (const g of plan.gestures) {
       if (g.targets.f0 !== undefined) {
@@ -62,66 +58,54 @@ export function ScoreView() {
       }
       const r = rowOf(g);
       if (r < 0) continue;
-      const x0 = X(g.t0 - g.rampIn), x1 = X(g.t1 + g.rampOut);
-      const xa = X(g.t0), xb = X(g.t1);
-      const y = top + rowH * r + rowH * 0.18, hh = rowH * 0.64;
+      const yb = top + rowH * (r + 1) - 3, yt = top + rowH * r + 7;
+      const x0 = X(g.t0 - g.rampIn), xa = X(g.t0), xb = X(g.t1), x1 = X(g.t1 + g.rampOut);
       const isVowel = r === 2 && Object.keys(g.targets).length > 4;
-      const active = now >= g.t0 - g.rampIn && now <= g.t1 + g.rampOut ? activation(g, now) : 0;
-      const base = isVowel ? "154,163,168" : "242,207,91";
-      const grad = ctx.createLinearGradient(x0, 0, x1, 0);
-      const a = isVowel ? 0.28 : 0.5;
-      grad.addColorStop(0, `rgba(${base},0)`);
-      grad.addColorStop(Math.max(0, Math.min(1, (xa - x0) / Math.max(1, x1 - x0))), `rgba(${base},${a})`);
-      grad.addColorStop(Math.max(0, Math.min(1, (xb - x0) / Math.max(1, x1 - x0))), `rgba(${base},${a})`);
-      grad.addColorStop(1, `rgba(${base},0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(x0, y, Math.max(2, x1 - x0), hh, 4);
-      ctx.fill();
-      if (active > 0.05) {
-        ctx.strokeStyle = `rgba(${base},${0.5 + 0.5 * active})`;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-      if (g.label && (xb - xa > 12 || !isVowel)) {
-        ctx.fillStyle = isVowel ? "rgba(232,234,235,0.85)" : "#1d1a10";
-        ctx.font = font(12, 600);
-        const lbl = g.label === "aspiration" || g.label === "voiceless" ? "open" : g.label === "velum" ? "lowered" : g.label;
-        ctx.fillText(lbl, Math.max(x0 + 3, xa + 2), y + hh * 0.7);
+      const act = now >= g.t0 - g.rampIn && now <= g.t1 + g.rampOut ? activation(g, now) : 0;
+      // a gesture is a trapezoid: ramp in, plateau, ramp out
+      const p = new Path2D();
+      p.moveTo(x0, yb);
+      p.lineTo(xa, yt);
+      p.lineTo(xb, yt);
+      p.lineTo(x1, yb);
+      beam(ctx, p, ROWS[r].color, act > 0.05 ? 1.5 : 1.1, { alpha: act > 0.05 ? 0.6 + 0.4 * act : isVowel ? 0.42 : 0.75, hot: act > 0.5 });
+      if (g.label && xb - xa > 10) {
+        const lbl = g.label === "aspiration" || g.label === "voiceless" ? "OPEN" : g.label === "velum" ? "LOWERED" : g.label;
+        label(ctx, lbl, (xa + xb) / 2, yb - 4, { size: 10, color: ROWS[r].color, align: "center", ls: 0.08, alpha: isVowel && act < 0.05 ? 0.6 : 1 });
       }
     }
-    // pitch contour
+    // the pitch contour
     if (f0s.length) {
-      f0s.sort((p, q) => p.t - q.t);
-      const fmin = Math.min(...f0s.map((p) => p.f)) * 0.9, fmax = Math.max(...f0s.map((p) => p.f)) * 1.1;
-      const yb = top + rowH * ROWS.length + rowH * 0.9, ya = top + rowH * ROWS.length + rowH * 0.1;
-      ctx.beginPath();
-      f0s.forEach((p, i) => {
-        const x = X(p.t), y = yb - ((p.f - fmin) / Math.max(1, fmax - fmin)) * (yb - ya);
-        if (i) ctx.lineTo(x, y);
-        else ctx.moveTo(x, y);
-      });
-      ctx.strokeStyle = "rgba(232,234,235,0.8)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      f0s.sort((a, b) => a.t - b.t);
+      const fmin = Math.min(...f0s.map((q) => q.f)) * 0.92, fmax = Math.max(...f0s.map((q) => q.f)) * 1.08;
+      const yb = top + rowH * (ROWS.length + 1) - 4, ya = top + rowH * ROWS.length + 6;
+      const pts: Pt[] = f0s.map((q) => [X(q.t), yb - ((q.f - fmin) / Math.max(1, fmax - fmin)) * (yb - ya)]);
+      beamPts(ctx, pts, V.amber, 1.3);
+      const lastP = pts[pts.length - 1];
+      label(ctx, `${Math.round(f0s[f0s.length - 1].f)} HZ`, lastP[0] + 6, lastP[1] + 3, { size: 9, color: V.amber, ls: 0.1 });
     }
-    // segment labels along the bottom
-    ctx.font = font(13, 500);
-    ctx.fillStyle = "rgba(232,234,235,0.9)";
+    // segments along the bottom
+    let lastRight = -Infinity;
     for (const s of plan.segments) {
       const x = X((s.t0 + s.t1) / 2);
-      const tw = ctx.measureText(s.ipa).width;
-      ctx.fillText(s.ipa, x - tw / 2, h - 10);
+      if (x - 6 < lastRight) continue;
+      lastRight = x + 6;
+      const on = now >= s.t0 && now < s.t1;
+      seg(ctx, X(s.t0), bottom + 2, X(s.t0), bottom + 6, V.blueDim, 1);
+      label(ctx, s.ipa, x, h - 8, { size: 12, color: on ? V.white : V.blue, align: "center", ls: 0 });
     }
     // playhead
     if (now >= T0 && now <= T1) {
-      ctx.strokeStyle = C.caliper;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(X(now), top);
-      ctx.lineTo(X(now), h - 24);
-      ctx.stroke();
+      const x = X(now);
+      seg(ctx, x, top - 4, x, bottom, V.white, 1.2, { hot: true });
+      const tri = new Path2D();
+      tri.moveTo(x - 5, top - 10);
+      tri.lineTo(x + 5, top - 10);
+      tri.lineTo(x, top - 3);
+      tri.closePath();
+      beam(ctx, tri, V.white, 1.1);
+      label(ctx, `${Math.max(0, now).toFixed(2)} S`, x + 8, top - 4, { size: 9, color: V.white, ls: 0.12, alpha: 0.8 });
     }
   });
-  return <canvas ref={ref} className="score-canvas" aria-label="Gestural score of the current utterance" role="img" />;
+  return <canvas ref={ref} className="score-canvas" aria-label="Gestural score of the current utterance: which articulator moves, when, and how they overlap" role="img" />;
 }
