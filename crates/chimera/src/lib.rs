@@ -46,4 +46,11 @@ pub mod util {
 }
 
 pub mod creatures;
+pub mod engine;
 pub mod phonetics;
+
+/// Parse every embedded data table now (an `Engine` does this when it is created), so nothing
+/// initialises lazily on an audio thread later.
+pub fn init() {
+    phonetics::planner::vowel_table();
+}

@@ -61,10 +61,10 @@ pub fn save_json(name: &str, v: &Value) {
     println!("blessed {path}");
 }
 
-/// Renders must agree sample for sample (to ~1e-6 of peak) until a discrete decision can go the
-/// other way on a last-ulp difference (V8's libm and Rust's differ there; e.g. which of two
-/// near-equal sections is the narrowest, so where the frication noise is injected). After that
-/// the loudness envelope must still agree to 0.05 dB in every 10 ms window.
+/// For renders that may legitimately part after a discrete decision goes the other way on a
+/// last-ulp difference (V8's libm and Rust's differ in the last bit of some functions; chaotic or
+/// self-oscillating sources can amplify that): the loudness envelope must still agree to 0.05 dB
+/// in every 10 ms window. Renders expected to agree throughout assert `first_diverge.is_none()`.
 pub fn assert_close(name: &str, d: &AudioDiff) {
     assert!(d.env_db < 0.05, "{name}: RMS envelope differs by {:.3} dB (max sample error {:.2e} of peak, first at {:?})", d.env_db, d.max_err, d.first_diverge);
 }

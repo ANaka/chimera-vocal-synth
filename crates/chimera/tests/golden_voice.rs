@@ -62,7 +62,8 @@ fn voice_matches_typescript() {
         }
         let d = compare_audio(&reference, &got, 1e-6, 480);
         println!("{name:>20}: peak {:.3} max err {:.2e} first >1e-6 at {:?} env {:.4} dB", d.peak, d.max_err, d.first_diverge, d.env_db);
-        assert_close(name, &d);
+        // the human voice is linear enough (and the port literal enough) to agree throughout
+        assert!(d.first_diverge.is_none(), "{name}: renders diverge from sample {:?} (max error {:.2e} of peak)", d.first_diverge, d.max_err);
         for block in [1usize, 77, 4096] {
             assert_eq!(run(s, block), got, "{name}: block size {block} changed the output");
         }

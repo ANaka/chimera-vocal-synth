@@ -254,6 +254,11 @@ pub struct AirwayNetwork {
     dx_step: Vec<f64>,
     vol: Vec<f64>,
     inv_a: Vec<f64>,
+    /// per-sample half-section terms of each node, shared by its branches (same operations, in
+    /// the same order, as computing them per branch): Δ/A, and S·Δ·√A/A²·visc factor
+    half_l: Vec<f64>,
+    half_r: Vec<f64>,
+    sqrt_a: Vec<f64>,
     flow_sum: Vec<f64>,
     /// external volume-velocity injection per node for the next step (cleared after use)
     pub ext_flow: Vec<f64>,
@@ -363,6 +368,9 @@ impl AirwayNetwork {
             dx_step: Vec::new(),
             vol: Vec::new(),
             inv_a: Vec::new(),
+            half_l: Vec::new(),
+            half_r: Vec::new(),
+            sqrt_a: Vec::new(),
             flow_sum: Vec::new(),
             ext_flow: Vec::new(),
             fixed: Vec::new(),
@@ -493,6 +501,9 @@ impl AirwayNetwork {
         self.dx_step = zf(n);
         self.vol = zf(n);
         self.inv_a = zf(n);
+        self.half_l = zf(n);
+        self.half_r = zf(n);
+        self.sqrt_a = zf(n);
         self.flow_sum = zf(n);
         self.ext_flow = zf(n);
         self.fixed = vec![false; n];
@@ -539,6 +550,9 @@ impl AirwayNetwork {
         for &k in &self.pending_fixed {
             self.fixed[k] = true;
         }
+        // the step's branch loop indexes nodes without bounds checks: every endpoint must exist
+        assert!(self.b_a.iter().chain(&self.b_b).all(|&k| k < n), "branch endpoint out of range");
+        assert!(self.rad_nodes.iter().all(|&k| k < n), "radiator node out of range");
         self.u = zf(b);
         self.mom = zf(b);
         self.l_prev = zf(b);
@@ -792,8 +806,13 @@ impl AirwayNetwork {
                 amin[k] = amk;
                 dx[k] += self.dx_step[k];
                 let d = dx[k];
-                self.inv_a[k] = 1.0 / (if a > 1e-6 { a } else { 1e-6 });
+                let ia = 1.0 / (if a > 1e-6 { a } else { 1e-6 });
+                self.inv_a[k] = ia;
                 self.inv_amin[k] = 1.0 / (if amk > 1e-6 { amk } else { 1e-6 });
+                let sa = sqrt(a);
+                self.sqrt_a[k] = sa;
+                self.half_l[k] = d * ia;
+                self.half_r[k] = self.wall_perim[k] * d * sa * ia * ia * self.visc_f[k];
                 let v = (if a > min_a { a } else { min_a }) * d;
                 if vol_on {
                     let raw = -(v - self.vol[k]) * inv_t;
@@ -852,110 +871,138 @@ impl AirwayNetwork {
         let half_rho = 0.5 * RHO;
         let enable_energy_safe = self.energy_safe;
         let symmetric = self.symmetric_kinetic;
-        for j in 0..nb {
-            let a = self.b_a[j];
-            let b = self.b_b[j];
-            let l: f64;
-            let r: f64;
-            let mut kf: f64;
-            let mut kb: f64;
-            let a_eff: f64;
-            if self.b_kind[j] == KIND_SERIES {
-                let aa = self.area[a];
-                let ab = self.area[b];
-                let ma = self.amin[a];
-                let mb = self.amin[b];
-                a_eff = if ma < mb { ma } else { mb };
-                if (if aa < ab { aa } else { ab }) < closed || a_eff < closed {
-                    self.u[j] = 0.0;
-                    self.mom[j] = 0.0;
-                    self.branch_area[j] = a_eff;
-                    continue;
-                }
-                let ia = self.inv_a[a];
-                let ib = self.inv_a[b];
-                let dxa = self.dx[a];
-                let dxb = self.dx[b];
-                l = half_rho * (dxa * ia + dxb * ib);
-                // viscous: R = S·l/A² · sqrt(ρμω/2) with S = perimeter of each half-section
-                r = 0.5 * visc * (self.wall_perim[a] * dxa * sqrt(aa) * ia * ia * self.visc_f[a] + self.wall_perim[b] * dxb * sqrt(ab) * ib * ib * self.visc_f[b]);
-                // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
-                // the downstream node (sub-section minima make short constrictions lossy as they should be)
-                let ima = self.inv_amin[a];
-                let imb = self.inv_amin[b];
-                let ef = ima - ib; // a→b
-                let eb = imb - ia; // b→a
-                kf = if ef > 0.0 { half_rho * ef * ef } else { 0.0 };
-                kb = if eb > 0.0 { half_rho * eb * eb } else { 0.0 };
-                // small contraction (vena contracta) loss entering a narrower node
-                let cf = imb - ia;
-                let cb = ima - ib;
-                if cf > 0.0 {
-                    kf += 0.1 * half_rho * cf * cf;
-                }
-                if cb > 0.0 {
-                    kb += 0.1 * half_rho * cb * cb;
-                }
-            } else {
-                self.port_area[j] += self.port_area_step[j];
-                let mut ap = self.port_area[j];
-                if ap < 0.0 {
-                    self.port_area[j] = 0.0;
-                    ap = 0.0;
-                }
-                a_eff = ap;
-                if ap < closed {
-                    self.u[j] = 0.0;
-                    self.mom[j] = 0.0;
-                    self.branch_area[j] = ap;
-                    continue;
-                }
-                let ip = 1.0 / ap;
-                let len = self.port_len[j];
-                let mut ll = RHO * len * ip;
-                if self.port_half[j] {
-                    ll += half_rho * (self.dx[a] * self.inv_a[a] + self.dx[b] * self.inv_a[b]);
-                }
-                l = ll;
-                let w = self.port_slit[j];
-                let mut rr = if w > 0.0 { (12.0 * MU * len * w * w) * ip * ip * ip } else { visc * 2.0 * sqrt(PI) * len * sqrt(ap) * ip * ip };
-                rr += self.port_extra_r[j];
-                r = rr;
-                // kinetic: entrance (contraction) + exit (jet expansion into the downstream node)
-                let ex_f = ip - self.inv_a[b]; // flow a→b exits into b
-                let ex_b = ip - self.inv_a[a]; // flow b→a exits into a
-                let kin = self.port_kin[j] * half_rho * ip * ip;
-                kf = kin + self.port_kex[j] * half_rho * (if ex_f > 0.0 { ex_f * ex_f } else { 0.0 });
-                kb = kin + self.port_kex[j] * half_rho * (if ex_b > 0.0 { ex_b * ex_b } else { 0.0 });
+        {
+            // indices were validated in finalize(): every b_a/b_b < n_nodes, and the per-branch
+            // arrays all have n_branches entries
+            let area = &self.area[..n];
+            let amin = &self.amin[..n];
+            let inv_a = &self.inv_a[..n];
+            let inv_amin = &self.inv_amin[..n];
+            let half_l = &self.half_l[..n];
+            let half_r = &self.half_r[..n];
+            let is_j = &self.is_junction[..n];
+            let p = &self.p[..n];
+            let flow_sum = &mut self.flow_sum[..n];
+            let inv_lsum = &mut self.inv_lsum[..n];
+            let (b_a, b_b, b_kind) = (&self.b_a[..nb], &self.b_b[..nb], &self.b_kind[..nb]);
+            let (u_arr, mom, l_prev, psrc) = (&mut self.u[..nb], &mut self.mom[..nb], &mut self.l_prev[..nb], &self.psrc[..nb]);
+            let branch_area = &mut self.branch_area[..nb];
+            let port_area = &mut self.port_area[..nb];
+            let (port_area_step, port_len, port_half, port_slit, port_extra_r, port_kin, port_kex) = (&self.port_area_step[..nb], &self.port_len[..nb], &self.port_half[..nb], &self.port_slit[..nb], &self.port_extra_r[..nb], &self.port_kin[..nb], &self.port_kex[..nb]);
+            macro_rules! node {
+                ($v:expr, $i:expr) => {
+                    // SAFETY: $i is a branch endpoint (< n, checked in finalize) and $v has n entries
+                    unsafe { *$v.get_unchecked($i) }
+                };
             }
-            self.branch_area[j] = a_eff;
-            // energy-safe momentum transfer when the inertance changes: closing (L↑) conserves
-            // momentum (flow drops), opening (L↓) conserves flow — never injects kinetic energy
-            if symmetric {
-                let km = if kf > kb { kf } else { kb };
-                kf = km;
-                kb = km;
-            }
-            let lp = self.l_prev[j];
-            let m0 = if enable_energy_safe && l < lp { l * self.u[j] } else { self.mom[j] };
-            let c = self.p[a] - self.p[b] + self.psrc[j] + m0 * inv_t;
-            let bq = l * inv_t + r;
-            let u = if c >= 0.0 {
-                if kf > 0.0 { (2.0 * c) / (bq + sqrt(bq * bq + 4.0 * kf * c)) } else { c / bq }
-            } else if kb > 0.0 {
-                (2.0 * c) / (bq + sqrt(bq * bq - 4.0 * kb * c))
-            } else {
-                c / bq
-            };
-            self.u[j] = u;
-            self.mom[j] = l * u;
-            self.l_prev[j] = l;
-            self.flow_sum[a] -= u;
-            self.flow_sum[b] += u;
-            if self.is_junction[a] | self.is_junction[b] {
-                let il = 1.0 / l;
-                self.inv_lsum[a] += il;
-                self.inv_lsum[b] += il;
+            for j in 0..nb {
+                let a = b_a[j];
+                let b = b_b[j];
+                let l: f64;
+                let r: f64;
+                let mut kf: f64;
+                let mut kb: f64;
+                let a_eff: f64;
+                if b_kind[j] == KIND_SERIES {
+                    let aa = node!(area, a);
+                    let ab = node!(area, b);
+                    let ma = node!(amin, a);
+                    let mb = node!(amin, b);
+                    a_eff = if ma < mb { ma } else { mb };
+                    if (if aa < ab { aa } else { ab }) < closed || a_eff < closed {
+                        u_arr[j] = 0.0;
+                        mom[j] = 0.0;
+                        branch_area[j] = a_eff;
+                        continue;
+                    }
+                    let ia = node!(inv_a, a);
+                    let ib = node!(inv_a, b);
+                    l = half_rho * (node!(half_l, a) + node!(half_l, b));
+                    // viscous: R = S·l/A² · sqrt(ρμω/2) with S = perimeter of each half-section
+                    r = 0.5 * visc * (node!(half_r, a) + node!(half_r, b));
+                    // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
+                    // the downstream node (sub-section minima make short constrictions lossy as they should be)
+                    let ima = node!(inv_amin, a);
+                    let imb = node!(inv_amin, b);
+                    let ef = ima - ib; // a→b
+                    let eb = imb - ia; // b→a
+                    kf = if ef > 0.0 { half_rho * ef * ef } else { 0.0 };
+                    kb = if eb > 0.0 { half_rho * eb * eb } else { 0.0 };
+                    // small contraction (vena contracta) loss entering a narrower node
+                    let cf = imb - ia;
+                    let cb = ima - ib;
+                    if cf > 0.0 {
+                        kf += 0.1 * half_rho * cf * cf;
+                    }
+                    if cb > 0.0 {
+                        kb += 0.1 * half_rho * cb * cb;
+                    }
+                } else {
+                    port_area[j] += port_area_step[j];
+                    let mut ap = port_area[j];
+                    if ap < 0.0 {
+                        port_area[j] = 0.0;
+                        ap = 0.0;
+                    }
+                    a_eff = ap;
+                    if ap < closed {
+                        u_arr[j] = 0.0;
+                        mom[j] = 0.0;
+                        branch_area[j] = ap;
+                        continue;
+                    }
+                    let ip = 1.0 / ap;
+                    let len = port_len[j];
+                    let mut ll = RHO * len * ip;
+                    if port_half[j] {
+                        ll += half_rho * (node!(half_l, a) + node!(half_l, b));
+                    }
+                    l = ll;
+                    let w = port_slit[j];
+                    let mut rr = if w > 0.0 { (12.0 * MU * len * w * w) * ip * ip * ip } else { visc * 2.0 * sqrt(PI) * len * sqrt(ap) * ip * ip };
+                    rr += port_extra_r[j];
+                    r = rr;
+                    // kinetic: entrance (contraction) + exit (jet expansion into the downstream node)
+                    let ex_f = ip - node!(inv_a, b); // flow a→b exits into b
+                    let ex_b = ip - node!(inv_a, a); // flow b→a exits into a
+                    let kin = port_kin[j] * half_rho * ip * ip;
+                    kf = kin + port_kex[j] * half_rho * (if ex_f > 0.0 { ex_f * ex_f } else { 0.0 });
+                    kb = kin + port_kex[j] * half_rho * (if ex_b > 0.0 { ex_b * ex_b } else { 0.0 });
+                }
+                branch_area[j] = a_eff;
+                // energy-safe momentum transfer when the inertance changes: closing (L↑) conserves
+                // momentum (flow drops), opening (L↓) conserves flow — never injects kinetic energy
+                if symmetric {
+                    let km = if kf > kb { kf } else { kb };
+                    kf = km;
+                    kb = km;
+                }
+                let lp = l_prev[j];
+                let m0 = if enable_energy_safe && l < lp { l * u_arr[j] } else { mom[j] };
+                let c = node!(p, a) - node!(p, b) + psrc[j] + m0 * inv_t;
+                let bq = l * inv_t + r;
+                let u = if c >= 0.0 {
+                    if kf > 0.0 { (2.0 * c) / (bq + sqrt(bq * bq + 4.0 * kf * c)) } else { c / bq }
+                } else if kb > 0.0 {
+                    (2.0 * c) / (bq + sqrt(bq * bq - 4.0 * kb * c))
+                } else {
+                    c / bq
+                };
+                u_arr[j] = u;
+                mom[j] = l * u;
+                l_prev[j] = l;
+                // SAFETY: as above (endpoints < n)
+                unsafe {
+                    *flow_sum.get_unchecked_mut(a) -= u;
+                    *flow_sum.get_unchecked_mut(b) += u;
+                }
+                if node!(is_j, a) | node!(is_j, b) {
+                    let il = 1.0 / l;
+                    unsafe {
+                        *inv_lsum.get_unchecked_mut(a) += il;
+                        *inv_lsum.get_unchecked_mut(b) += il;
+                    }
+                }
             }
         }
 
@@ -970,8 +1017,8 @@ impl AirwayNetwork {
             let v = ((m * inv_t - 0.5 * r) * self.wall_v[k] + self.p[k] - self.wall_k[k] * self.wall_y[k]) / (m * inv_t + 0.5 * r);
             self.wall_v[k] = v;
             self.wall_y[k] += t * v;
-            let a = if self.area[k] > min_a { self.area[k] } else { min_a };
-            let uw = self.wall_perim[k] * sqrt(a) * self.dx[k] * v;
+            let sa = if self.area[k] > min_a { self.sqrt_a[k] } else { sqrt(min_a) };
+            let uw = self.wall_perim[k] * sa * self.dx[k] * v;
             self.wall_u[k] = uw;
             self.flow_sum[k] -= uw;
             wall_rad_sum += uw * self.wall_rad[k];
