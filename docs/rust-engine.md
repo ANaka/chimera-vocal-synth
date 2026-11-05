@@ -176,8 +176,12 @@ consumption or sums (noise sources, gestures). It retunes nothing. The checks:
 
 `chimera` as a path or git dependency:
 
-- `Engine::new(sample_rate)` plus `handle(Command)`, `render(&mut [f32])` and
-  `telemetry(&mut Telemetry)`.
+- **`Engine::new(sample_rate)`** with:
+  - commands as methods: `set_body`, `set_artic`, `set_source`, `set_gate`, `schedule`,
+    `release`, `stop_speech`, `set_beat_*`, `beat_hit`, `set_creature`, `set_creature_params`,
+    `play_call` and `stop_call`;
+  - `render(&mut [f32])`;
+  - `telemetry` / `creature_telemetry`.
 - The voices directly: `HumanVoice`, `CreatureVoice`.
 - The planners: `plan_phrases`, `plan_song`, `plan_note_on/off`, `lyrics_to_syllables`, and
   `EnglishG2P` with a dictionary given as `&str`.
@@ -191,8 +195,10 @@ speculative (JDAW principle: generality must earn its place).
 - `render-speech`, `render-text`, `render-song`, `render-beatbox`, `render-creature` and
   `render-vowels` become `chimera render <kind> …`, which writes a WAV. The spectrogram PNG stays
   a TS tool (`tools/spectrogram.ts in.wav out.png`, reusing `tools/lib`).
-- `calibrate-vowels`, `calibrate-consonants` and `gen-syrinx-table` become `chimera-cli` bins,
+- `calibrate-vowels` and `calibrate-consonants` become `chimera calibrate vowels|consonants`,
   because they regenerate committed data.
+- `gen-syrinx-table` and `gen-ipa-nfc` stay TS, because neither drives the engine. The NFC data
+  comes from the JS engine's ICU.
 - `speech-diagnostics` (nasal leakage, formant undershoot, bandwidths, pitch) becomes
   `chimera diagnose`, because it's a measurement tool for future tuning.
 - The one-off explorations are deleted: `proto-vowel`, `explore-syrinx`, `measure-closures`,
@@ -214,3 +220,56 @@ It also suggested keeping G2P, planning and songs in TS for now. That suggestion
 
 The worklet's per-block replay budget stays out of Rust, because commands apply at the next
 render call and so it isn't needed.
+
+## Status (what shipped)
+
+**Crates**
+- `crates/chimera`: the engine.
+- `crates/chimera-wasm`: the browser ABI (about 1 MB of wasm, no imports).
+- `crates/chimera-cli`: the `chimera` CLI.
+
+**Browser**
+- `src/wasm/` holds the facade and codec.
+- `src/worklet/processor.ts` runs on the wasm engine.
+- `src/engine/` (the TS engine) is gone.
+
+**Verification**
+- **Golden fixtures** from the TS engine (`crates/chimera/tests/golden/README.md`):
+  - human voice: within 1e-9 of peak over every render;
+  - creatures: within 2e-10, including the chaotic and self-oscillating modes;
+  - plans and beat sequences: bit-exact apart from 1-ulp `f0` values;
+  - G2P, IPA and syllables: exact on about 3 200 cases;
+  - geometry and analysis: within 1e-12 relative.
+- **The bun tests** that were about the engine are now `cargo test`s with the same thresholds.
+  The UI's live paths (Sing keys, worklet ordering, creature telemetry layout) run on the wasm
+  build.
+- **Native and wasm** render bit-identical samples on x86-64.
+- **Block size:** a full session (sequencer, body switch, held note) is bit-identical in blocks
+  of 1 to 48 000 samples.
+- **Allocations:** counted through the audio-thread ABI, from idle into labelled speech, the
+  sequencer and a creature. There are none.
+- **CLI renders** match the old TS tools to under 1e-6 of peak.
+
+**Speed** (Ryzen 7 8745HS)
+- Male voice at 2× oversampling, rendered offline: 46% of a core for TS in Chromium, 32% for
+  wasm in Chromium, 19–21% native.
+- Engine load in the running app: human 40% → 29%, creatures roughly halved (seal 56% → 28%).
+
+**Where it differs from the design above**
+- **Commands are methods** applied at once, not a `Command` enum. The worklet's body/creature
+  pending queues and per-block replay budget are gone, since ordering is the call order.
+- **Schedules return their clock offset**, and the worklet posts `ready`/`planned` itself, so
+  there is no event queue.
+- **The FDTD step uses checked indexing.** `get_unchecked` gained nothing measurable, and it
+  relied on an invariant that safe callers could break.
+- **Only the human-voice audio fixtures can be re-blessed.** The others record the TS engine.
+- **Vowel calibration isn't bit-reproducible.** `chimera calibrate vowels` moves 7 posture
+  values by ±0.001–0.002: last-ulp math differences, amplified by Nelder–Mead on flat minima.
+  The committed table is kept, so the voice is unchanged.
+
+**Open**
+- **Determinism on aarch64/macOS** is untested.
+- **Performance beyond TS parity.** Exactness with the TS engine ruled out reciprocal
+  multiplies and similar changes in the FDTD step. That's possible now, with a re-bless.
+- **Real-time planning.** `plan_note_on` allocates; a JDAW live-input path will want a
+  non-allocating form.

@@ -179,7 +179,10 @@ UI's typed facade over the engine. Bun for the UI's tooling and tests.
   Golden fixtures from the retired TypeScript engine (crates/chimera/tests/golden) check the
   port; native and wasm builds render bit-identical samples (tests/wasm-engine.test.ts).
 * `bun test tests`: the UI's live paths (Sing keys, worklet ordering, MIDI) on the wasm engine.
-* Offline renders (`chimera render …`) → WAV; `tools/spectrogram.ts` draws the PNG to inspect.
+* Offline renders (`cargo run --release -p chimera-cli -- render speech|text|song|beatbox|creature|vowels …`)
+  → WAV; `tools/spectrogram.ts` draws the PNG to inspect. `chimera diagnose` measures speech
+  (nasal leakage, formant undershoot, bandwidths, pitch); `chimera calibrate` regenerates the
+  vowel/consonant tables.
 * Headless Chromium (Playwright) smoke tests: app loads, worklet runs, no console errors,
   screenshots of each mode.
 * Hosted over HTTPS via `tailscale serve` (AudioWorklet needs a secure context).
