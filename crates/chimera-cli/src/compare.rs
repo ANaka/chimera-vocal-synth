@@ -33,6 +33,7 @@ use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::math::{js_round, midi_to_hz};
 use chimera::phonetics::Segment;
 use chimera::phonetics::Syllable;
+use chimera::phonetics::planner::diphthong_parts;
 use chimera::phonetics::sing::{SongOptions, SungNote, plan_song};
 use chimera::voice::human_voice::{HumanVoice, SourcePatch};
 use serde_json::{Value, json};
@@ -54,6 +55,12 @@ const BANDS: [(f64, f64); 5] = [
 ];
 const BAND_NAMES: [&str; 5] = ["0-.5k", ".5-1k", "1-2k", "2-4k", "4-8k"];
 const N_MEL: usize = 40;
+/// pitch frame hop (s)
+const HOP: f64 = 0.005;
+/// shortest unbroken voiced run (s) searched for vibrato
+const VIB_MIN_RUN: f64 = 0.4;
+/// a note whose planned vowel start is this far (s) from its annotated start is left out
+const MAX_MISALIGN: f64 = 0.03;
 /// frames this far (dB) below a signal's loud level count as silent
 const GATE_DB: f64 = 35.0;
 const N_CEP: usize = 13;
@@ -202,9 +209,20 @@ fn load_notes(path: &str) -> Result<Vec<Note>, String> {
     Ok(notes)
 }
 
+/// A render on the recording's timeline.
+struct Render {
+    out: Vec<f32>,
+    /// gestures the score had no room for
+    dropped: u64,
+    /// planned start of each note's vowel. `plan_song` lays a phrase's segments end to end and
+    /// gives each vowel at least 50 ms, so a note too short for its consonants pushes the
+    /// following vowels late.
+    vowel_t0: Vec<f64>,
+}
+
 /// Sing the notes on the recording's timeline: one `plan_song` per phrase, 60 bpm so beats are
 /// seconds; a note lasts until the next one starts (its last note, to its own end).
-fn render_notes(notes: &[Note], body_name: &str, seconds: f64) -> Result<(Vec<f32>, u64), String> {
+fn render_notes(notes: &[Note], body_name: &str, seconds: f64) -> Result<Render, String> {
     let b = body(body_name)?;
     let mut v = HumanVoice::new(FS, b, 2);
     v.set_source(&SourcePatch {
@@ -214,6 +232,7 @@ fn render_notes(notes: &[Note], body_name: &str, seconds: f64) -> Result<(Vec<f3
         tension: Some(0.55),
         ..Default::default()
     });
+    let mut vowel_t0 = Vec::with_capacity(notes.len());
     let mut i = 0;
     while i < notes.len() {
         let mut j = i;
@@ -241,13 +260,36 @@ fn render_notes(notes: &[Note], body_name: &str, seconds: f64) -> Result<(Vec<f3
             },
         );
         v.schedule(&plan.gestures);
+        // each note sings one vowel segment, two for a diphthong that is not carried on into a
+        // melisma (as plan_song builds them); CSD syllables have exactly one vowel each
+        let mut vowels = plan.segments.iter().filter(|s| s.kind == "vowel");
+        for k in i..=j {
+            let next_melisma = k < j && notes[k + 1].syl.melisma == Some(true);
+            let parts = if diphthong_parts(&notes[k].syl.nucleus.ipa).is_some() && !next_melisma {
+                2
+            } else {
+                1
+            };
+            let first = vowels.next().ok_or("plan has fewer vowels than notes")?;
+            vowel_t0.push(first.t0);
+            for _ in 1..parts {
+                vowels.next().ok_or("plan has fewer vowels than notes")?;
+            }
+        }
+        if vowels.next().is_some() {
+            return Err("plan has more vowels than notes".into());
+        }
         i = j + 1;
     }
     let mut out = vec![0f32; js_round(FS * seconds) as usize];
     for block in out.chunks_mut(128) {
         v.render(block);
     }
-    Ok((out, v.score.dropped))
+    Ok(Render {
+        out,
+        dropped: v.score.dropped,
+        vowel_t0,
+    })
 }
 
 /// Mono samples and rate of a PCM (16/24/32-bit) or float WAV; channels are averaged.
@@ -314,14 +356,16 @@ fn read_wav(path: &str) -> Result<(Vec<f64>, f64), String> {
 struct NoteMeas {
     /// median f0 vs the score (cents); NaN if no voiced frame
     cents: f64,
-    /// (peak cents, Hz); NaN unless the steady part is long enough
+    /// (peak cents, Hz); NaN unless periodic vibrato was found (see `vibrato`)
     vib_depth: f64,
     vib_rate: f64,
+    /// the note had a voiced run long enough to look for vibrato
+    vib_eligible: bool,
     aperiodicity: f64,
     voiced: f64,
     /// dB re the 0–8 kHz total
     bands: [f64; 5],
-    /// first harmonic minus second (dB), from the averaged spectrum at the measured f0
+    /// first harmonic minus second (dB): median over voiced frames, each at its own f0
     h1h2: f64,
     cep: [f64; N_CEP],
     /// first voiced frame relative to the note start (s); NaN if none or not phrase-initial
@@ -434,20 +478,40 @@ impl Analyzer {
         (if ms < self.gate { 0.0 } else { p.f0 }, p.aperiodicity)
     }
 
-    /// power spectrum (linear) of the frame centred at t
-    fn power(&self, x: &[f64], t: f64, acc: &mut [f64]) -> bool {
+    /// Power spectrum (linear, n/2+1 bins) of the frame centred at t, if it fits in x.
+    fn power(&self, x: &[f64], t: f64) -> Option<Vec<f64>> {
         let n = self.fft.n;
         let c = (t * self.fs) as isize - (n / 2) as isize;
         if c < 0 || c as usize + n > x.len() {
-            return false;
+            return None;
         }
         let mut re: Vec<f64> = (0..n).map(|i| x[c as usize + i] * self.win[i]).collect();
         let mut im = vec![0.0; n];
         self.fft.transform(&mut re, &mut im);
-        for k in 0..=n / 2 {
-            acc[k] += re[k] * re[k] + im[k] * im[k];
+        Some((0..=n / 2).map(|k| re[k] * re[k] + im[k] * im[k]).collect())
+    }
+
+    /// Level (dB) of the harmonic near `hz` in one frame's power spectrum: the strongest bin
+    /// within ±3 % (at least ±2 bins), refined by a parabola through its neighbours (dB).
+    fn harmonic_db(&self, p: &[f64], hz: f64) -> f64 {
+        let bin = self.fs / self.fft.n as f64;
+        let half = (0.03 * hz / bin).max(2.0);
+        let (lo, hi) = (
+            ((hz / bin - half).floor().max(1.0)) as usize,
+            ((hz / bin + half).ceil()) as usize,
+        );
+        if hi + 1 >= p.len() {
+            return f64::NAN;
         }
-        true
+        let k = (lo..=hi).max_by(|&a, &b| p[a].total_cmp(&p[b])).unwrap();
+        let db = |i: usize| 10.0 * (p[i] + 1e-30).log10();
+        let (a, b, c) = (db(k - 1), db(k), db(k + 1));
+        let den = a - 2.0 * b + c;
+        if den < 0.0 {
+            b - 0.125 * (a - c) * (a - c) / den
+        } else {
+            b
+        }
     }
 
     fn note(&self, x: &[f64], n: &Note) -> NoteMeas {
@@ -458,64 +522,54 @@ impl Analyzer {
             (n.start + 0.3 * d, n.end - 0.2 * d)
         };
         let target = midi_to_hz(n.midi);
-        let hop = 0.005;
-        let mut cents = Vec::new();
-        let mut times = Vec::new();
+        // pitch every HOP over the steady part; (frame index, cents) of the voiced frames
+        let mut voiced: Vec<(usize, f64)> = Vec::new();
         let mut aper = Vec::new();
-        let mut frames = 0usize;
-        let mut t = a;
-        while t <= b {
+        let mut h1h2 = Vec::new();
+        let frames = if b >= a {
+            ((b - a) / HOP).floor() as usize + 1
+        } else {
+            0
+        };
+        for i in 0..frames {
+            let t = a + i as f64 * HOP;
             let (f0, ap) = self.pitch(x, t, target);
-            frames += 1;
             aper.push(ap);
             if f0 > 0.0 {
-                cents.push(1200.0 * (f0 / target).log2());
-                times.push(t);
+                voiced.push((i, 1200.0 * (f0 / target).log2()));
+                // H1−H2 per frame at that frame's own f0 (every other frame)
+                if i % 2 == 0
+                    && let Some(p) = self.power(x, t)
+                {
+                    h1h2.push(self.harmonic_db(&p, f0) - self.harmonic_db(&p, 2.0 * f0));
+                }
             }
-            t += hop;
         }
+        let cents: Vec<f64> = voiced.iter().map(|v| v.1).collect();
+        let (vib_depth, vib_rate, vib_eligible) = vibrato(&voiced);
         let mut m = NoteMeas {
             cents: median(&cents),
-            vib_depth: f64::NAN,
-            vib_rate: f64::NAN,
+            vib_depth,
+            vib_rate,
+            vib_eligible,
             aperiodicity: median(&aper),
             voiced: if frames > 0 {
-                cents.len() as f64 / frames as f64
+                voiced.len() as f64 / frames as f64
             } else {
                 f64::NAN
             },
+            h1h2: median(&h1h2),
             onset: f64::NAN,
-            ..Default::default()
+            bands: [f64::NAN; 5],
+            cep: [f64::NAN; N_CEP],
         };
-        // vibrato: detrend (least squares line) the contour; a sine of peak A has RMS A/√2
-        if b - a >= 0.35 && cents.len() as f64 >= 0.8 * frames as f64 {
-            let k = cents.len() as f64;
-            let (mt, mc) = (times.iter().sum::<f64>() / k, cents.iter().sum::<f64>() / k);
-            let (mut sxy, mut sxx) = (0.0, 0.0);
-            for (t, c) in times.iter().zip(&cents) {
-                sxy += (t - mt) * (c - mc);
-                sxx += (t - mt) * (t - mt);
-            }
-            let slope = if sxx > 0.0 { sxy / sxx } else { 0.0 };
-            let r: Vec<f64> = times
-                .iter()
-                .zip(&cents)
-                .map(|(t, c)| c - mc - slope * (t - mt))
-                .collect();
-            let rms = (r.iter().map(|v| v * v).sum::<f64>() / k).sqrt();
-            let crossings = r
-                .windows(2)
-                .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
-                .count();
-            m.vib_depth = rms * std::f64::consts::SQRT_2;
-            m.vib_rate = crossings as f64 / (2.0 * (times[times.len() - 1] - times[0]));
-        }
         // spectrum, averaged over the steady part
         let mut acc = vec![0.0; self.fft.n / 2 + 1];
         let mut count = 0;
         let mut t = a;
         while t <= b {
-            if self.power(x, t, &mut acc) {
+            if let Some(p) = self.power(x, t) {
+                acc.iter_mut().zip(&p).for_each(|(s, v)| *s += v);
                 count += 1;
             }
             t += 0.01;
@@ -533,23 +587,6 @@ impl Analyzer {
                     .sum::<f64>()
             };
             let total = band(0.0, 8000.0) + 1e-30;
-            // strongest bin within ±6 % of each harmonic
-            let f0 = target * 2f64.powf(m.cents / 1200.0);
-            let harmonic = |h: f64| {
-                let (lo, hi) = (
-                    (h * f0 * 0.94 / bin) as usize,
-                    (h * f0 * 1.06 / bin).ceil() as usize,
-                );
-                acc[lo.min(acc.len() - 1)..=hi.min(acc.len() - 1)]
-                    .iter()
-                    .copied()
-                    .fold(0.0, f64::max)
-            };
-            m.h1h2 = if f0.is_finite() {
-                10.0 * ((harmonic(1.0) + 1e-30) / (harmonic(2.0) + 1e-30)).log10()
-            } else {
-                f64::NAN
-            };
             for (k, (lo, hi)) in BANDS.iter().enumerate() {
                 m.bands[k] = 10.0 * ((band(*lo, *hi) + 1e-30) / total).log10();
             }
@@ -571,9 +608,6 @@ impl Analyzer {
                     .sum();
                 m.cep[q - 1] = s / N_MEL as f64;
             }
-        } else {
-            m.bands = [f64::NAN; 5];
-            m.h1h2 = f64::NAN;
         }
         // voice onset of a phrase-initial note, searched from after the previous note
         if n.phrase_start {
@@ -583,10 +617,78 @@ impl Analyzer {
                     m.onset = t - n.start;
                     break;
                 }
-                t += hop;
+                t += HOP;
             }
         }
         m
+    }
+}
+
+/// Vibrato of a note from its voiced pitch frames (index on the HOP grid, cents): over the
+/// longest unbroken voiced run, if it lasts VIB_MIN_RUN, the contour is detrended and its
+/// normalised autocorrelation searched for a peak at 4–9 Hz. A peak of at least 0.5 is
+/// vibrato: rate from the peak's lag, depth (peak cents) from the residual's RMS (a sine of
+/// peak A has RMS A/√2). Returns (depth, rate, eligible); depth and rate are NaN without vibrato.
+fn vibrato(voiced: &[(usize, f64)]) -> (f64, f64, bool) {
+    let none = (f64::NAN, f64::NAN);
+    // longest run of consecutive frame indices
+    let (mut best, mut start) = ((0, 0), 0);
+    for i in 1..=voiced.len() {
+        if i == voiced.len() || voiced[i].0 != voiced[i - 1].0 + 1 {
+            if i - start > best.1 - best.0 {
+                best = (start, i);
+            }
+            start = i;
+        }
+    }
+    let run: Vec<f64> = voiced[best.0..best.1].iter().map(|v| v.1).collect();
+    let n = run.len();
+    if (n as f64) * HOP < VIB_MIN_RUN {
+        return (none.0, none.1, false);
+    }
+    let k = n as f64;
+    let (mt, mc) = ((k - 1.0) / 2.0, run.iter().sum::<f64>() / k);
+    let (mut sxy, mut sxx) = (0.0, 0.0);
+    for (i, c) in run.iter().enumerate() {
+        sxy += (i as f64 - mt) * (c - mc);
+        sxx += (i as f64 - mt) * (i as f64 - mt);
+    }
+    let slope = sxy / sxx;
+    let r: Vec<f64> = run
+        .iter()
+        .enumerate()
+        .map(|(i, c)| c - mc - slope * (i as f64 - mt))
+        .collect();
+    let energy = r.iter().map(|v| v * v).sum::<f64>() / k;
+    if energy <= 0.0 {
+        return (none.0, none.1, true);
+    }
+    // unbiased normalised autocorrelation
+    let ac = |lag: usize| {
+        (0..n - lag).map(|i| r[i] * r[i + lag]).sum::<f64>() / (n - lag) as f64 / energy
+    };
+    let (lo, hi) = (
+        (1.0 / (9.0 * HOP)).floor() as usize,
+        (1.0 / (4.0 * HOP)).ceil() as usize,
+    );
+    let vals: Vec<f64> = (lo - 1..=hi + 1).map(ac).collect();
+    // the strongest local maximum inside [lo, hi]
+    let peak = (1..vals.len() - 1)
+        .filter(|&j| vals[j] >= vals[j - 1] && vals[j] >= vals[j + 1])
+        .max_by(|&p, &q| vals[p].total_cmp(&vals[q]));
+    match peak {
+        Some(j) if vals[j] >= 0.5 => {
+            let (a, b, c) = (vals[j - 1], vals[j], vals[j + 1]);
+            let den = a - 2.0 * b + c;
+            let shift = if den < 0.0 { 0.5 * (a - c) / den } else { 0.0 };
+            let lag = (lo - 1 + j) as f64 + shift;
+            (
+                energy.sqrt() * std::f64::consts::SQRT_2,
+                1.0 / (lag * HOP),
+                true,
+            )
+        }
+        _ => (none.0, none.1, true),
     }
 }
 
@@ -677,9 +779,13 @@ fn compare_song(
     }
     let (human, hfs) = read_wav(&format!("{csd}/english/wav/{id}.wav"))?;
     let seconds = human.len() as f64 / hfs;
-    let (synth, dropped) = render_notes(&notes, body_name, seconds)?;
-    ctx.write_wav(&format!("{out_dir}/{id}-synth.wav"), &synth)?;
-    let synth: Vec<f64> = synth.iter().map(|&v| v as f64).collect();
+    let Render {
+        out,
+        dropped,
+        vowel_t0,
+    } = render_notes(&notes, body_name, seconds).map_err(|e| format!("{id}: {e}"))?;
+    ctx.write_wav(&format!("{out_dir}/{id}-synth.wav"), &out)?;
+    let synth: Vec<f64> = out.iter().map(|&v| v as f64).collect();
 
     let lo = notes.iter().map(|n| n.midi).fold(f64::INFINITY, f64::min);
     let hi = notes
@@ -693,12 +799,15 @@ fn compare_song(
     let mut rows = Vec::new();
     let mut vowels = Vec::new();
     let mut per: Vec<(NoteMeas, NoteMeas, f64)> = Vec::new();
-    for n in &notes {
+    // notes measured on both sides; those the planner could not place on time are reported
+    // but left out of every statistic (their windows would hold the wrong sound)
+    let mut kept: Vec<&Note> = Vec::new();
+    for (n, &vt0) in notes.iter().zip(&vowel_t0) {
         let h = ha.note(&human, n);
         let s = sa.note(&synth, n);
         let d = mcd(&h.cep, &s.cep);
         let bd: [f64; 5] = std::array::from_fn(|k| s.bands[k] - h.bands[k]);
-        vowels.push((n.syl.nucleus.ipa.clone(), d, bd));
+        let aligned = (vt0 - n.start).abs() <= MAX_MISALIGN;
         rows.push(json!({
             "start": n.start, "end": n.end, "midi": n.midi, "csd": n.csd,
             "ipa": format!("{}{}{}",
@@ -708,9 +817,30 @@ fn compare_song(
             "melisma": n.syl.melisma == Some(true), "phraseStart": n.phrase_start,
             "human": meas_json(&h), "synth": meas_json(&s), "mcd": r2(d),
             "bandDiffDb": bd.iter().map(|v| r2(*v)).collect::<Vec<_>>(),
+            "plannedVowelStart": r2(vt0), "aligned": aligned,
         }));
-        per.push((h, s, d));
+        if aligned {
+            vowels.push((n.syl.nucleus.ipa.clone(), d, bd));
+            per.push((h, s, d));
+            kept.push(n);
+        }
     }
+    let misaligned = notes.len() - kept.len();
+    let compared = per.iter().filter(|p| p.2.is_finite()).count();
+    // share of notes long enough to look for vibrato that have it
+    let vib_share = |side: usize| {
+        let e: Vec<bool> = per
+            .iter()
+            .map(|p| if side == 0 { &p.0 } else { &p.1 })
+            .filter(|m| m.vib_eligible)
+            .map(|m| m.vib_depth.is_finite())
+            .collect();
+        if e.is_empty() {
+            f64::NAN
+        } else {
+            e.iter().filter(|&&v| v).count() as f64 / e.len() as f64
+        }
+    };
 
     let col = |f: &dyn Fn(&NoteMeas) -> f64, side: usize| -> Vec<f64> {
         per.iter()
@@ -723,8 +853,7 @@ fn compare_song(
     // phrase starts, split by whether voicing means the vowel (vowel-initial) or the onset
     // consonant (or the vowel after a voiceless one) has begun
     let onset_of = |side: usize, vowel_initial: bool| -> Vec<f64> {
-        notes
-            .iter()
+        kept.iter()
             .zip(&per)
             .filter(|(n, _)| n.phrase_start && n.syl.onset.is_empty() == vowel_initial)
             .map(|(_, p)| if side == 0 { p.0.onset } else { p.1.onset })
@@ -741,9 +870,11 @@ fn compare_song(
         })
         .collect();
     let summary = json!({
-        "id": id, "notes": notes.len(), "seconds": r2(seconds), "droppedGestures": dropped,
+        "id": id, "notes": notes.len(), "notesMisaligned": misaligned, "notesCompared": compared,
+        "seconds": r2(seconds), "droppedGestures": dropped,
         "pitchAbsCentsVsScore": {"human": r2(median(&abs_cents(0))), "synth": r2(median(&abs_cents(1)))},
         "pitchAbsCentsSynthVsHuman": r2(median(&vs_human)),
+        "vibratoShare": {"human": r2(vib_share(0)), "synth": r2(vib_share(1))},
         "vibratoDepthCents": {"human": r2(median(&col(&|m| m.vib_depth, 0))), "synth": r2(median(&col(&|m| m.vib_depth, 1)))},
         "vibratoRateHz": {"human": r2(median(&col(&|m| m.vib_rate, 0))), "synth": r2(median(&col(&|m| m.vib_rate, 1)))},
         "aperiodicity": {"human": r2(median(&col(&|m| m.aperiodicity, 0))), "synth": r2(median(&col(&|m| m.aperiodicity, 1)))},
@@ -756,7 +887,7 @@ fn compare_song(
         "bandDiffDb": BAND_NAMES.iter().zip(&band_mean).map(|(n, v)| (n.to_string(), r2(*v))).collect::<serde_json::Map<_, _>>(),
     });
     let line = format!(
-        "{id}  {:>3} notes  pitch |c| H {:>5} S {:>5}  vib H {:>4}c/{:>3}Hz S {:>4}c/{:>3}Hz  aper H {} S {}  H1-H2 H {:>5} S {:>5}  MCD {:>4}  lag {:+.2}s r {}  bands {}",
+        "{id}  {:>3} notes ({misaligned:>2} off-time)  pitch |c| H {:>5} S {:>5}  vib H {:>4}c/{:>3}Hz S {:>4}c/{:>3}Hz  aper H {} S {}  H1-H2 H {:>5} S {:>5}  MCD {:>4}  lag {:+.2}s r {}  bands {}",
         notes.len(),
         fx(median(&abs_cents(0)), 1),
         fx(median(&abs_cents(1)), 1),
@@ -908,12 +1039,29 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     md += &format!(
         "{} songs, body `{body_name}`. Medians over songs of each song's median (MCD and bands: means). \
          H = the singer, S = the synth. Per-note detail is in `report.json`; renders are `<id>-synth.wav`, \
-         on the same timeline as `english/wav/<id>.wav`.\n\n",
-        results.len()
+         on the same timeline as `english/wav/<id>.wav`.\n\n\
+         {} of {} notes are compared. {} were left out because the planner could not start their vowel \
+         within {} ms of the annotated start (a note too short for its consonants pushes the \
+         following vowels late); the rest lack a spectrum on one side.\n\n",
+        results.len(),
+        results
+            .iter()
+            .map(|r| r.summary["notesCompared"].as_u64().unwrap_or(0))
+            .sum::<u64>(),
+        results
+            .iter()
+            .map(|r| r.summary["notes"].as_u64().unwrap_or(0))
+            .sum::<u64>(),
+        results
+            .iter()
+            .map(|r| r.summary["notesMisaligned"].as_u64().unwrap_or(0))
+            .sum::<u64>(),
+        MAX_MISALIGN * 1000.0,
     );
     md += "| measure | human | synth |\n|---|---|---|\n";
     for (label, key) in [
         ("pitch error vs score (|cents|)", "pitchAbsCentsVsScore"),
+        ("long notes with vibrato (share)", "vibratoShare"),
         ("vibrato depth (peak cents)", "vibratoDepthCents"),
         ("vibrato rate (Hz)", "vibratoRateHz"),
         ("aperiodicity (YIN)", "aperiodicity"),
@@ -1012,4 +1160,123 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     println!("\n{md}");
     println!("wrote {out_dir}/report.md, {out_dir}/report.json");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RATE: f64 = 44100.0;
+
+    fn held_note(midi: f64, start: f64, end: f64) -> Note {
+        Note {
+            start,
+            end,
+            midi,
+            csd: "a".into(),
+            syl: Syllable {
+                text: "a".into(),
+                onset: vec![],
+                nucleus: Segment::new("ɑ"),
+                coda: vec![],
+                melisma: None,
+                word_end: true,
+                phrase_end: true,
+            },
+            phrase_start: true,
+            prev_end: f64::NEG_INFINITY,
+        }
+    }
+
+    /// 2 s of harmonics `amps` on `midi`, pitch modulated by `vib(t)` cents
+    fn tone(midi: f64, amps: &[f64], vib: impl Fn(f64) -> f64) -> Vec<f64> {
+        let f = midi_to_hz(midi);
+        let mut phase = 0.0;
+        (0..(2.0 * RATE) as usize)
+            .map(|i| {
+                let t = i as f64 / RATE;
+                phase += 2.0 * std::f64::consts::PI * f * 2f64.powf(vib(t) / 1200.0) / RATE;
+                0.2 * amps
+                    .iter()
+                    .enumerate()
+                    .map(|(h, a)| a * ((h + 1) as f64 * phase).sin())
+                    .sum::<f64>()
+            })
+            .collect()
+    }
+
+    fn measure(x: &[f64], midi: f64) -> NoteMeas {
+        let a = Analyzer::new(x, RATE, midi_to_hz(midi - 7.0), midi_to_hz(midi + 7.0));
+        a.note(x, &held_note(midi, 0.1, 1.9))
+    }
+
+    #[test]
+    fn vibrato_reads_rate_and_depth_of_a_periodic_modulation() {
+        let x = tone(67.0, &[1.0], |t| {
+            50.0 * (2.0 * std::f64::consts::PI * 5.5 * t).sin()
+        });
+        let m = measure(&x, 67.0);
+        assert!(m.vib_eligible);
+        assert!((m.vib_rate - 5.5).abs() < 0.3, "rate {}", m.vib_rate);
+        assert!((m.vib_depth - 50.0).abs() < 8.0, "depth {}", m.vib_depth);
+    }
+
+    #[test]
+    fn vibrato_is_absent_from_a_straight_tone_with_pitch_jitter_or_a_scoop() {
+        // ±8 cents of random jitter (a new value every 2.5 ms, interpolated): not vibrato
+        let mut seed = 12345u32;
+        let jitter: Vec<f64> = (0..1000)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                8.0 * ((seed >> 8) as f64 / (1u32 << 24) as f64 * 2.0 - 1.0)
+            })
+            .collect();
+        let x = tone(67.0, &[1.0], |t| {
+            let u = t / 0.0025;
+            let (i, f) = (u.floor() as usize, u - u.floor());
+            jitter[i] * (1.0 - f) + jitter[i + 1] * f
+        });
+        let m = measure(&x, 67.0);
+        assert!(
+            m.vib_eligible && m.vib_depth.is_nan(),
+            "{} c at {} Hz",
+            m.vib_depth,
+            m.vib_rate
+        );
+        // a slow 60-cent scoop up and back over the note
+        let x = tone(67.0, &[1.0], |t| {
+            -60.0 * (std::f64::consts::PI * t / 2.0).sin()
+        });
+        let m = measure(&x, 67.0);
+        assert!(
+            m.vib_depth.is_nan(),
+            "{} c at {} Hz",
+            m.vib_depth,
+            m.vib_rate
+        );
+    }
+
+    #[test]
+    fn h1h2_reads_the_harmonic_ratio_whatever_the_vibrato() {
+        // H2 at half the amplitude of H1: 6.02 dB, with and without a wide vibrato
+        for depth in [0.0, 100.0] {
+            let x = tone(62.0, &[1.0, 0.5], |t| {
+                depth * (2.0 * std::f64::consts::PI * 6.0 * t).sin()
+            });
+            let m = measure(&x, 62.0);
+            assert!(
+                (m.h1h2 - 6.02).abs() < 0.7,
+                "vibrato {depth} c: H1−H2 {}",
+                m.h1h2
+            );
+        }
+    }
+
+    #[test]
+    fn a_note_with_no_spectrum_has_no_cepstrum() {
+        let x = tone(67.0, &[1.0], |_| 0.0);
+        let a = Analyzer::new(&x, RATE, 200.0, 600.0);
+        let m = a.note(&x, &held_note(67.0, 5.0, 6.0)); // past the end of the signal
+        assert!(m.cep.iter().all(|c| c.is_nan()) && mcd(&m.cep, &m.cep).is_nan());
+    }
 }

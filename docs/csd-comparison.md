@@ -46,15 +46,21 @@ under test.
   note, continues that note as a melisma.
 - **Settings.** The body, the source settings and the 35-cent vibrato match `render song`.
 
+**Notes the planner can't place on time.** `plan_song` lays a phrase's segments end to end and
+gives each vowel at least 50 ms. A note too short for its consonants therefore pushes the
+following vowels late. Any note whose planned vowel starts more than 30 ms from its annotated
+start is kept in `report.json` (`"aligned": false`) but left out of every statistic, because its
+measurement window would hold the wrong sound. The report gives the count.
+
 **What is measured.** Each note is measured over its steady part: from 30 % into the note to
 20 % before its end, or from 10 % to 10 % for melisma notes.
 
 | measure | what it tells you |
 |---|---|
 | pitch vs score, synth vs singer (cents) | intonation; YIN searched ±7 semitones around the score note, so it cannot jump octaves |
-| vibrato depth (peak cents) and rate (Hz) | from the detrended contour of notes with at least 0.35 s of steady part |
+| vibrato share, depth (peak cents) and rate (Hz) | over the note's longest unbroken voiced run, if it lasts 0.4 s: the detrended contour counts as vibrato only if its autocorrelation peaks at 0.5 or more between 4 and 9 Hz. The share is how many such notes have vibrato |
 | aperiodicity | YIN's aperiodicity: noise and roughness in the voice |
-| H1−H2 (dB) | first minus second harmonic, the standard voice-quality measure: high is breathy or lax, low is pressed |
+| H1−H2 (dB) | first minus second harmonic, the standard voice-quality measure: high is breathy or lax, low is pressed. Measured in each voiced frame at that frame's own f0, then the median is taken |
 | voiced share | share of steady frames the synth actually voices; a frame is voiced when YIN finds a period and it is within 35 dB of the signal's loud level |
 | voice onset (s) | first voiced frame of a phrase-initial note, relative to the note start; vowel-initial and consonant-initial phrases are reported separately |
 | band levels, synth − singer (dB) | 0–0.5, 0.5–1, 1–2, 2–4 and 4–8 kHz, each relative to the 0–8 kHz total: spectral tilt and vowel colour, per vowel |
@@ -74,16 +80,20 @@ under test.
 
 ## Baseline (2026-11-05, the 50 `a` songs, female body)
 
+7,032 of 7,220 notes are compared. The other 188 were too short for the planner to place on time:
+up to 25 in a song (en028a), mostly in fast passages.
+
 | measure | singer | synth |
 |---|---|---|
-| pitch error vs score (median \|cents\|) | 15.4 | 5.0 |
-| vibrato depth (peak cents) / rate (Hz) | 37 / 6.7 | 35 / 5.8 |
-| H1−H2 (dB) | +3.2 | −1.7 |
-| H1−H2 on notes ≤ C4 / notes ≥ G4 (dB) | +3.9 / +0.2 | −6.0 / +7.5 |
-| voiced share of steady frames | 0.93 | 0.87 (0.66 in en018a) |
+| pitch error vs score (median \|cents\|) | 15.3 | 5.0 |
+| long notes with vibrato | 65 % | 100 % |
+| vibrato depth (peak cents) / rate (Hz) | 39 / 6.0 | 35 / 5.5 |
+| H1−H2 (dB) | +3.8 | −1.7 |
+| H1−H2 on notes ≤ C4 / notes ≥ G4 (dB) | +4.1 / 0.0 | −5.8 / +8.0 |
+| voiced share of steady frames | 0.94 | 0.88 (0.64 in en041a) |
 | voice onset, consonant-initial phrases (s) | +0.01 | −0.06 |
 
-- **Spectral balance.** Over all vowels, synth minus singer is −3.1, 0.0, +1.4, +4.5 and +7.9 dB
+- **Spectral balance.** Over all vowels, synth minus singer is −3.2, 0.0, +1.4, +4.5 and +8.0 dB
   in the five bands.
 - **Distance and timing.** Note MCD is 9.2 dB. The envelope lag is −0.02 s (between −0.06 and
   +0.04 s) with correlation 0.79.
@@ -91,13 +101,15 @@ under test.
 What this points at:
 
 1. **Too much energy above 2 kHz**, about +8 dB at 4–8 kHz, for every vowel.
-2. **The fundamental is weak on low notes and too strong on high ones.** H1−H2 should vary much
-   less with pitch than it does.
+2. **The fundamental is weak on low notes and too strong on high ones.** The singer's H1−H2 falls
+   only about 4 dB from her low notes to her high ones. The synth's rises by 14 dB.
 3. **Consonants come too early.** For consonant-initial phrases the singer's voicing starts at
    the note's annotated start, but the synth sings its onset consonants about 60 ms before it.
    Either CSD annotates the syllable start rather than the vowel, or this singer puts consonants
    on the beat. Either way it is a timing difference to check by ear.
-4. **Vibrato is too uniform.** The synth puts the same 35-cent vibrato on every long note. The
-   singer's ranges from almost none to wide, and is faster.
-5. **Voicing gaps in the steady part of notes.** These are worst in en018a, en041a and en043a,
+4. **Vibrato is too uniform.** The synth puts 35-cent vibrato on every long note. The singer uses
+   it on about two thirds of them, a little wider and faster.
+5. **Voicing gaps in the steady part of notes.** These are worst in en041a, en018a and en043a,
    which are worth listening to first.
+6. **Short notes don't fit.** When a note is too short for its consonants, the planner runs late,
+   about 2.6 % of notes here. Fast lyrics will drift off the beat.
