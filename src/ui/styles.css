@@ -2215,3 +2215,139 @@ input[type="range"]::-moz-range-thumb {
     flex-direction: row;
   }
 }
+
+/* ---------- Sing */
+.right-sing {
+  grid-template-columns: minmax(0, 342fr) minmax(0, 342fr);
+  grid-template-rows: minmax(0, 320fr) minmax(0, 134fr) minmax(0, 206fr) minmax(0, 172fr);
+  grid-template-areas: "roll roll" "lyrics lyrics" "spec voice" "keys keys";
+}
+
+.s-roll { grid-area: roll; }
+.s-lyrics { grid-area: lyrics; }
+
+.screen-body > .roll-canvas {
+  height: 100%;
+}
+
+.demo-songs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.demo-songs .chip {
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
+.lyrics {
+  position: absolute;
+  inset: 0;
+  padding: 6px 14px 10px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.lyrics textarea {
+  height: 30px;
+  resize: none;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.lyrics .syllables {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px 0;
+  overflow-y: auto;
+}
+
+.syl-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 3px;
+}
+
+.syl-wrap.word-end {
+  margin-right: 10px;
+}
+
+.syl {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--frame);
+  border-radius: 0;
+  color: var(--blue-mid);
+  padding: 2px 7px;
+  font-family: var(--font);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.syl.sung {
+  color: var(--blue-dim);
+  border-color: rgba(19, 57, 84, 0.6);
+}
+
+.syl.held {
+  font-style: normal;
+  opacity: 0.8;
+}
+
+.syl.next {
+  background: transparent;
+  color: var(--green);
+  border: 1px dashed var(--green);
+  box-shadow: none;
+}
+
+.syl.now {
+  background: rgba(91, 227, 129, 0.1);
+  color: var(--green);
+  border: 1px solid var(--green);
+  box-shadow: 0 0 6px rgba(91, 227, 129, 0.45);
+  text-shadow: 0 0 3px rgba(91, 227, 129, 0.6);
+}
+
+.breath-mark {
+  color: var(--blue-mid);
+  margin-left: 2px;
+}
+
+.from-start {
+  margin-left: 6px;
+  padding: 2px 7px;
+  font-size: 9px;
+}
+
+.right-sing .enc-label {
+  font-size: 9px;
+}
+
+@media (max-width: 1100px) {
+  .right-sing {
+    grid-template-rows: none;
+    grid-template-areas: "roll roll" "lyrics lyrics" "spec voice" "keys keys";
+  }
+  .right-sing .screen-body {
+    min-height: 190px;
+  }
+  .s-roll .screen-body {
+    min-height: 280px;
+  }
+  .s-lyrics .screen-body {
+    min-height: 130px;
+  }
+}
+
+@media (max-width: 640px) {
+  .right-sing {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "roll" "lyrics" "spec" "voice" "keys";
+  }
+}
