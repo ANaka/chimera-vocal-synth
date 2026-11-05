@@ -6,10 +6,10 @@ import { TubeView } from "./components/TubeView.tsx";
 import { Stroboscope } from "./components/Stroboscope.tsx";
 import { SpectrumView } from "./components/SpectrumView.tsx";
 import { VowelMap } from "./components/VowelMap.tsx";
-import { VoicePanel } from "./components/VoicePanel.tsx";
-import { ArticPanel } from "./components/ArticPanel.tsx";
+import { VoiceControls, VoiceToggles } from "./components/VoiceControls.tsx";
 import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
+import { Screen } from "./components/Screen.tsx";
 import { SpeakPanel } from "./components/SpeakPanel.tsx";
 import { BestiaryPanel } from "./components/BestiaryPanel.tsx";
 import { CreatureView } from "./components/CreatureView.tsx";
@@ -22,6 +22,8 @@ import { SingPanel } from "./components/SingPanel.tsx";
 import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
+
+const BODY_NAME: Record<BodyName, string> = { male: "Adult male", female: "Adult female", child: "Child" };
 
 function TopBar() {
   const started = useStore((s) => s.started);
@@ -62,8 +64,8 @@ function TopBar() {
           value={body}
           onChange={setBody}
           options={[
-            { value: "male", label: "Adult male" },
-            { value: "female", label: "Adult female" },
+            { value: "male", label: "Male" },
+            { value: "female", label: "Female" },
             { value: "child", label: "Child" },
           ]}
         />
@@ -141,103 +143,90 @@ function StartPrompt() {
   );
 }
 
+/** The tall left screen: the face (or the creature) with its overlays. */
+function LeftScreen() {
+  const mode = useStore((s) => s.mode);
+  const body = useStore((s) => s.body);
+  const bestiary = mode === "bestiary";
+  return (
+    <Screen
+      className="left"
+      focus
+      title={bestiary ? "Creature" : "Vocal tract"}
+      sub={bestiary ? "Airway / live" : `${BODY_NAME[body]} / midsagittal`}
+      label={bestiary ? "Live creature airway" : "Live vocal tract"}
+      tools={<ViewToggles />}
+    >
+      {bestiary ? <CreatureView /> : <AnatomyView />}
+      {mode === "beatbox" && <BeatOverlay />}
+      <StartPrompt />
+    </Screen>
+  );
+}
+
+function PlayRight() {
+  const f0 = useStore((s) => s.source.f0);
+  return (
+    <div className="right right-play">
+      <Screen className="s-tube" title="Tube" sub="Glottis to lips">
+        <TubeView />
+      </Screen>
+      <Screen className="s-folds" title="Vocal folds" sub="Slowed 100×">
+        <Stroboscope />
+      </Screen>
+      <Screen className="s-spec" title="Spectrum" sub="Resonances">
+        <SpectrumView />
+      </Screen>
+      <Screen className="s-vowels" title="Vowels" sub="F1 / F2">
+        <VowelMap />
+      </Screen>
+      <Screen className="s-voice" title="Voice" tools={<VoiceToggles />}>
+        <VoiceControls />
+      </Screen>
+      <Screen className="s-keys" title="Keys" sub={`${Math.round(f0)} Hz`}>
+        <Keys />
+      </Screen>
+    </div>
+  );
+}
+
+/** Modes not yet redrawn in the vector style: their three instruments, as screens. */
+function LegacyRight() {
+  const mode = useStore((s) => s.mode);
+  const screens: [string, React.ReactNode][] =
+    mode === "beatbox"
+      ? [["Tube, glottis to lips", <TubeView key="t" />], ["Spectrogram", <Spectrogram key="s" />], ["Vocal folds, slowed down", <Stroboscope key="f" />]]
+      : mode === "bestiary"
+        ? [["Spectrogram", <Spectrogram key="s" />], ["Waveform, three cycles", <Scope key="w" />], ["Airway, each tube unrolled", <CreatureTubes key="a" />]]
+        : [["Tube, glottis to lips", <TubeView key="t" />], ["Vocal folds, slowed down", <Stroboscope key="f" />], ["Spectrum and resonances", <SpectrumView key="p" ring={mode === "sing"} />]];
+  return (
+    <div className="right right-legacy">
+      {screens.map(([title, node]) => (
+        <Screen key={title} title={title}>
+          {node}
+        </Screen>
+      ))}
+    </div>
+  );
+}
+
 function Deck() {
   const mode = useStore((s) => s.mode);
   if (mode === "speak") return <SpeakPanel />;
   if (mode === "sing") return <SingPanel />;
   if (mode === "bestiary") return <BestiaryPanel />;
   if (mode === "beatbox") return <BeatboxPanel />;
-  return (
-    <>
-      <section className="deck">
-        <div className="panel vowel-panel">
-          <h2>Vowels</h2>
-          <VowelMap />
-        </div>
-        <VoicePanel />
-        <ArticPanel />
-      </section>
-      <footer className="keys-bar">
-        <Keys />
-      </footer>
-    </>
-  );
-}
-
-function Instruments() {
-  const mode = useStore((s) => s.mode);
-  if (mode === "beatbox")
-    return (
-      <aside className="instruments">
-        <figure className="instrument">
-          <figcaption>Tube, glottis to lips</figcaption>
-          <TubeView />
-        </figure>
-        <figure className="instrument">
-          <figcaption>Spectrogram</figcaption>
-          <Spectrogram />
-        </figure>
-        <figure className="instrument">
-          <figcaption>Vocal folds, slowed down</figcaption>
-          <Stroboscope />
-        </figure>
-      </aside>
-    );
-  if (mode === "bestiary")
-    return (
-      <aside className="instruments">
-        <figure className="instrument">
-          <figcaption>Spectrogram</figcaption>
-          <Spectrogram />
-        </figure>
-        <figure className="instrument">
-          <figcaption>Waveform, three cycles</figcaption>
-          <Scope />
-        </figure>
-        <figure className="instrument">
-          <figcaption>Airway, each tube unrolled</figcaption>
-          <CreatureTubes />
-        </figure>
-      </aside>
-    );
-  return (
-    <aside className="instruments">
-      <figure className="instrument">
-        <figcaption>Tube, glottis to lips</figcaption>
-        <TubeView />
-      </figure>
-      <figure className="instrument">
-        <figcaption>Vocal folds, slowed down</figcaption>
-        <Stroboscope />
-      </figure>
-      <figure className="instrument">
-        <figcaption>Spectrum and resonances</figcaption>
-        <SpectrumView />
-      </figure>
-    </aside>
-  );
-}
-
-function Viewport() {
-  const mode = useStore((s) => s.mode);
-  const bestiary = mode === "bestiary";
-  return (
-    <section className="viewport" aria-label={bestiary ? "Live creature airway" : "Live vocal tract"}>
-      {bestiary ? <CreatureView /> : <AnatomyView />}
-      {mode === "beatbox" && <BeatOverlay />}
-      <StartPrompt />
-      <ViewToggles />
-    </section>
-  );
+  return null;
 }
 
 export function App() {
+  const mode = useStore((s) => s.mode);
   return (
-    <div className="app">
+    <div className={`app mode-${mode}`}>
       <TopBar />
-      <main className="stage">
-        <Viewport />
-        <Instruments />
+      <main className={`wall wall-${mode}`}>
+        <LeftScreen />
+        {mode === "play" ? <PlayRight /> : <LegacyRight />}
       </main>
       <Deck />
     </div>

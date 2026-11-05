@@ -1,15 +1,17 @@
 import { useRef } from "react";
-import { useCanvasLoop, font } from "../useCanvas.ts";
+import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
 import { useModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
-import { C } from "../colors.ts";
+import { V } from "../colors.ts";
+import { beamPts, handle, ipaGlyph, label, seg, type Pt } from "../render/vector.ts";
+import { nearestVowel } from "./AnatomyView.tsx";
 
 /**
  * Vowel map in the phonetician's orientation: F2 decreasing left→right, F1 increasing downward.
  * Calibrated vowels are plotted where this body actually produces them; dragging morphs the
- * articulation between them; the yellow ring is the live tract's measured (F1, F2).
+ * articulation between them; the green ring is the live tract's measured (F1, F2), with a trail.
  */
 export function VowelMap() {
   const model = useModel();
@@ -34,49 +36,36 @@ export function VowelMap() {
     const F1 = Math.exp(Math.log(r.f1[0]) + v * (Math.log(r.f1[1]) - Math.log(r.f1[0])));
     return { F1, F2 };
   };
-  const ref = useCanvasLoop(({ ctx, w, h }) => {
+  const trail = useRef<{ x: number; y: number }[]>([]);
+  const ref = usePhosphor(({ ctx, w, h }) => {
     const m = model.current;
     if (!m) return;
     const st = useStore.getState();
-    ctx.clearRect(0, 0, w, h);
-    // vowel trapezoid guide
+    // vowel trapezoid guide, like a border on a map
     const corners = [toXY(300, 2500, w, h), toXY(320, 850, w, h), toXY(720, 1050, w, h), toXY(780, 1650, w, h)];
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    corners.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    ctx.closePath();
-    ctx.stroke();
-    ctx.font = font(16, 500);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    for (const v of m.vowels) {
-      const p = toXY(v.F1, v.F2, w, h);
-      ctx.fillStyle = "rgba(232,234,235,0.82)";
-      ctx.fillText(v.ipa, p.x, p.y);
-    }
-    // live point
+    beamPts(ctx, corners.map((p) => [p.x, p.y] as Pt), V.blueDim, 1, { close: true, alpha: 0.9 });
     const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
     const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
     const fm = m.transfer(a).formants;
-    if (fm.length >= 2) {
-      const p = toXY(fm[0], fm[1], w, h);
-      ctx.strokeStyle = C.caliper;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-      ctx.fillStyle = C.caliper;
-      ctx.fill();
+    const live = fm.length >= 2 ? toXY(fm[0], fm[1], w, h) : null;
+    const near = fm.length >= 2 ? nearestVowel(m, fm[0], fm[1]) : "";
+    for (const v of m.vowels) {
+      if (v.ipa === near && live) continue;
+      const p = toXY(v.F1, v.F2, w, h);
+      ipaGlyph(ctx, p.x, p.y + 5, v.ipa, 15, V.blueMid);
     }
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.font = font(10.5);
-    ctx.fillStyle = C.textDim;
-    ctx.fillText("F2", w - 22, h - 5);
-    ctx.fillText("F1", 4, h - 5);
+    if (live) {
+      // where the tongue has been: a fading trail of the last second or so
+      const tr = trail.current;
+      const last = tr[tr.length - 1];
+      if (!last || Math.hypot(last.x - live.x, last.y - live.y) > 0.5) tr.push(live);
+      if (tr.length > 40) tr.shift();
+      for (let i = 1; i < tr.length; i++) seg(ctx, tr[i - 1].x, tr[i - 1].y, tr[i].x, tr[i].y, V.green, 1.2, { alpha: 0.08 + (0.6 * i) / tr.length });
+      handle(ctx, live.x, live.y, V.green, 8);
+      ipaGlyph(ctx, live.x + 20, live.y - 8, near, 17, V.green);
+    }
+    label(ctx, "F2", w - 6, h - 5, { size: 9, color: V.blueDim, align: "right", ls: 0.1 });
+    label(ctx, "F1", 4, h - 5, { size: 9, color: V.blueDim, ls: 0.1 });
   });
 
   const apply = (e: React.PointerEvent) => {

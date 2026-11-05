@@ -1,14 +1,41 @@
 import { useEffect, useRef, useState } from "react";
-import { AnatomyRenderer, type HandleId } from "../render/anatomy.ts";
+import { AnatomyRenderer, type HandleId, type Slot } from "../render/anatomy.ts";
+import { Glow } from "../render/vector.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
 import { VoiceModel } from "../analysis.ts";
 import { useModel } from "../useModel.ts";
-import type { HumanArtic } from "../../wasm/types.ts";
+import { V } from "../colors.ts";
+import type { HumanArtic, HumanFrame } from "../../wasm/types.ts";
+import type { TelemetryMessage } from "../../worklet/protocol.ts";
 
-const BODY_LABEL = { male: "Human, adult male", female: "Human, adult female", child: "Human, child" } as const;
+/** What the four readouts under the chin show; a mode can pass its own. */
+export type SlotsFn = (m: VoiceModel, a: HumanArtic, f: HumanFrame, formants: number[], tele: TelemetryMessage | null) => Slot[];
 
-export function AnatomyView() {
+/** the calibrated vowel nearest to (F1, F2), same metric as the vowel map */
+export function nearestVowel(m: VoiceModel, F1: number, F2: number): string {
+  let best = "", bd = Infinity;
+  for (const v of m.vowels) {
+    const d = Math.hypot(Math.log(F1 / v.F1) * 2.2, Math.log(F2 / v.F2));
+    if (d < bd) {
+      bd = d;
+      best = v.ipa;
+    }
+  }
+  return best;
+}
+
+/** Play mode: the tongue as its nearest vowel, then jaw, lips and soft palate */
+export const articulatorSlots: SlotsFn = (m, a, f, formants) => [
+  formants.length >= 2 ? { label: "Tongue", value: nearestVowel(m, formants[0], formants[1]), color: V.green, ipa: true } : { label: "Tongue", value: "-", color: V.green },
+  { label: "Jaw", value: a.jaw.toFixed(1), unit: "cm", color: V.red },
+  { label: "Lips", value: a.lipAp.toFixed(1), unit: "cm", color: V.pink },
+  f.velumPort > 0.02 ? { label: "Soft palate", value: f.velumPort.toFixed(2), unit: "cm²", color: V.white } : { label: "Soft palate", value: "Shut", color: V.white },
+];
+
+export function AnatomyView(props: { slots?: SlotsFn }) {
+  const slotsRef = useRef<SlotsFn>(props.slots ?? articulatorSlots);
+  slotsRef.current = props.slots ?? articulatorSlots;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const model = useModel();
@@ -20,12 +47,20 @@ export function AnatomyView() {
 
   useEffect(() => {
     const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d")!;
     const wrap = wrapRef.current!;
-    const r = new AnatomyRenderer(canvas);
+    const r = new AnatomyRenderer();
+    const glow = new Glow();
     rendererRef.current = r;
+    let w = 0, h = 0, dpr = 1;
     const ro = new ResizeObserver(() => {
       const b = wrap.getBoundingClientRect();
-      r.resize(b.width, b.height, Math.min(2, window.devicePixelRatio || 1));
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      w = b.width;
+      h = b.height;
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      r.resize(w, h);
     });
     ro.observe(wrap);
     let raf = 0;
@@ -39,10 +74,18 @@ export function AnatomyView() {
       const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
       const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
       const m = model.current;
-      if (m) {
+      if (m && w > 0 && h > 0) {
         const f = m.frame(a);
         if (++fTick % 4 === 0 || formants.length === 0) formants = m.transfer(a).formants;
-        r.draw(m, f, a, tele, st.view, { hover: hoverRef.current, drag: dragRef.current?.id ?? null, dt, bodyLabel: BODY_LABEL[st.body], formants });
+        const info = [`Tract ${f.length.toFixed(1)} cm`, `Mouth ${f.lipArea.toFixed(1)} cm²`];
+        if (tele) info.push(`F0 ${tele.t.f0.toFixed(1)} Hz`, `Lungs ${tele.t.pLung.toFixed(1)} cmH₂O`);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        r.draw(ctx, m, f, a, tele, st.view, { hover: hoverRef.current, drag: dragRef.current?.id ?? null, dt, formants, slots: slotsRef.current(m, a, f, formants, tele), info: info.map((s) => s.toUpperCase()) });
+        glow.apply(canvas, ctx, dpr);
       }
       raf = requestAnimationFrame(loop);
     };

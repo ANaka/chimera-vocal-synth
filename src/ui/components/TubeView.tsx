@@ -1,21 +1,24 @@
-import { useCanvasLoop, font } from "../useCanvas.ts";
+import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
 import { useModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
-import { C, hot, pressureLevel } from "../colors.ts";
+import { V, heat, pressureLevel } from "../colors.ts";
+import { beam, beamPts, label, seg, type Pt } from "../render/vector.ts";
 
-/** The simulated tube: diameter profile along the tract, lit by acoustic pressure, nasal branch above. */
+/**
+ * The simulated tube as a wireframe: one ring per section (diameter from the area function),
+ * lit by acoustic pressure, with the nasal branch above the velum junction.
+ */
 export function TubeView() {
   const model = useModel();
-  const ref = useCanvasLoop(({ ctx, w, h }) => {
+  const ref = usePhosphor(({ ctx, w, h }) => {
     const st = useStore.getState();
     const m = model.current;
     if (!m) return;
-    ctx.clearRect(0, 0, w, h);
     const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
     let ph: ArrayLike<number>, or: ArrayLike<number>, phLen: number, orLen: number;
-    let rms: Float32Array | null = null;
+    let rms: ArrayLike<number> | null = null;
     if (tele) {
       ph = tele.t.phAreas;
       or = tele.t.orAreas;
@@ -31,67 +34,60 @@ export function TubeView() {
     }
     const nPh = ph.length, nOr = or.length;
     const total = phLen + orLen;
-    const padL = 12, padR = 12;
-    const axisY = h * 0.62;
-    const sx = (w - padL - padR) / total;
-    // diameter scale: 4 cm diameter → 34% of height
-    const dScale = (h * 0.34) / 4;
+    const x0 = 16, x1 = w - 16;
+    const sx = (x1 - x0) / total;
+    const axisY = h * 0.6;
+    const dS = (h * 0.3) / 4; // 4 cm diameter → 30% of the height
     const a2d = (A: number) => 2 * Math.sqrt(Math.max(0, A) / Math.PI);
-    // nasal branch (fixed profile) above, from the velum junction
+    const secs: { x: number; r: number; lv: number }[] = [];
+    for (let i = 0; i < nPh; i++) secs.push({ x: x0 + ((i + 0.5) / nPh) * phLen * sx, r: (a2d(ph[i]) * dS) / 2, lv: rms ? pressureLevel(rms[i]) : 0 });
+    for (let i = 0; i < nOr; i++) secs.push({ x: x0 + (phLen + ((i + 0.5) / nOr) * orLen) * sx, r: (a2d(or[i]) * dS) / 2, lv: rms ? pressureLevel(rms[nPh + i]) : 0 });
+
+    // nasal branch: dashed and dim while the velum is shut
     const velum = tele ? tele.t.velumPort : m.frame(st.artic).velumPort;
-    const naX0 = padL + phLen * sx;
-    const naY = axisY - h * 0.36;
-    const naLen = 11.4 * m.bodyParams.scale;
-    const nasalLit = Math.min(1, velum / 0.4);
-    ctx.strokeStyle = `rgba(160,170,175,${0.25 + 0.5 * nasalLit})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(naX0, axisY - a2d(ph[nPh - 1]) * dScale * 0.5);
-    ctx.lineTo(naX0, naY + 6);
-    ctx.stroke();
-    const naW = Math.min(w - padR - naX0, naLen * sx * 0.75);
-    ctx.fillStyle = `rgba(120,130,135,${0.18 + 0.35 * nasalLit})`;
-    ctx.beginPath();
-    ctx.roundRect(naX0, naY - 5, naW, 10, 5);
-    ctx.fill();
-    ctx.fillStyle = C.textDim;
-    ctx.font = font(11);
-    ctx.fillText(velum > 0.02 ? `Nasal, port ${velum.toFixed(2)} cm²` : "Nasal, closed", naX0 + 4, naY - 10);
-    // sections
-    const draw = (areas: ArrayLike<number>, s0: number, len: number, n: number, off: number) => {
-      const dx = len / n;
-      for (let i = 0; i < n; i++) {
-        const x = padL + (s0 + i * dx) * sx;
-        const ww = Math.max(1, dx * sx - 1);
-        const d = a2d(areas[i]) * dScale;
-        const lvl = rms ? pressureLevel(rms[off + i]) : 0;
-        const [r, g, b] = hot(0.08 + 0.92 * lvl);
-        ctx.fillStyle = rms ? `rgb(${r | 0},${g | 0},${b | 0})` : "#5b6368";
-        ctx.fillRect(x, axisY - d / 2, ww, Math.max(0.5, d));
-      }
-    };
-    draw(ph, 0, phLen, nPh, 0);
-    draw(or, phLen, orLen, nOr, nPh);
+    const open = velum > 0.02;
+    const jx = x0 + phLen * sx;
+    const nTop = axisY - h * 0.36;
+    const nLen = Math.min(x1 - jx - 40, 11.4 * m.bodyParams.scale * sx * 0.62);
+    const nc = open ? V.white : V.blueDim;
+    const dash = open ? undefined : [3, 4];
+    for (const off of [-5, 5]) {
+      const p = new Path2D();
+      p.moveTo(jx + off, axisY - 26);
+      p.lineTo(jx + off, nTop + off + 2);
+      p.quadraticCurveTo(jx + off, nTop + off, jx + 8, nTop + off);
+      p.lineTo(jx + nLen, nTop + off);
+      beam(ctx, p, nc, 1, { dash });
+    }
+    label(ctx, "NOSE", jx + nLen + 6, nTop + 3, { size: 9, color: nc, ls: 0.16 });
+    label(ctx, open ? `VELUM OPEN ${velum.toFixed(2)} CM²` : "VELUM SHUT", jx, nTop - 12, { size: 9, color: nc, ls: 0.16, align: "center" });
+
+    // silhouette and rings
+    const top: Pt[] = [[x0, axisY - 3], ...secs.map((q) => [q.x, axisY - q.r] as Pt), [x1, axisY - secs[secs.length - 1].r]];
+    const bot: Pt[] = [[x0, axisY + 3], ...secs.map((q) => [q.x, axisY + q.r] as Pt), [x1, axisY + secs[secs.length - 1].r]];
+    beamPts(ctx, top, V.blue, 1.3, { hot: true });
+    beamPts(ctx, bot, V.blue, 1.3, { hot: true });
+    for (const q of secs) {
+      const lv = Math.pow(q.lv, 0.85);
+      const p = new Path2D();
+      p.ellipse(q.x, axisY, Math.max(1.2, q.r * 0.28), Math.max(0.6, q.r), 0, 0, Math.PI * 2);
+      beam(ctx, p, rms ? heat(lv) : V.blueDim, 1.1, { alpha: rms ? 0.35 + 0.65 * lv : 0.6 });
+    }
+    seg(ctx, x0, axisY, x1, axisY, V.blueDim, 0.8, { dash: [2, 5], alpha: 0.8 });
+
     // landmarks
     const f = m.frame(tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic);
-    const marks: [number, string][] = [[0, "Glottis"], [phLen, "Velum"], [total, "Lips"]];
-    if ((total - f.teethS) * sx > 46) marks.splice(2, 0, [f.teethS, "Teeth"]);
-    ctx.font = font(11);
-    ctx.fillStyle = C.textDim;
-    ctx.strokeStyle = "rgba(154,163,168,0.4)";
+    const marks: [number, string][] = [[0, "GLOTTIS"], [phLen, "VELUM"], [f.teethS, "TEETH"], [total, "LIPS"]];
     let lastRight = -Infinity;
     for (const [s, name] of marks) {
-      const x = padL + s * sx;
-      const twCheck = ctx.measureText(name).width;
-      if (x - twCheck / 2 < lastRight + 6) continue;
-      lastRight = x + twCheck / 2;
-      ctx.beginPath();
-      ctx.moveTo(x, h - 22);
-      ctx.lineTo(x, h - 16);
-      ctx.stroke();
-      const tw = ctx.measureText(name).width;
-      ctx.fillText(name, Math.min(w - tw - 2, Math.max(2, x - tw / 2)), h - 4);
+      const x = x0 + s * sx;
+      const tw = name.length * 9 * 0.78;
+      const lx = Math.min(w - tw - 2, Math.max(2, x - tw / 2));
+      if (lx < lastRight + 8) continue;
+      lastRight = lx + tw;
+      seg(ctx, x, h - 26, x, h - 21, V.blueDim, 1);
+      label(ctx, name, lx, h - 9, { size: 9, color: V.blueMid, ls: 0.16 });
     }
   });
-  return <canvas ref={ref} className="instrument-canvas" aria-label="Area function of the simulated tube" role="img" />;
+  return <canvas ref={ref} className="instrument-canvas" aria-label="Area function of the simulated tube, lit by sound pressure" role="img" />;
 }
