@@ -90,7 +90,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
         break;
       case "schedule": {
         // O(n) time shift onto the voice clock; planning happened on the main thread
-        const off = this.voice.clock + 0.03;
+        const off = this.voice.clock + (m.lead ?? 0.03);
         const gs = m.gestures.slice(0, 4000);
         for (const g of gs) {
           g.t0 += off;
@@ -98,7 +98,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
         }
         if (m.replace) this.voice.cancelScore();
         this.voice.schedule(gs);
-        this.post({ type: "planned", id: m.id, t0: off, end: m.end + off, segments: m.segments.map((s) => ({ ...s, t0: s.t0 + off, t1: s.t1 + off })) });
+        if (m.segments.length) this.post({ type: "planned", id: m.id, t0: off, end: m.end + off, segments: m.segments.map((s) => ({ ...s, t0: s.t0 + off, t1: s.t1 + off })) });
         break;
       }
       case "stopSpeech":
@@ -116,6 +116,9 @@ class ChimeraProcessor extends AudioWorkletProcessor {
         }
         break;
       }
+      case "release":
+        this.voice.release(m.tag);
+        break;
       case "beatHit": {
         const hit = this.voice.clock + BeatPlayer.leadIn(m.id, this.body);
         this.voice.schedule(this.beat.gestures({ id: m.id, note: m.note, accent: m.accent }, hit, 0.18));

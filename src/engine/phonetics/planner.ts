@@ -61,6 +61,12 @@ const EXPAND: Record<string, string[]> = {
   ɚ: ["ɝ"],
 };
 
+/** The two vowel targets of a diphthong ("aɪ" → ["a", "ɪ"]), or null. */
+export function diphthongParts(ipa: string): [string, string] | null {
+  const p = EXPAND[ipa];
+  return p && p.length === 2 ? [p[0], p[1]] : null;
+}
+
 export function isVowel(ipa: string, body = "male"): boolean {
   return !!VT[body]?.[ipa] || ipa in EXPAND;
 }

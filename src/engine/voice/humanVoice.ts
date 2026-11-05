@@ -125,6 +125,8 @@ export class HumanVoice {
     this.dec = new Decimator(this.M);
     this.ctrlEvery = 64 * this.M;
     this.dcCoef = Math.exp((-2 * Math.PI * 25) / this.fsOut);
+    this.limHoldN = Math.round(0.025 * this.fsOut);
+    this.limRelease = Math.exp(-1 / (0.2 * this.fsOut));
     const nTract = this.airway.nPh + this.airway.nOr;
     this.rmsAcc = new Float64Array(nTract);
     this.flowSm = new Float64Array(nTract);
@@ -148,6 +150,11 @@ export class HumanVoice {
   /** Add gestures (times on the voice clock). */
   schedule(gestures: Gesture[]): void {
     this.score.addAll(gestures);
+  }
+
+  /** End the open-ended gestures with this tag now (a sung note's key was released). */
+  release(tag: number): void {
+    this.score.release(tag, this.clock);
   }
 
   /** Cancel scheduled gestures (speech stops; the voice returns to the performer's posture). */
@@ -182,6 +189,11 @@ export class HumanVoice {
     g.effort = clamp((Math.abs(s.pressure) - 3) / 10, 0, 1);
   }
 
+  private limEnv = 0;
+  private limHold = 0;
+  private readonly limHoldN: number;
+  private readonly limRelease: number;
+
   /** Render n output samples into out[offset..]. */
   render(out: Float32Array, offset: number, n: number): void {
     const air = this.airway;
@@ -213,9 +225,18 @@ export class HumanVoice {
           this.dcX = v;
           this.dcY = hp;
           v = hp;
-          // soft limiter
+          // output limiter: a peak envelope held for longer than a glottal period, so a loud
+          // sung vowel is turned down by a steady gain instead of being squared off; only a
+          // rising level touches the soft clip
           const av = Math.abs(v);
-          if (av > 0.7) v = Math.sign(v) * (0.7 + 0.3 * Math.tanh((av - 0.7) / 0.3));
+          if (av >= this.limEnv) {
+            this.limEnv = av;
+            this.limHold = this.limHoldN;
+          } else if (this.limHold > 0) this.limHold--;
+          else this.limEnv *= this.limRelease;
+          if (this.limEnv > 0.75) v *= 0.75 / this.limEnv;
+          const al = Math.abs(v);
+          if (al > 0.85) v = Math.sign(v) * (0.85 + 0.15 * Math.tanh((al - 0.85) / 0.15));
           out[offset + i] = v;
           this.outAcc += v * v;
           this.outCount++;
@@ -269,6 +290,8 @@ export class HumanVoice {
         breathAct = Math.min(1, br.weight);
         breathVal = br.value;
       }
+      const vb = score.blend("vibrato", t, tmp);
+      gp.vibratoDepth = vb.weight > 0 ? (this.source.vibratoDepth * 0.05 + vb.value * vb.weight) / (0.05 + vb.weight) : this.source.vibratoDepth;
       const pf = score.blend("f0", t, tmp);
       if (pf.weight > 0) {
         f0Target = (this.source.f0 * 0.02 + pf.value * pf.weight) / (0.02 + pf.weight);

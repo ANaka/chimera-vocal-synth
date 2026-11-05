@@ -93,13 +93,13 @@ export class EnglishG2P {
     return phrases;
   }
 
-  /** One word → segments with lexical stress. */
-  word(w: string): Segment[] {
+  /** One word → segments with lexical stress. `reduce`: weak forms of function words (speech). */
+  word(w: string, reduce = true): Segment[] {
     const clean = w.toLowerCase().replace(/^'+|'+$/g, "");
     const entry = this.dict?.get(clean);
     if (entry) {
       const segs = arpabetToSegments(entry);
-      if (FUNCTION_WORDS.has(clean)) {
+      if (reduce && FUNCTION_WORDS.has(clean)) {
         const nv = segs.filter((s) => VOWELS.has(s.ipa)).length;
         for (const s of segs) {
           s.stress = 0;
@@ -110,7 +110,7 @@ export class EnglishG2P {
       return segs;
     }
     // hyphenated compounds
-    if (clean.includes("-")) return clean.split("-").flatMap((p) => this.word(p));
+    if (clean.includes("-")) return clean.split("-").flatMap((p) => this.word(p, reduce));
     return letterToSound(clean);
   }
 }

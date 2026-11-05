@@ -180,6 +180,16 @@ export class AudioEngine {
     this.send({ type: "beat", ...m });
   }
 
+  /** End the sung note (open-ended gestures) with this tag. */
+  release(tag: number): void {
+    this.send({ type: "release", tag });
+  }
+
+  /** Gestures planned on the main thread, times relative to arrival + lead (live playing). */
+  scheduleGestures(gestures: import("../engine/control/score.ts").Gesture[], lead = 0.006): void {
+    this.send({ type: "schedule", gestures, segments: [], end: 0, id: ++this.speakId, replace: false, lead });
+  }
+
   beatHit(id: string, note?: number, accent?: number): void {
     this.send({ type: "beatHit", id, note, accent });
   }

@@ -17,7 +17,9 @@ export type SourceKey =
   /** breath pressure multiplier (0 = no breath, 1 = performer's pressure, <0 = ingressive) */
   | "breath"
   /** pitch in Hz (absolute) */
-  | "f0";
+  | "f0"
+  /** vibrato depth (cents): singers let it bloom a few hundred ms into a held note */
+  | "vibrato";
 
 export type ControlKey = ArticKey | SourceKey;
 
@@ -33,6 +35,8 @@ export interface Gesture {
   releaseHold?: number;
   /** label for visualisation (phoneme / gesture name) */
   label?: string;
+  /** open-ended gestures (a sung note held until its key is released) end via release(tag) */
+  tag?: number;
 }
 
 export interface Blended {
@@ -73,6 +77,17 @@ export class GestureScore {
   clear(): void {
     this.gestures.length = 0;
     this.end = 0;
+  }
+
+  /** End every gesture with this tag at time t (those already ended are left alone). */
+  release(tag: number, t: number): void {
+    for (const g of this.gestures)
+      if (g.tag === tag && g.t1 > t) {
+        g.t1 = Math.max(g.t0, t);
+      }
+    let end = 0;
+    for (const g of this.gestures) end = Math.max(end, g.t1 + g.rampOut + (g.releaseHold ?? 0));
+    this.end = end;
   }
 
   /** Drop gestures that have fully finished before time t. */

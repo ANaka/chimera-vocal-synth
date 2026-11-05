@@ -21,7 +21,7 @@ export type ToWorklet =
   | { type: "gate"; level: number }
   | { type: "telemetry"; enabled: boolean }
   /** gestures planned on the main thread with times relative to "now" (the worklet adds its clock) */
-  | { type: "schedule"; gestures: Gesture[]; segments: PlannedSegment[]; end: number; id: number; replace: boolean }
+  | { type: "schedule"; gestures: Gesture[]; segments: PlannedSegment[]; end: number; id: number; replace: boolean; lead?: number }
   | { type: "stopSpeech" }
   /** switch the active voice: "human" or a creature id */
   | { type: "creature"; id: string; params?: Record<string, number> }
@@ -30,6 +30,8 @@ export type ToWorklet =
   | { type: "stopCall" }
   /** beatbox sequencer: any subset of its state */
   | { type: "beat"; steps?: (BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }
+  /** end the open-ended gestures with this tag now (a sung note released) */
+  | { type: "release"; tag: number }
   /** play one beatbox sound as soon as the mouth can make it */
   | { type: "beatHit"; id: string; note?: number; accent?: number };
 
