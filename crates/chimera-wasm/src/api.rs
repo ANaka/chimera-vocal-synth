@@ -5,7 +5,12 @@
 
 use chimera::airway::frequency::{find_peaks, transfer_function};
 use chimera::anatomy::human::{BodyName, HumanArtic, HumanFrame};
+use chimera::control::beat_player::BeatPlayer;
 use chimera::math;
+use chimera::phonetics::beatbox::{self, BeatStep};
+use chimera::phonetics::planner::{self, PhraseInput, PlanOptions};
+use chimera::phonetics::sing::{self, MelismaOptions, NoteOnOptions, SongOptions, SungNote};
+use chimera::phonetics::{Segment, Syllable};
 use chimera::voice::human_airway::HumanAirway;
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -32,6 +37,10 @@ fn arg<T: serde::de::DeserializeOwned>(req: &Value, key: &str) -> Result<T, Stri
     serde_json::from_value(req.get(key).cloned().unwrap_or(Value::Null)).map_err(|e| format!("{key}: {e}"))
 }
 
+fn to_json<T: serde::Serialize>(v: &T) -> Res {
+    serde_json::to_value(v).map_err(|e| e.to_string())
+}
+
 fn model<'a>(st: &'a mut State, req: &Value) -> Result<&'a mut Model, String> {
     let id: usize = arg(req, "model")?;
     st.models.get_mut(id).ok_or_else(|| format!("no model {id}"))
@@ -41,6 +50,7 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
     let name = req.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match name {
         "version" => Ok(json!({ "layout": crate::LAYOUT_VERSION, "crate": env!("CARGO_PKG_VERSION") })),
+        "catalog" => catalog(),
         // ---------------------------------------------------------------- the anatomy model
         "model" => {
             // the main-thread mirror of the worklet's airway: same topology and node counts
@@ -91,8 +101,44 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
             let formants: Vec<f64> = find_peaks(&freqs, &h.mag, 150.0).iter().map(|p| p.freq).take(5).collect();
             Ok(json!({ "freqs": freqs, "db": db, "formants": formants }))
         }
+        // ---------------------------------------------------------------- planning (speech, song)
+        "planUtterance" => to_json(&planner::plan_utterance(&arg::<Vec<Segment>>(req, "segments")?, &arg::<PlanOptions>(req, "options")?)),
+        "planPhrases" => to_json(&planner::plan_phrases(&arg::<Vec<PhraseInput>>(req, "phrases")?, &arg::<PlanOptions>(req, "options")?)),
+        "planSong" => to_json(&sing::plan_song(&arg::<Vec<SungNote>>(req, "notes")?, &arg::<SongOptions>(req, "options")?)),
+        "planNoteOn" => to_json(&sing::plan_note_on(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, &arg::<NoteOnOptions>(req, "options")?)),
+        "planNoteOff" => to_json(&sing::plan_note_off(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, &arg::<String>(req, "body")?)),
+        "planMelisma" => to_json(&sing::plan_melisma(arg(req, "midi")?, &arg::<MelismaOptions>(req, "options")?)),
+        // ---------------------------------------------------------------- beatbox
+        "parseBeat" => to_json(&beatbox::parse_beat(&arg::<String>(req, "text")?)),
+        "formatBeat" => Ok(Value::String(beatbox::format_beat(&arg::<Vec<Option<BeatStep>>>(req, "steps")?))),
+        "beatReady" => to_json(&beatbox::beat_ready(&arg::<String>(req, "body")?)),
+        "leadIn" => Ok(json!(BeatPlayer::lead_in(&arg::<String>(req, "id")?, &arg::<String>(req, "body")?))),
         _ => Err(format!("unknown fn {name}")),
     }
+}
+
+/// Everything constant the UI needs: articulators, bodies, defaults, sound catalogues.
+fn catalog() -> Res {
+    use chimera::anatomy::human::{ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, NEUTRAL};
+    use chimera::control::articulators::ARTIC_SPECS;
+    use chimera::voice::human_voice::DEFAULT_SOURCE;
+    let specs: serde_json::Map<String, Value> = ArticKey::ALL.iter().map(|k| (k.name().to_string(), serde_json::to_value(ARTIC_SPECS[k.index()]).unwrap())).collect();
+    let vowels: serde_json::Map<String, Value> = planner::vowel_table()
+        .iter()
+        .map(|(body, t)| (body.clone(), Value::Object(t.iter().map(|(ipa, v)| (ipa.clone(), json!({ "artic": v.artic, "formants": v.formants }))).collect())))
+        .collect();
+    Ok(json!({
+        "neutral": NEUTRAL,
+        "bodies": { "male": BODY_MALE, "female": BODY_FEMALE, "child": BODY_CHILD },
+        "articKeys": ArticKey::NAMES,
+        "articSpecs": specs,
+        "defaultSource": DEFAULT_SOURCE,
+        "exhaleLabel": planner::EXHALE_LABEL,
+        "bassNote": beatbox::BASS_NOTE,
+        "beatSounds": &beatbox::BEAT_SOUNDS[..],
+        "beatPresets": &beatbox::BEAT_PRESETS[..],
+        "vowelTargets": vowels,
+    }))
 }
 
 /// Run one JSON call (see the module docs). Returns 0 on success, 1 if the result is an error.
