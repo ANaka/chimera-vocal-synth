@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "dev": "bun run wasm && vite --host 127.0.0.1",
+    "build": "bun run wasm && tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "bun test tests",
-    "typecheck": "tsc --noEmit"
+    "test": "bun run wasm && cargo test --workspace && bun test tests",
+    "typecheck": "tsc --noEmit",
+    "wasm": "cargo build -p chimera-wasm --release --target wasm32-unknown-unknown && cp target/wasm32-unknown-unknown/release/chimera_wasm.wasm src/wasm/chimera.wasm"
   },
   "dependencies": {
     "react": "19.3.1",

@@ -4,3 +4,4 @@ out
 *.wav
 .DS_Store
 target/
+src/wasm/chimera.wasm

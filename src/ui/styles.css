@@ -1316,3 +1316,14 @@ button.midi.on .midi-status {
     animation: none;
   }
 }
+
+/* the engine failed to load */
+.boot-error {
+  max-width: 34rem;
+  margin: 18vh auto;
+  padding: 0 16px;
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+  color: var(--text);
+}
