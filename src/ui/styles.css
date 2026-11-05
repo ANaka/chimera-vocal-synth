@@ -1601,19 +1601,19 @@ button.ghost:hover,
   gap: 4px;
 }
 
-.view-toggles .toggle {
+.screen-tools .toggle {
   position: relative;
   display: inline-flex;
 }
 
-.view-toggles .toggle input {
+.screen-tools .toggle input {
   position: absolute;
   opacity: 0;
   width: 1px;
   height: 1px;
 }
 
-.view-toggles .toggle span {
+.screen-tools .toggle span {
   border: 1px solid var(--frame);
   padding: 2px 7px;
   font-size: 9px;
@@ -1623,13 +1623,13 @@ button.ghost:hover,
   cursor: pointer;
 }
 
-.view-toggles .toggle input:checked + span {
+.screen-tools .toggle input:checked + span {
   color: var(--blue);
   border-color: var(--blue-dim);
   text-shadow: var(--glow-blue);
 }
 
-.view-toggles .toggle input:focus-visible + span {
+.screen-tools .toggle input:focus-visible + span {
   outline: 1px dashed var(--blue);
   outline-offset: 1px;
 }
@@ -1982,5 +1982,236 @@ input[type="range"]::-moz-range-thumb {
   }
   .s-voice .screen-body {
     min-height: 380px;
+  }
+}
+
+/* ---------- Speak */
+.right-speak {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 192fr) minmax(0, 236fr) minmax(0, 214fr) minmax(0, 190fr);
+  grid-template-areas: "say say" "score score" "chart chart" "tube folds";
+}
+
+.s-say { grid-area: say; }
+.s-score { grid-area: score; }
+.s-chart { grid-area: chart; }
+
+.say {
+  position: absolute;
+  inset: 0;
+  padding: 6px 14px 10px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  overflow: hidden;
+}
+
+.say-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.say textarea {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  resize: none;
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.say textarea:focus {
+  outline: none;
+  border-color: var(--blue-dim);
+  box-shadow: 0 0 5px rgba(79, 182, 242, 0.25);
+}
+
+.say-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.say-actions button {
+  min-width: 84px;
+}
+
+.say .transcription {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--amber);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 2px rgba(255, 179, 64, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.say-rate {
+  width: 170px;
+  flex: none;
+}
+
+.say-rate .slider label {
+  font-size: 9px;
+  margin: 0;
+}
+
+.say-rate input[type="range"] {
+  height: 12px;
+}
+
+.say .examples {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.say .examples .chip {
+  flex: none;
+}
+
+.say .examples::-webkit-scrollbar {
+  display: none;
+}
+
+.say .examples .chip {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+
+.vowel-pick {
+  display: flex;
+  gap: 4px;
+}
+
+.ipa-chip {
+  text-transform: none;
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.s-chart .screen-body {
+  overflow: auto;
+}
+
+.s-chart .chart-scroll {
+  position: absolute;
+  inset: 0;
+  padding: 2px 12px 8px;
+  overflow: auto;
+}
+
+.ipa-chart {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.ipa-chart thead th:first-child,
+.ipa-chart tbody th {
+  width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ipa-chart th {
+  font-size: 8px;
+  font-weight: 300;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+  padding: 1px 3px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.ipa-chart tbody th {
+  text-align: left;
+}
+
+.ipa-chart td {
+  border: 1px solid var(--frame);
+  padding: 0 1px;
+  text-align: center;
+  height: 18px;
+}
+
+.ipa-chart button.ipa {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--blue);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.05;
+  padding: 0 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.ipa-chart button.ipa:hover {
+  background: transparent;
+  color: var(--white);
+  text-shadow: 0 0 3px rgba(238, 246, 248, 0.6);
+}
+
+/* the old rule fixed buttons and gaps at 26 px square, which made the chart taller than its screen */
+.ipa-chart button.ipa,
+.ipa-chart .ipa-empty {
+  width: auto;
+  min-width: 1.3em;
+  height: 16px;
+}
+
+.ipa-chart button.ipa.now {
+  color: var(--green);
+  outline: 1px solid var(--green);
+  outline-offset: 1px;
+  box-shadow: 0 0 6px rgba(91, 227, 129, 0.5);
+  text-shadow: 0 0 3px rgba(91, 227, 129, 0.7);
+}
+
+.screen-body > .score-canvas {
+  display: block;
+  height: 100%;
+}
+
+@media (max-width: 1100px) {
+  .right-speak {
+    grid-template-rows: none;
+    grid-template-areas: "say say" "score score" "chart chart" "tube folds";
+  }
+  .right-speak .screen-body {
+    min-height: 200px;
+  }
+  .s-say .screen-body {
+    min-height: 170px;
+  }
+}
+
+@media (max-width: 640px) {
+  .right-speak {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "say" "score" "chart" "tube" "folds";
+  }
+  .s-say .screen-body {
+    min-height: 230px;
+  }
+  .say-row {
+    flex-wrap: wrap;
+  }
+  .say-actions {
+    flex-direction: row;
   }
 }

@@ -10,7 +10,7 @@ import { VoiceControls, VoiceToggles } from "./components/VoiceControls.tsx";
 import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
 import { Screen } from "./components/Screen.tsx";
-import { SpeakPanel } from "./components/SpeakPanel.tsx";
+import { SpeakRight, speechInfo, speechSlots } from "./components/SpeakPanel.tsx";
 import { BestiaryPanel } from "./components/BestiaryPanel.tsx";
 import { CreatureView } from "./components/CreatureView.tsx";
 import { Spectrogram } from "./components/Spectrogram.tsx";
@@ -157,7 +157,7 @@ function LeftScreen() {
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >
-      {bestiary ? <CreatureView /> : <AnatomyView />}
+      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : <AnatomyView />}
       {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
     </Screen>
@@ -212,7 +212,6 @@ function LegacyRight() {
 
 function Deck() {
   const mode = useStore((s) => s.mode);
-  if (mode === "speak") return <SpeakPanel />;
   if (mode === "sing") return <SingPanel />;
   if (mode === "bestiary") return <BestiaryPanel />;
   if (mode === "beatbox") return <BeatboxPanel />;
@@ -226,7 +225,7 @@ export function App() {
       <TopBar />
       <main className={`wall wall-${mode}`}>
         <LeftScreen />
-        {mode === "play" ? <PlayRight /> : <LegacyRight />}
+        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : <LegacyRight />}
       </main>
       <Deck />
     </div>
