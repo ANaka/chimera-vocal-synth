@@ -282,8 +282,9 @@ export class HumanVoice {
       this.scoreF0 = null;
     }
     this.clock += dt;
-    this.enforceContacts();
+    // contact constraint on the frame computed anyway; re-apply only if a correction was made
     this.airway.apply(this.artic.x, dt);
+    if (this.enforceContacts()) this.airway.apply(this.artic.x, 0);
     this.airway.net.beginBlock(this.ctrlEvery);
     this.ctrlCounter = this.ctrlEvery;
     // breath: fast attack, slower release; a speaking score breathes on its own
@@ -314,14 +315,15 @@ export class HumanVoice {
    * inward velocity removed (inelastic). Keeps held closures still (no air pumping), makes
    * releases start at the surface, and keeps the drawn anatomy physical.
    */
-  private enforceContacts(): void {
+  private enforceContacts(): boolean {
     const tract = this.airway.tract;
     const x = this.artic.x, vel = this.artic.v;
-    tract.compute(x);
     const k = tract.scale;
+    let changed = false;
     const lim = -this.maxPenetration * k;
     const fix = (d: number, n: { x: number; y: number }, kx: "ttX" | "tbX", ky: "ttY" | "tbY") => {
       if (!(d < lim)) return;
+      changed = true;
       const depth = lim - d; // > 0, body cm
       // body → template displacement (oral x is compressed by 0.86 in the template map)
       const sx = (x[kx] > 0.5 ? 1 / 0.86 : 1) / k;
@@ -336,6 +338,7 @@ export class HumanVoice {
     };
     fix(tract.contactTip, tract.contactTipN, "ttX", "ttY");
     fix(tract.contactBody, tract.contactBodyN, "tbX", "tbY");
+    return changed;
   }
 
   telemetry(): VoiceTelemetry {

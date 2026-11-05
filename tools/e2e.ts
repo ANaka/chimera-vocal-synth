@@ -55,6 +55,17 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   await page.keyboard.up("d");
   const loadText = await page.locator(".load").textContent().catch(() => null);
   logs.push(`[${tag}] load: ${loadText}`);
+  // speak mode
+  await page.getByRole("radio", { name: "Speak" }).click();
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: /^Speak$/ }).click();
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${outDir}/${tag}-3-speak.png`, fullPage: true });
+  const trans = await page.locator(".transcription").textContent();
+  logs.push(`[${tag}] transcription: ${trans}`);
+  await page.locator("button.ipa", { hasText: "ʃ" }).first().click();
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: `${outDir}/${tag}-4-pad.png` });
   await page.close();
 }
 
@@ -62,4 +73,4 @@ await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
-console.log(logs.filter((l) => /load|warn/i.test(l)).slice(0, 20).join("\n"));
+console.log(logs.filter((l) => /load|warn|transcription/i.test(l)).slice(0, 20).join("\n"));

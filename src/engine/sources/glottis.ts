@@ -76,6 +76,7 @@ export class ParametricGlottis {
   private readonly drift: Drift;
   private driftValue = 0;
   private driftCounter = 0;
+  private pitchFactor = 1;
   /** smoothed voicing gate 0..1 (telemetry) */
   voicing = 0;
   private voicingSm = 0;
@@ -98,7 +99,7 @@ export class ParametricGlottis {
 
   constructor(fs: number) {
     this.fs = fs;
-    this.drift = new Drift(fs / 64, 0.3, 4242);
+    this.drift = new Drift(fs / 32, 0.3, 4242);
     this.dpCoef = 1 - Math.exp(-TAU * 30 / fs);
     this.voiceCoef = 1 - Math.exp(-TAU * 25 / fs);
     this.smCoef = 1 - Math.exp(-1 / (0.004 * fs));
@@ -119,15 +120,16 @@ export class ParametricGlottis {
     const P = this.params;
     this.dpSm += this.dpCoef * (dp - this.dpSm);
 
-    // slow drift updated at a decimated rate
+    // drift and vibrato evaluated at a decimated rate (pitch modulation is slow)
     if (--this.driftCounter <= 0) {
-      this.driftCounter = 64;
+      this.driftCounter = 32;
       this.driftValue = this.drift.step();
+      this.vibPhase += ((P.vibratoRate * 32) / this.fs) * (1 + 0.04 * this.driftValue);
+      if (this.vibPhase > 1) this.vibPhase -= 1;
+      const cents = P.vibratoDepth * Math.sin(TAU * this.vibPhase) + P.drift * this.driftValue;
+      this.pitchFactor = Math.pow(2, cents / 1200);
     }
-    this.vibPhase += (P.vibratoRate / this.fs) * (1 + 0.04 * this.driftValue);
-    if (this.vibPhase > 1) this.vibPhase -= 1;
-    const cents = P.vibratoDepth * Math.sin(TAU * this.vibPhase) + P.drift * this.driftValue;
-    let f0 = P.f0 * Math.pow(2, cents / 1200);
+    let f0 = P.f0 * this.pitchFactor;
     // fry pulls the rate down toward ~45 Hz
     if (P.fry > 0) f0 = f0 * (1 - P.fry) + Math.min(f0, 48) * P.fry;
     this.f0Now = f0;

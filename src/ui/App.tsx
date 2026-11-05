@@ -10,6 +10,8 @@ import { VoicePanel } from "./components/VoicePanel.tsx";
 import { ArticPanel } from "./components/ArticPanel.tsx";
 import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
+import { SpeakPanel } from "./components/SpeakPanel.tsx";
+import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
 function TopBar() {
@@ -20,6 +22,8 @@ function TopBar() {
   const setBody = useStore((s) => s.setBody);
   const volume = useStore((s) => s.volume);
   const setVolume = useStore((s) => s.setVolume);
+  const mode = useStore((s) => s.mode);
+  const setMode = useStore((s) => s.setMode);
   const [load, setLoad] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setLoad(engine.latest?.load ?? 0), 500);
@@ -31,6 +35,15 @@ function TopBar() {
         <span className="wordmark">Chimera</span>
         <span className="tagline">A voice grown from a simulated airway</span>
       </div>
+      <Segmented<Mode>
+        label="Mode"
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: "play", label: "Play" },
+          { value: "speak", label: "Speak" },
+        ]}
+      />
       <Segmented<BodyName>
         label="Body"
         value={body}
@@ -98,6 +111,26 @@ function StartPrompt() {
   );
 }
 
+function Deck() {
+  const mode = useStore((s) => s.mode);
+  if (mode === "speak") return <SpeakPanel />;
+  return (
+    <>
+      <section className="deck">
+        <div className="panel vowel-panel">
+          <h2>Vowels</h2>
+          <VowelMap />
+        </div>
+        <VoicePanel />
+        <ArticPanel />
+      </section>
+      <footer className="keys-bar">
+        <Keys />
+      </footer>
+    </>
+  );
+}
+
 export function App() {
   return (
     <div className="app">
@@ -123,17 +156,7 @@ export function App() {
           </figure>
         </aside>
       </main>
-      <section className="deck">
-        <div className="panel vowel-panel">
-          <h2>Vowels</h2>
-          <VowelMap />
-        </div>
-        <VoicePanel />
-        <ArticPanel />
-      </section>
-      <footer className="keys-bar">
-        <Keys />
-      </footer>
+      <Deck />
     </div>
   );
 }

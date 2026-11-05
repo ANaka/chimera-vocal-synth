@@ -6,6 +6,8 @@ import type { BodyName } from "../worklet/protocol.ts";
 
 export const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
 
+export type Mode = "play" | "speak";
+
 export interface ViewOptions {
   pressure: boolean;
   particles: boolean;
@@ -26,6 +28,8 @@ interface State {
   hold: boolean;
   heldNotes: number[];
   view: ViewOptions;
+  mode: Mode;
+  setMode: (m: Mode) => void;
   start: () => Promise<void>;
   setBody: (b: BodyName) => void;
   setSource: (v: Partial<VoiceSource>) => void;
@@ -58,6 +62,8 @@ export const useStore = create<State>((set, get) => ({
   hold: false,
   heldNotes: [],
   view: { pressure: true, particles: true, grid: false, calipers: true },
+  mode: "play",
+  setMode: (m) => set({ mode: m }),
   start: async () => {
     if (get().started || get().starting) return;
     set({ starting: true, startError: null });

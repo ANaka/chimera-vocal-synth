@@ -222,3 +222,20 @@ export function planUtterance(input: Segment[], o: PlanOptions): Plan {
   });
   return { gestures, segments: planned, end };
 }
+
+/** Plan consecutive phrases (each with its own breath group and intonation) from t0. */
+export function planPhrases(
+  phrases: { segments: Segment[]; intonation?: "statement" | "question" | "flat"; pause?: number }[],
+  o: Omit<PlanOptions, "intonation">,
+): Plan {
+  const all: Plan = { gestures: [], segments: [], end: o.t0 };
+  let t = o.t0;
+  for (const p of phrases) {
+    const plan = planUtterance(p.segments, { ...o, t0: t, intonation: p.intonation ?? "statement" });
+    all.gestures.push(...plan.gestures);
+    all.segments.push(...plan.segments);
+    t = plan.end + (p.pause ?? 0.25);
+    all.end = plan.end;
+  }
+  return all;
+}

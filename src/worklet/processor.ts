@@ -59,6 +59,22 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "telemetry":
         this.telemetryOn = m.enabled;
         break;
+      case "schedule": {
+        // O(n) time shift onto the voice clock; planning happened on the main thread
+        const off = this.voice.clock + 0.03;
+        const gs = m.gestures.slice(0, 4000);
+        for (const g of gs) {
+          g.t0 += off;
+          g.t1 += off;
+        }
+        if (m.replace) this.voice.cancelScore();
+        this.voice.schedule(gs);
+        this.post({ type: "planned", id: m.id, t0: off, end: m.end + off, segments: m.segments.map((s) => ({ ...s, t0: s.t0 + off, t1: s.t1 + off })) });
+        break;
+      }
+      case "stopSpeech":
+        this.voice.cancelScore();
+        break;
     }
   }
 

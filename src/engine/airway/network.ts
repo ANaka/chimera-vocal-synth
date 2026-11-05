@@ -137,6 +137,8 @@ export class AirwayNetwork {
   /** nodes with ≥3 connections get a compliance floor for leapfrog stability */
   private isJunction!: Uint8Array;
   private invLsum!: Float64Array;
+  /** per-sample reciprocal minimum area (jet losses) */
+  private invAmin!: Float64Array;
   /** neighbour lists (CSR) for redistributing squeezed volume of nearly closed nodes */
   private nbrStart!: Int32Array;
   private nbrList!: Int32Array;
@@ -303,6 +305,7 @@ export class AirwayNetwork {
     this.aminStep = new Float64Array(N);
     this.isJunction = new Uint8Array(N);
     this.invLsum = new Float64Array(N);
+    this.invAmin = new Float64Array(N);
     this.dx = new Float64Array(N);
     this.dxTarget = new Float64Array(N);
     this.dxStep = new Float64Array(N);
@@ -569,9 +572,11 @@ export class AirwayNetwork {
       area[k] = a;
       let am = amin[k] + this.aminStep[k];
       if (am < 0) am = 0;
-      amin[k] = am > a ? a : am;
+      const amk = am > a ? a : am;
+      amin[k] = amk;
       const d = (dx[k] += this.dxStep[k]);
       invA[k] = 1 / (a > 1e-6 ? a : 1e-6);
+      this.invAmin[k] = 1 / (amk > 1e-6 ? amk : 1e-6);
       const v = (a > minA ? a : minA) * d;
       if (volOn) {
         const raw = -(v - vol[k]) * invT;
@@ -653,13 +658,14 @@ export class AirwayNetwork {
         R = 0.5 * visc * (this.wallPerim[a] * dx[a] * Math.sqrt(Aa) * ia * ia * this.viscF[a] + this.wallPerim[b] * dx[b] * Math.sqrt(Ab) * ib * ib * this.viscF[b]);
         // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
         // the downstream node (sub-section minima make short constrictions lossy as they should be)
-        const ef = 1 / ma - ib; // a→b
-        const eb = 1 / mb - ia; // b→a
+        const ima = this.invAmin[a], imb = this.invAmin[b];
+        const ef = ima - ib; // a→b
+        const eb = imb - ia; // b→a
         kf = ef > 0 ? halfRho * ef * ef : 0;
         kb = eb > 0 ? halfRho * eb * eb : 0;
         // small contraction (vena contracta) loss entering a narrower node
-        const cf = 1 / mb - ia;
-        const cb = 1 / ma - ib;
+        const cf = imb - ia;
+        const cb = ima - ib;
         if (cf > 0) kf += 0.1 * halfRho * cf * cf;
         if (cb > 0) kb += 0.1 * halfRho * cb * cb;
       } else {
@@ -719,19 +725,21 @@ export class AirwayNetwork {
 
     // 4) walls (velocity at half step from p(n), displacement integrates)
     const wallU = this.wallU;
+    const hasWall = this.hasWall, wallM = this.wallM, wallR = this.wallR, wallK = this.wallK;
+    const wallV = this.wallV, wallY = this.wallY, wallRad = this.wallRad;
     let wallRadSum = 0;
     for (let k = 0; k < N; k++) {
-      if (!this.hasWall[k]) continue;
-      const m = this.wallM[k];
-      const r = this.wallR[k];
-      const v = ((m * invT - 0.5 * r) * this.wallV[k] + p[k] - this.wallK[k] * this.wallY[k]) / (m * invT + 0.5 * r);
-      this.wallV[k] = v;
-      this.wallY[k] += T * v;
+      if (!hasWall[k]) continue;
+      const m = wallM[k];
+      const r = wallR[k];
+      const v = ((m * invT - 0.5 * r) * wallV[k] + p[k] - wallK[k] * wallY[k]) / (m * invT + 0.5 * r);
+      wallV[k] = v;
+      wallY[k] += T * v;
       const a = area[k] > minA ? area[k] : minA;
       const uw = this.wallPerim[k] * Math.sqrt(a) * dx[k] * v;
       wallU[k] = uw;
       flowSum[k] -= uw;
-      wallRadSum += uw * this.wallRad[k];
+      wallRadSum += uw * wallRad[k];
     }
 
     // 5) nodes (radiation loads handled semi-implicitly)

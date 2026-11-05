@@ -3,7 +3,7 @@
  * parameter messages (at most one per animation frame per kind) and telemetry fan-out.
  */
 import workletUrl from "../worklet/processor.ts?worker&url";
-import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName } from "../worklet/protocol.ts";
+import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName, PlannedMessage } from "../worklet/protocol.ts";
 import type { HumanArtic } from "../engine/anatomy/human.ts";
 import type { VoiceSource } from "../engine/voice/humanVoice.ts";
 
@@ -22,6 +22,10 @@ export class AudioEngine {
   private pendingSource: Partial<VoiceSource> | null = null;
   private flushScheduled = false;
   private readyListeners = new Set<() => void>();
+  private plannedListeners = new Set<(p: PlannedMessage) => void>();
+  /** most recent planned utterance (for timelines) */
+  lastPlan: PlannedMessage | null = null;
+  private speakId = 0;
   error: string | null = null;
 
   get running(): boolean {
@@ -54,6 +58,9 @@ export class AudioEngine {
       if (m.type === "telemetry") {
         this.latest = m;
         for (const l of this.listeners) l(m);
+      } else if (m.type === "planned") {
+        this.lastPlan = m;
+        for (const l of this.plannedListeners) l(m);
       } else if (m.type === "ready") {
         for (const l of this.readyListeners) l();
       } else if (m.type === "error") {
@@ -67,6 +74,22 @@ export class AudioEngine {
   onTelemetry(l: Listener): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
+  }
+
+  onPlanned(l: (p: PlannedMessage) => void): () => void {
+    this.plannedListeners.add(l);
+    return () => this.plannedListeners.delete(l);
+  }
+
+  /** Send a gestural plan (times relative to now). Returns the request id. */
+  schedule(plan: { gestures: import("../engine/control/score.ts").Gesture[]; segments: import("../engine/phonetics/planner.ts").PlannedSegment[]; end: number }, replace = true): number {
+    const id = ++this.speakId;
+    this.send({ type: "schedule", gestures: plan.gestures, segments: plan.segments, end: plan.end, id, replace });
+    return id;
+  }
+
+  stopSpeech(): void {
+    this.send({ type: "stopSpeech" });
   }
 
   onReady(l: () => void): () => void {
