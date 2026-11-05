@@ -71,16 +71,35 @@ describe("beat player", () => {
     expect(gap).toBeLessThanOrEqual(60 / 100 / 4 + 1e-9);
     expect(after[2].t - after[1].t).toBeCloseTo(60 / 160 / 4, 9);
   });
-  test("reports the step under the playhead and nothing when stopped", () => {
+  test("the playhead follows the scheduled hits, swing included, and nothing when stopped", () => {
     const p = new BeatPlayer();
     p.steps = parseBeat("B . t .");
-    p.setTempo(120, 0);
+    p.setTempo(120, 0.6);
     expect(p.stepAt(1)).toBe(-1);
     p.start(0);
+    run(p, 0, 1.2);
+    const step = 0.125, late = 0.3 * step;
+    expect(p.stepAt(p.horizon - 0.01)).toBe(-1);
     expect(p.stepAt(p.horizon + 0.01)).toBe(0);
-    expect(p.stepAt(p.horizon + 3 * 0.125 + 0.01)).toBe(3);
-    expect(p.stepAt(p.horizon + 4 * 0.125 + 0.01)).toBe(0);
+    // step 1 is swung: until its hit the playhead stays on step 0
+    expect(p.stepAt(p.horizon + step + late - 0.005)).toBe(0);
+    expect(p.stepAt(p.horizon + step + late + 0.005)).toBe(1);
+    expect(p.stepAt(p.horizon + 4 * step + 0.01)).toBe(0);
     p.stop();
     expect(p.stepAt(1)).toBe(-1);
+  });
+  test("after the voice is replaced, steps not yet heard are scheduled again at their times", () => {
+    const p = new BeatPlayer();
+    p.steps = parseBeat("B t Pf t");
+    p.setTempo(120, 0.3);
+    p.start(0);
+    const first = run(p, 0, 0.5);
+    // a new voice whose clock restarts at 0 while the old one was at 0.5
+    p.rebase(-0.5);
+    p.rewind(0);
+    const again = run(p, 0, 0.3);
+    const pending = first.filter((h) => h.t > 0.5).map((h) => h.t - 0.5);
+    expect(again.length).toBeGreaterThanOrEqual(pending.length);
+    pending.forEach((t, i) => expect(again[i].t).toBeCloseTo(t, 9));
   });
 });

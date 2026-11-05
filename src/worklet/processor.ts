@@ -133,12 +133,15 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       this.body = this.pendingBody;
       this.pendingBody = null;
       this.voice = this.makeVoice(this.body);
-      // the new voice's clock starts at zero: keep the beat's phase across the switch
+      // the new voice's clock starts at zero: keep the beat's phase across the switch, and
+      // queue again the hits the old voice's score was holding (built for the new body)
       this.beat.body = this.body;
       this.beat.rebase(this.voice.clock - prev.clock);
+      this.beat.rewind(this.voice.clock);
       this.voice.setSource({ ...prev.source, f0: DEFAULT_F0[this.body] });
       this.voice.setArticulation({ ...prev.artic.target }, prev.artic.tipFree);
-      this.voice.setGate(prev.gate > 0.5 ? 1 : 0);
+      // the performer's breath, not the voice's (which includes breath from the score)
+      this.voice.setGate(this.gateLevel);
       this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr, creature: this.creature ? this.creature.def.id : "human" });
     }
     if (this.pendingCreature !== null) {

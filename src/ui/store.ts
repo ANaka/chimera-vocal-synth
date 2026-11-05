@@ -120,6 +120,8 @@ export const useStore = create<State>((set, get) => ({
     if (prev === m) return;
     // notes held across the switch would keep breathing into the other voice
     set({ mode: m, heldNotes: [] });
+    // speech belongs to Speak: under a creature the human clock stops and it would resume later
+    if (prev === "speak" || m === "bestiary") engine.stopSpeech();
     if ((prev === "bestiary") !== (m === "bestiary")) {
       // a sustain belongs to the voice it was started on
       set({ hold: false });

@@ -27,6 +27,8 @@ interface ActiveCall {
   fired: Set<number>;
   /** params the call automates (restored to the performer's values when it ends) */
   owns: Set<string>;
+  /** every key the call mentions, including "gate" and "!events" */
+  names: string[];
 }
 
 export class CreatureVoice {
@@ -101,8 +103,13 @@ export class CreatureVoice {
     const ref = def.pitchRef ?? 0;
     this.endCall();
     const owns = new Set<string>();
-    for (const k of def.keys) for (const n of Object.keys(k.v)) if (n !== "gate" && !n.startsWith("!")) owns.add(n);
-    this.call = { def, t0: this.clock, pitch: pitch && ref ? pitch / ref : 1, amp, fired: new Set(), owns };
+    const names = new Set<string>();
+    for (const k of def.keys)
+      for (const n of Object.keys(k.v)) {
+        names.add(n);
+        if (n !== "gate" && !n.startsWith("!")) owns.add(n);
+      }
+    this.call = { def, t0: this.clock, pitch: pitch && ref ? pitch / ref : 1, amp, fired: new Set(), owns, names: [...names] };
   }
 
   stopCall(): void {
@@ -131,10 +138,7 @@ export class CreatureVoice {
       this.endCall();
       return;
     }
-    // collect all params mentioned
-    const names = new Set<string>();
-    for (const k of keys) for (const n of Object.keys(k.v)) names.add(n);
-    for (const n of names) {
+    for (const n of c.names) {
       // find surrounding keys that define n
       let prev: { t: number; x: number } | null = null, next: { t: number; x: number; curve?: string } | null = null;
       for (const k of keys) {

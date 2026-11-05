@@ -9,6 +9,9 @@ import type { Gesture } from "./score.ts";
 
 const midiToHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 
+/** scheduled steps remembered for the playhead (well over a horizon's worth) */
+const MARKS = 32;
+
 export class BeatPlayer {
   steps: (BeatStep | null)[] = [];
   bpm = 96;
@@ -22,6 +25,10 @@ export class BeatPlayer {
   private anchorTime = 0;
   private anchorStep = 0;
   private next = 0;
+  /** step number and hit time of recently scheduled steps (−1 = empty slot) */
+  private readonly markN = new Int32Array(MARKS).fill(-1);
+  private readonly markT = new Float64Array(MARKS);
+  private markPos = 0;
 
   get stepDur(): number {
     return 60 / this.bpm / this.stepsPerBeat;
@@ -37,6 +44,7 @@ export class BeatPlayer {
     this.anchorTime = clock + this.horizon;
     this.anchorStep = 0;
     this.next = 0;
+    this.markN.fill(-1);
   }
 
   stop(): void {
@@ -57,13 +65,41 @@ export class BeatPlayer {
   /** The voice clock restarted (new voice after a body change): keep the beat's phase. */
   rebase(delta: number): void {
     this.anchorTime += delta;
+    for (let i = 0; i < MARKS; i++) this.markT[i] += delta;
   }
 
-  /** Step under the playhead at `clock` (−1 when stopped). */
+  /**
+   * The score holding the scheduled hits was replaced (new voice): schedule again every step
+   * not yet heard at `clock`, at the times they were given.
+   */
+  rewind(clock: number): void {
+    let first = -1, firstT = 0;
+    for (let i = 0; i < MARKS; i++) {
+      const n = this.markN[i];
+      if (n >= 0 && this.markT[i] >= clock && (first < 0 || n < first)) {
+        first = n;
+        firstT = this.markT[i];
+      }
+    }
+    if (first < 0) return;
+    this.anchorStep = first;
+    this.anchorTime = firstT - (first % 2 === 1 ? this.swing * 0.5 * this.stepDur : 0);
+    this.next = first;
+    for (let i = 0; i < MARKS; i++) if (this.markN[i] >= first) this.markN[i] = -1;
+  }
+
+  /** Step under the playhead at `clock`: the last scheduled step whose hit has come (−1: none). */
   stepAt(clock: number): number {
     if (!this.playing || this.steps.length === 0) return -1;
-    const n = Math.floor((clock - this.anchorTime) / this.stepDur) + this.anchorStep;
-    return n < 0 ? -1 : n % this.steps.length;
+    let best = -1, bestT = -Infinity;
+    for (let i = 0; i < MARKS; i++) {
+      const t = this.markT[i];
+      if (this.markN[i] >= 0 && t <= clock && t > bestT) {
+        best = this.markN[i];
+        bestT = t;
+      }
+    }
+    return best < 0 ? -1 : best % this.steps.length;
   }
 
   /** Schedule every step whose hit falls within the horizon. */
@@ -73,6 +109,9 @@ export class BeatPlayer {
       const hit = this.stepTime(this.next);
       if (hit > clock + this.horizon) break;
       const L = this.steps.length;
+      this.markN[this.markPos] = this.next;
+      this.markT[this.markPos] = hit;
+      this.markPos = (this.markPos + 1) % MARKS;
       const cell = this.steps[this.next % L];
       if (cell && hit >= clock) {
         // sustained sounds (hum, open hat) last until the next sound
