@@ -290,6 +290,8 @@ pub struct GestureScore {
     gestures: Vec<Gesture>,
     /// end time of the latest gesture (s)
     pub end: f64,
+    /// gestures refused because the score was full
+    pub dropped: u64,
 }
 
 impl Default for GestureScore {
@@ -299,14 +301,18 @@ impl Default for GestureScore {
 }
 
 impl GestureScore {
-    /// Capacity reserved up front: the score never reallocates below this many gestures.
-    pub const RESERVE: usize = 8192;
+    /// Fixed capacity: the score never reallocates. Gestures added past it are dropped (and counted).
+    pub const CAPACITY: usize = 16384;
 
     pub fn new() -> Self {
-        GestureScore { gestures: Vec::with_capacity(Self::RESERVE), end: 0.0 }
+        GestureScore { gestures: Vec::with_capacity(Self::CAPACITY), end: 0.0, dropped: 0 }
     }
 
     pub fn add(&mut self, g: Gesture) {
+        if self.gestures.len() >= Self::CAPACITY {
+            self.dropped += 1;
+            return;
+        }
         self.gestures.push(g);
         self.end = js_max(self.end, g.end());
     }

@@ -49,85 +49,120 @@ port can be reviewed file against file. `chimera::engine::Engine` is the old pro
 
 ## Real-time contract (what JDAW needs)
 
-- `Engine`, `HumanVoice`, `CreatureVoice`: `Send`, no shared mutable state, so each can render
-  on its own thread.
-- `render(&mut [f32])` allocates nothing once warm. Any per-block or per-control-step temporary
-  is a buffer that lives in the struct and keeps its capacity. The geometry `Frame`, the
-  noise-source list, the beatbox gesture builder and the score storage all follow this rule; the
-  gesture score has a fixed capacity, as the TS version effectively does with `MAX_GESTURES`.
-- The planners (text → gestures) allocate and are meant for a non-real-time thread: the main
-  thread in the browser, an edit thread in JDAW. Live sung notes call `plan_note_on`, which is
-  small; making the planner allocation-free is left for the JDAW integration.
-- Output does not depend on block size: the same commands give the same samples whether you
-  render in blocks of 1, 128 or 48 000. Commands apply at the start of the next `render` call;
-  a host that needs sample accuracy splits its block at the event.
+- `Engine`, `HumanVoice` and `CreatureVoice` are `Send` and share no mutable state, so each can
+  render on its own thread.
+- **Steady-state rendering allocates nothing.** That covers `render(&mut [f32])`, control steps,
+  geometry frames, noise-source lists, beat-sequencer gesture builds and telemetry snapshots,
+  which all reuse buffers held in their structs.
+- **Bounded state with defined overflow.** The gesture score holds at most
+  `GestureScore::CAPACITY` (16 384) gestures. A gesture added past that is dropped and counted
+  (the TS score had no bound). Each `schedule` command takes at most 4 000 gestures, as the TS
+  worklet did. Pruning compacts in place and keeps insertion order, which matters because
+  blends sum in that order.
+- **Commands that allocate.** These are meant for when nothing is sounding, or for a host that
+  builds things off the audio thread:
+  - a body switch (it builds a new airway network);
+  - a creature switch;
+  - the first `Engine::new` (it also loads the phonetics tables, so nothing initialises lazily
+    on the audio thread later).
+
+  Scheduling, releases, artic/source/gate changes and beat edits don't allocate.
+- **Planners allocate** (text → gestures) and belong on a non-real-time thread: the main thread
+  in the browser, an edit thread in JDAW. `plan_note_on` for live sung notes is small but
+  allocates too; making it allocation-free is left for the JDAW integration.
+- **Block-size independence.** `Engine::render` advances in fixed 128-sample sub-blocks, and the
+  per-block work (beat-sequencer ticks) happens at those sub-block boundaries, which sit at
+  absolute sample positions. The same commands at the same absolute sample positions therefore
+  give the same samples whatever the host's block size. The TS worklet ticked once per host
+  block, so a 48 000-sample offline block would have lost beats. Commands apply at the start of
+  the next `render` call; a host that needs sample accuracy splits its block at the event.
+- **Events out.** Responses go into a queue that the host drains after `handle`/`render`:
+  `Ready { body, creature, n_ph, n_or }` after a voice switch, and `Planned { id, t0, end }` for a
+  schedule that carries an id (the UI's timelines use `t0`).
+- **Telemetry.** A snapshot is fixed-size and written into caller-owned buffers. Interval
+  measures (RMS levels, the glottal scope's cycle capture) reset on each read; the struct docs
+  mark which fields are which. Load measurement and message cadence stay in JS.
+- **The human clock stops while a creature plays**, as before.
 
 ## Determinism
 
-- All transcendental math (`sin cos tan exp ln pow tanh atan2 acos cbrt hypot log10 log2`) goes
-  through `chimera::math`, which wraps the pure-Rust `libm` crate. `sqrt`, `abs`, `floor` and the
-  basic arithmetic are IEEE-exact everywhere. Rust never contracts to FMA on its own. The result
-  is that native x86-64, native aarch64 (macOS) and wasm32 produce **bit-identical** output. That
-  settles JDAW's open question on cross-machine determinism, at least for CHIMERA. There is a
-  test that renders a fixed scenario and checks a hash committed alongside it.
-- `Math.min`/`Math.max` propagate NaN; `f64::min`/`f64::max` don't. The port uses explicit
-  comparisons wherever the TS relies on that, or where an argument could be NaN.
-- Hosts must not enable FTZ/DAZ: flushed denormals change the samples. The engine already
-  flushes silent state itself, as the TS version does.
+- **Repeatability (promised).** A given build renders the same samples every time, for any
+  block size.
+- **Cross-target identity (tested where possible).** All transcendental math goes through
+  `chimera::math`, which wraps the pure-Rust `libm` crate at a pinned version. `sqrt` and the
+  basic operations are IEEE-exact, and Rust never contracts to FMA on its own. A test renders
+  fixed scenarios natively and through the wasm build and requires identical samples on
+  x86-64 Linux. aarch64/macOS is untested here, so identity there is a goal, not a claim.
+- **JS semantics.** `Math.min`/`Math.max` become `js_min`/`js_max`, which propagate NaN from
+  either argument and order −0 below +0. Ternaries are ported as written. `Math.round` becomes
+  `js_round`, which rounds halves up. The PRNG uses explicit wrapping `u32` arithmetic.
+- **Precision.** State and gesture values are `f64` throughout; only output and telemetry are
+  `f32`, as the TS `Float32Array`s were.
+- **No FTZ/DAZ.** Hosts must not enable flush-to-zero or denormals-are-zero, because those
+  change the samples. The engine already flushes silent state itself.
 
 ## Port fidelity
 
-The port is literal. It keeps the same equations, the same operation order, the same constants
-and the same PRNGs (mulberry32 with the same seeds). It does not retune anything. The checks:
+The port is literal. It keeps the same equations, the same operation order, the same constants,
+the same PRNG seeds, and the same container order where order decides random-number
+consumption or sums (noise sources, gestures). It retunes nothing. The checks:
 
-1. **Golden comparison against the TS engine, before the TS engine is deleted.** A TS script
-   (`tools/golden.ts`) renders scenarios and dumps fixtures: per-module numeric outputs
-   (geometry frames, area functions, transfer functions, plans as JSON, G2P on a word list,
-   syllabification) and audio (speech, a sung phrase, a beatbox bar, each creature's calls, live
-   articulator sweeps, a body switch). Rust tests compare against them.
-   - Plans, geometry and G2P must match exactly, or to within 1e-9 relative where floats are
-     involved.
-   - Audio is compared sample by sample. The expectation is ≲1e-6 relative to peak for the first
-     ~0.25 s; libm and V8 differ in the last ulp of `pow`/`exp`, and the voice's nonlinear
-     feedback can grow that. Over the whole render the check is a looser envelope/spectral one
-     (RMS envelope within 0.1 dB, log-spectrum distance) so that real porting errors still fail.
-   - Fixtures are short and committed (<2 MB total), so the Rust tests keep guarding behaviour
-     after the TS engine is gone.
-2. **The existing bun tests**, which check resonances against analytic values, FDTD against the
-   chain matrix, stability, formants, closures and singing behaviour, are ported to `cargo test`
-   with the same thresholds.
-3. **The app's e2e smoke test** (`tools/e2e.ts`) runs against the wasm build and must stay
-   green.
-4. **Benchmarks** (`cargo bench`-style, plain `std::time`, so no criterion dependency): native
-   and wasm real-time factors next to the TS numbers measured before the port.
+1. **Golden comparison against the TS engine, before the TS engine is deleted.** Each
+   `tools/golden/<area>.ts` runs the TS engine on fixed scenarios and writes fixtures, and the
+   Rust tests compare against them.
+   - Numeric outputs (geometry, area functions, plans, G2P, syllables) must agree to 1e-9
+     relative, with an absolute floor near zero. Plans and G2P must agree exactly in structure.
+   - Audio is compared on scenarios with events throughout (artic changes, releases, cancels,
+     calls, body switches), not just at the start. Renders must agree sample for sample (≲1e-6
+     of peak) until a discrete decision flips on a last-ulp difference between V8's libm and
+     Rust's. After that, every 10 ms window's RMS must agree to 0.05 dB, and onset/release
+     timing, silence, pitch and closures are covered by the ported behavioural tests. Any
+     divergence before an event is investigated, not tolerated.
+   - With the TS engine gone, `CHIMERA_BLESS=1 cargo test` rewrites the fixtures from the Rust
+     engine after an intended change to the sound.
+2. **The existing bun tests** (resonances against analytic values, FDTD against the chain
+   matrix, stability, formants, closures, singing behaviour) are ported to `cargo test` with
+   the same thresholds.
+3. **The app's e2e smoke test** (`tools/e2e.ts`) runs against the wasm build and stays green.
+4. **Benchmarks** measure native and wasm real-time factors against the TS numbers taken
+   before the port.
 
 ## The browser boundary
 
-- **One wasm module.** The main thread compiles it once (`WebAssembly.compileStreaming`) and
-  passes the `WebAssembly.Module` to the worklet in `processorOptions`. Each side instantiates it
-  synchronously and gets its own instance and memory. The import object is empty: no WASI and
-  no JS glue.
-- **Audio thread (worklet).** The exports are C ABI with numbers and pointers only, for example
-  `engine_new(fs)`, `engine_render(n) -> *f32`, `engine_set_artic(ptr, mask)` and
-  `engine_schedule(ptr, count, lead, replace)`.
-  - Gestures cross as fixed-size `#[repr(C)]` records: a header of t0, t1, ramps, strength,
-    speed, releaseHold and tag; 22 target slots with NaN for absent; and a 24-byte UTF-8 label.
-    A ~60-line TS codec (`src/engine/wire.ts`) writes them into wasm memory.
-  - Telemetry is a set of pointer/length getters read into the same `TelemetryMessage` shape
-    the UI uses today, so the UI barely changes.
-  - The worklet scope has no `TextEncoder`/`TextDecoder`, so labels use a tiny UTF-8 helper.
-  - Typed-array views are re-created after every call that might grow memory. Memory starts
-    pre-sized so that the audio path never grows it.
-- **Main thread.** Rich, non-real-time calls take JSON in and give JSON out through
-  `serde_json`: `plan_phrases`, `plan_song`, `plan_note_on`, `g2p_*`, `lyrics_to_syllables`,
-  `model_frame` (the geometry for drawing), `model_transfer` (H(f) and formants), and the
-  creature, beatbox and vowel catalogues. The TS facade parses that JSON into the types the UI
-  already imports (`Gesture`, `Plan`, `HumanFrame`, `CreatureDef` minus the drawing data, which
-  stays in TS). CMUdict is still fetched and gunzipped in the browser; its text goes into the
-  wasm instance once.
-- **Panics.** The crate is built with `panic = "abort"`, so a panic in the worklet traps. The
-  processor catches the trap, posts an error, outputs silence and rebuilds the instance with the
-  performer's state.
+- **One wasm module.** The main thread compiles it once and passes the `WebAssembly.Module` to
+  the worklet in `processorOptions` (structured clone). Each side instantiates it
+  synchronously. The import object is empty: no WASI and no JS glue. A build check asserts the
+  artifact has no imports.
+- **Startup ordering.** The wasm module must be ready before any UI module that calls into it
+  runs, because `ui/singing.ts` builds syllables when it loads. `main.tsx` awaits the module,
+  then imports the app. A failure shows a retryable error screen.
+- **Audio thread (worklet).** The exports are C ABI with numbers and pointers only, over one
+  engine handle.
+  - Engine-owned buffers have a stable address for the engine's lifetime: an output buffer of
+    up to 4 096 frames, a command scratch area, and the telemetry block. JS re-creates its
+    typed-array views whenever `memory.buffer` has changed, and copies telemetry before the
+    next call.
+  - Gestures cross as fixed 256-byte little-endian records, layout version 1, specified in
+    `crates/chimera-wasm/src/lib.rs` and mirrored by `src/engine/wire.ts`:
+    - eight `f64`s: t0, t1, rampIn, rampOut, strength, speed, releaseHold, tag;
+    - 22 `f64` targets in `ControlKey` order;
+    - a u8 label length and 24 bytes of UTF-8;
+    - padding.
+
+    NaN marks an absent optional or target. Labels are cut at a character boundary.
+  - The worklet scope has no `TextEncoder`/`TextDecoder`, so a tiny UTF-8 helper handles
+    labels and ids.
+- **Main thread.** Rich, non-real-time calls are JSON in and out through `serde_json`:
+  - planning, G2P and syllables;
+  - the anatomy model: frame, transfer function and formants, the `P`/`unP` template maps,
+    scale, tube node positions, and branch → drawing position;
+  - the creature, beatbox and vowel catalogues.
+
+  The TS facade gives the UI the types it uses today. Creature drawing data stays in TS.
+- **Faults.** The crate is built with `panic = "abort"`, so a panic in the worklet traps. The
+  processor then outputs silence for good and posts one error. The main thread may build a new
+  node, which restarts playback state: score, clocks and beat. There's no attempt at seamless
+  recovery.
 
 ## Build
 
@@ -158,6 +193,24 @@ speculative (JDAW principle: generality must earn its place).
   a TS tool (`tools/spectrogram.ts in.wav out.png`, reusing `tools/lib`).
 - `calibrate-vowels`, `calibrate-consonants` and `gen-syrinx-table` become `chimera-cli` bins,
   because they regenerate committed data.
-- The one-off exploration and diagnostic scripts are deleted: `proto-vowel`, `explore-syrinx`,
-  `measure-closures`, `measure-consonants`, `speech-diagnostics` and `draw-anatomy`. Their
-  findings are already in the code and the commit history.
+- `speech-diagnostics` (nasal leakage, formant undershoot, bandwidths, pitch) becomes
+  `chimera diagnose`, because it's a measurement tool for future tuning.
+- The one-off explorations are deleted: `proto-vowel`, `explore-syrinx`, `measure-closures`,
+  `measure-consonants` and `draw-anatomy`. Their findings are already in the code and the
+  commit history.
+
+## Review
+
+A design review (Codex, 2026-11-05) changed several points: block-size independence of the
+beat sequencer, the bounded score and the list of allocating commands, latching faults instead
+of rebuilding on the audio thread, determinism claimed only as tested, the event and telemetry
+contract, the ABI layout, facade gaps and startup ordering.
+
+It also suggested keeping G2P, planning and songs in TS for now. That suggestion was declined:
+- the beat sequencer runs in the engine and needs most of the planner core (inventory, oral
+  gestures, vowel targets);
+- JDAW's headless core (principle 4) has to sing lyrics on notes (principle 15);
+- phonetics split across two languages would drift.
+
+The worklet's per-block replay budget stays out of Rust, because commands apply at the next
+render call and so it isn't needed.

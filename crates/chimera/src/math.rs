@@ -84,23 +84,31 @@ pub fn sqrt(x: f64) -> f64 {
     x.sqrt()
 }
 
-/// `Math.min(a, b)`: NaN if either is NaN.
+/// `Math.min(a, b)`: NaN if either is NaN; −0 is below +0.
 #[inline(always)]
 pub fn js_min(a: f64, b: f64) -> f64 {
     if a.is_nan() || b.is_nan() {
         f64::NAN
     } else if a < b {
         a
+    } else if b < a {
+        b
+    } else if a.is_sign_negative() {
+        a
     } else {
         b
     }
 }
-/// `Math.max(a, b)`: NaN if either is NaN.
+/// `Math.max(a, b)`: NaN if either is NaN; +0 is above −0.
 #[inline(always)]
 pub fn js_max(a: f64, b: f64) -> f64 {
     if a.is_nan() || b.is_nan() {
         f64::NAN
     } else if a > b {
+        a
+    } else if b > a {
+        b
+    } else if a.is_sign_positive() {
         a
     } else {
         b
@@ -262,6 +270,15 @@ mod tests {
         let w: Vec<f64> = (0..3).map(|_| q.next()).collect();
         println!("{v:?} {w:?}");
         assert!(v.iter().chain(&w).all(|x| (0.0..1.0).contains(x)));
+    }
+    #[test]
+    fn js_min_max_follow_javascript() {
+        assert!(js_min(f64::NAN, 1.0).is_nan() && js_min(1.0, f64::NAN).is_nan());
+        assert!(js_max(f64::NAN, 1.0).is_nan() && js_max(1.0, f64::NAN).is_nan());
+        assert!(js_min(0.0, -0.0).is_sign_negative() && js_min(-0.0, 0.0).is_sign_negative());
+        assert!(js_max(0.0, -0.0).is_sign_positive() && js_max(-0.0, 0.0).is_sign_positive());
+        assert_eq!(js_min(2.0, 3.0), 2.0);
+        assert_eq!(js_max(2.0, 3.0), 3.0);
     }
     #[test]
     fn js_round_halves_up() {
