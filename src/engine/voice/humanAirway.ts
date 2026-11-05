@@ -99,31 +99,85 @@ export class HumanAirway {
   maxAreaRate = 45;
   /** additional rate per cm² of current area (1/s) */
   areaRateGain = 40;
+  /**
+   * The last part of a closure is slower than a release: contact spreads over the palate as
+   * tissue compresses, while a release is ballistic. Sealing at the opening rate drove the air
+   * the articulator displaces through a slit that shut within ~1 ms (an audible click). Below
+   * sealHi cm² the closing rate eases from maxAreaRate down to sealRate.
+   */
+  sealRate = 5;
+  sealLo = 0.03;
+  sealHi = 0.4;
+
+  /** areas committed at the start of the current control step (slew-limit baseline) */
+  private basePh: Float64Array | null = null;
+  private baseOr: Float64Array | null = null;
+  private basePhMin: Float64Array | null = null;
+  private baseOrMin: Float64Array | null = null;
+  private baseDt = 0;
 
   /** Geometry → targets for the next block. Returns the computed frame. `dt` enables slew limiting. */
   apply(a: HumanArtic, dt = 0): HumanFrame {
+    if (dt > 0) {
+      if (!this.basePh) {
+        this.basePh = new Float64Array(this.nPh);
+        this.baseOr = new Float64Array(this.nOr);
+        this.basePhMin = new Float64Array(this.nPh);
+        this.baseOrMin = new Float64Array(this.nOr);
+      }
+      this.basePh.set(this.phAreas);
+      this.baseOr!.set(this.orAreas);
+      this.basePhMin!.set(this.phMin);
+      this.baseOrMin!.set(this.orMin);
+    }
+    this.baseDt = dt;
+    return this.commit(a, dt);
+  }
+
+  /**
+   * Recompute the geometry within the same control step (after a contact correction moved an
+   * articulator), still slew-limited against the areas the step started from: re-applying
+   * without the limit let closures appear within one block, a pressure and output spike.
+   */
+  reapply(a: HumanArtic): HumanFrame {
+    return this.commit(a, this.baseDt);
+  }
+
+  private commit(a: HumanArtic, dt: number): HumanFrame {
     const f = (this.frame = this.tract.compute(a));
-    const oldPh = dt > 0 ? Float64Array.from(this.phAreas) : null;
-    const oldOr = dt > 0 ? Float64Array.from(this.orAreas) : null;
-    const oldPhMin = dt > 0 ? Float64Array.from(this.phMin) : null;
-    const oldOrMin = dt > 0 ? Float64Array.from(this.orMin) : null;
     const { phLen, orLen } = this.tract.resample(a, f, this.nPh, this.nOr, this.phAreas, this.orAreas, this.phMin, this.orMin);
-    if (oldPh && oldOr && oldPhMin && oldOrMin) {
+    const oldPh = this.basePh, oldOr = this.baseOr, oldPhMin = this.basePhMin, oldOrMin = this.baseOrMin;
+    if (dt > 0 && oldPh && oldOr && oldPhMin && oldOrMin) {
       // both section areas and sub-section minima are rate-limited: the minima set the jet
       // (Borda–Carnot) losses ∝ 1/A², so a fast drop chokes the flow within a block
       // rate limit grows with cross-section: wide cavities reshape fast, narrow constrictions
       // (lateral extent ~1–2 cm) open and close at physiological rates (sets burst sharpness)
       const k2 = this.body.scale * this.body.scale;
       const clampArr = (cur: Float64Array, old: Float64Array, mins: Float64Array, oldMins: Float64Array) => {
+        const openR = this.maxAreaRate * k2, gain = this.areaRateGain;
+        const sealR = this.sealRate * k2, lo = this.sealLo * k2, hi = this.sealHi * k2;
+        // closing rate at area A: the release rate eased down to the seal rate near contact
+        const closeR = (A: number) => {
+          const u = A <= lo ? 0 : A >= hi ? 1 : (A - lo) / (hi - lo);
+          return sealR + (openR - sealR) * u * u * (3 - 2 * u);
+        };
         for (let i = 0; i < cur.length; i++) {
-          const lim = (this.maxAreaRate * k2 + this.areaRateGain * Math.max(old[i], cur[i])) * dt;
           const d = cur[i] - old[i];
-          if (d > lim) cur[i] = old[i] + lim;
-          else if (d < -lim) cur[i] = old[i] - lim;
-          const limM = (this.maxAreaRate * k2 + this.areaRateGain * Math.max(oldMins[i], mins[i])) * dt;
+          if (d > 0) {
+            const lim = (openR + gain * cur[i]) * dt;
+            if (d > lim) cur[i] = old[i] + lim;
+          } else {
+            const lim = (closeR(old[i]) + gain * old[i]) * dt;
+            if (d < -lim) cur[i] = old[i] - lim;
+          }
           const dm = mins[i] - oldMins[i];
-          if (dm > limM) mins[i] = oldMins[i] + limM;
-          else if (dm < -limM) mins[i] = oldMins[i] - limM;
+          if (dm > 0) {
+            const limM = (openR + gain * mins[i]) * dt;
+            if (dm > limM) mins[i] = oldMins[i] + limM;
+          } else {
+            const limM = (closeR(oldMins[i]) + gain * oldMins[i]) * dt;
+            if (dm < -limM) mins[i] = oldMins[i] - limM;
+          }
           if (mins[i] > cur[i]) mins[i] = cur[i];
           if (mins[i] < 0) mins[i] = 0;
         }

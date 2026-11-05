@@ -65,7 +65,7 @@ export function isVowel(ipa: string, body = "male"): boolean {
   return !!VT[body]?.[ipa] || ipa in EXPAND;
 }
 
-function vowelArtic(ipa: string, body: string): Partial<HumanArtic> | null {
+export function vowelArtic(ipa: string, body: string): Partial<HumanArtic> | null {
   const v = VT[body]?.[ipa] ?? VT.male?.[ipa];
   if (!v) return null;
   const out: Partial<HumanArtic> = {};

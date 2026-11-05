@@ -284,11 +284,13 @@ export class HumanVoice {
     this.clock += dt;
     // contact constraint on the frame computed anyway; re-apply only if a correction was made
     this.airway.apply(this.artic.x, dt);
-    if (this.enforceContacts()) this.airway.apply(this.artic.x, 0);
+    if (this.enforceContacts()) this.airway.reapply(this.artic.x);
     this.airway.net.beginBlock(this.ctrlEvery);
     this.ctrlCounter = this.ctrlEvery;
     // breath: fast attack, slower release; a speaking score breathes on its own
-    const gateGoal = Math.max(this.gateTarget, breathVal * breathAct);
+    // a negative breath gesture (ingressive: inward K snares, gasps) overrides the performer's breath
+    const scoreBreath = breathVal * breathAct;
+    const gateGoal = scoreBreath < 0 ? scoreBreath : Math.max(this.gateTarget, scoreBreath);
     const tau = gateGoal > this.gate ? 0.025 : 0.07;
     this.gate += (gateGoal - this.gate) * (1 - Math.exp(-dt / tau));
     this.pLung = this.source.pressure * CM_H2O * this.gate;

@@ -306,14 +306,19 @@ export class HumanVocalTract {
     const bl = dist(pF, T);
     const curl = clamp(a.ttCurl, 0, 1);
     const ctrl = add(add(pF, scale(tanF, bl * 0.5)), v(0, (0.18 + 0.5 * curl) * k));
-    // dorsum depression (clicks): pull the middle of the blade/body down
+    // dorsum depression (clicks): hollow the tongue between the back (velar) contact at the top
+    // of the body and the tip, leaving both contacts in place, so a sealed pocket expands
     const blade = bezier2(pF, ctrl, T, 7);
     if (a.dorsum > 0) {
-      for (let i = 0; i < arcPts.length; i++) {
-        const t = i / (arcPts.length - 1);
-        const w = Math.sin(Math.min(1, t * 1.3) * Math.PI);
-        arcPts[i] = add(arcPts[i], v(0, -a.dorsum * 0.9 * k * w * w));
-      }
+      const x0 = B.x, x1 = T.x;
+      const dip = (p: Vec): Vec => {
+        const u = (p.x - x0) / Math.max(1e-6, x1 - x0);
+        if (u <= 0 || u >= 1) return p;
+        const w = Math.sin(Math.PI * Math.pow(u, 0.8));
+        return add(p, v(0, -a.dorsum * 0.9 * k * w * w));
+      };
+      for (let i = 0; i < arcPts.length; i++) arcPts[i] = dip(arcPts[i]);
+      for (let i = 1; i < blade.length - 1; i++) blade[i] = dip(blade[i]);
     }
     // underside back to the frenulum / floor of mouth (jaw-carried)
     const fren = J(5.7, 6.15);
