@@ -174,10 +174,11 @@ export const BEAT_SOUNDS: BeatSound[] = [
     hint: "Sealed lips, the jaw drops, the lips pop open",
     latency: 0.013,
     build: (body) => [
-      ...snap(oral(body, "p", -0.12, 0, 2, "P!")),
+      // a light seal (pressing the lips squeezes the pocket before the suction starts)
+      ...snap(oral(body, "p", -0.12, 0, 2, "P!", { lipAp: -0.08 }), 5, 0.006),
       ...oral(body, "k", -0.12, 0.03, 2, "P!"),
-      // lips stay sealed while the jaw and tongue hollow the mouth
-      g(-0.045, 0.004, 0.04, 0.05, 40, { jaw: 1.3, dorsum: 0.8 }, "P!", 1.6),
+      // lips stay sealed while the jaw and tongue hollow the mouth: about −30 cmH₂O of suction
+      g(-0.07, 0.004, 0.04, 0.05, 40, { jaw: 1.6, dorsum: 1 }, "P!", 2),
     ],
   },
   {
