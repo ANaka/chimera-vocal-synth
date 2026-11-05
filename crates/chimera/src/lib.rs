@@ -52,5 +52,7 @@ pub mod phonetics;
 /// Parse every embedded data table now (an `Engine` does this when it is created), so nothing
 /// initialises lazily on an audio thread later.
 pub fn init() {
-    phonetics::planner::vowel_table();
+    phonetics::planner::init();
+    phonetics::inventory::init();
+    phonetics::beatbox::init();
 }

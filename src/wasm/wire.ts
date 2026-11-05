@@ -74,3 +74,33 @@ export function writeGestures(buf: ArrayBuffer, at: number, gestures: readonly G
   }
   return n;
 }
+
+export const STEP_RECORD = 48;
+
+/** A beatbox pattern step as the engine takes it. */
+export interface BeatStepRecord {
+  id: string;
+  note?: number;
+  accent?: number;
+}
+
+/** Write beat steps (null: rest) as 48-byte records at byte offset `at`. Returns the count written. */
+export function writeSteps(buf: ArrayBuffer, at: number, steps: readonly (BeatStepRecord | null)[], max = 128): number {
+  const n = Math.min(steps.length, max);
+  const dv = new DataView(buf, at, n * STEP_RECORD);
+  const bytes = new Uint8Array(buf, at, n * STEP_RECORD);
+  for (let i = 0; i < n; i++) {
+    const s = steps[i];
+    const o = i * STEP_RECORD;
+    if (!s) {
+      bytes[o] = 255;
+      continue;
+    }
+    const b = utf8(s.id).slice(0, LABEL_CAP);
+    bytes[o] = b.length;
+    bytes.set(b, o + 1);
+    dv.setFloat64(o + 32, s.note ?? NaN, true);
+    dv.setFloat64(o + 40, s.accent ?? NaN, true);
+  }
+  return n;
+}

@@ -22,15 +22,26 @@
 //! | 240    | u8          | label length in bytes (255: no label) |
 //! | 241    | 24 × u8     | label, UTF-8, cut at a character boundary |
 //! | 265    | 7 × u8      | padding |
+//!
+//! # Beat-step records ([`STEP_RECORD`] = 48 bytes, in the same record area)
+//! | offset | type     | field |
+//! |-------:|----------|-------|
+//! | 0      | u8       | id length in bytes (255: a rest) |
+//! | 1      | 24 × u8  | sound id, UTF-8 |
+//! | 25     | 7 × u8   | padding |
+//! | 32     | f64      | note (MIDI; NaN: absent) |
+//! | 40     | f64      | accent (NaN: absent) |
 
 pub mod api;
 
 use chimera::anatomy::human::{ArticPatch, BodyName, N_ARTIC};
 use chimera::control::score::{Gesture, Label, N_CONTROL, Targets};
 use chimera::engine::{Engine, MAX_SCHEDULE};
+use chimera::phonetics::beatbox::BeatStep;
 use chimera::voice::human_voice::{SourcePatch, VoiceTelemetry};
 
 pub const GESTURE_RECORD: usize = 272;
+pub const STEP_RECORD: usize = 48;
 pub const LAYOUT_VERSION: u32 = 1;
 /// Largest `engine_render` request (frames).
 pub const MAX_RENDER: usize = 4096;
@@ -381,4 +392,61 @@ pub unsafe extern "C" fn engine_telemetry(h: *mut Handle) -> *const f64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn engine_tele_labels(h: *mut Handle) -> *const u8 {
     handle!(h).tele_labels.as_ptr()
+}
+
+/// Decode a beat-step record (see the module docs).
+pub fn read_step(b: &[u8]) -> Option<BeatStep> {
+    let len = b[0];
+    if len == 255 {
+        return None;
+    }
+    let f = |o: usize| f64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+    Some(BeatStep { id: Label::from_bytes(&b[1..1 + (len as usize).min(Label::CAP)]), note: opt(f(32)), accent: opt(f(40)) })
+}
+
+/// The sequencer. `count` step records in the record area replace the pattern if `has_steps`;
+/// `bpm`/`swing` NaN keep the current value; `playing` 0 stop, 1 start, other: unchanged.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_set_beat(h: *mut Handle, has_steps: u32, count: usize, bpm: f64, swing: f64, playing: u32) {
+    let h = handle!(h);
+    if has_steps != 0 {
+        let count = count.min(128);
+        let mut steps = [None; 128];
+        for (i, s) in steps.iter_mut().enumerate().take(count) {
+            *s = read_step(&h.records[i * STEP_RECORD..(i + 1) * STEP_RECORD]);
+        }
+        h.engine.set_beat_steps(&steps[..count]);
+    }
+    if !bpm.is_nan() || !swing.is_nan() {
+        h.engine.set_beat_tempo(opt(bpm), opt(swing));
+    }
+    match playing {
+        0 => h.engine.set_beat_playing(false),
+        1 => h.engine.set_beat_playing(true),
+        _ => {}
+    }
+}
+
+/// Play the sound of the first step record of the record area as soon as the mouth can.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_beat_hit(h: *mut Handle) {
+    let h = handle!(h);
+    if let Some(step) = read_step(&h.records[..STEP_RECORD]) {
+        h.engine.beat_hit(&step);
+    }
+}
+
+/// The beat step under the playhead (−1: stopped).
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_beat_step(h: *mut Handle) -> f64 {
+    handle!(h).engine.beat_step() as f64
 }

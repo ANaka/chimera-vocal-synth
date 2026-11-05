@@ -10,7 +10,9 @@
 //!   warm. A body or creature switch builds a new airway network (it allocates).
 
 use crate::anatomy::human::{ArticPatch, BodyName};
+use crate::control::beat_player::BeatPlayer;
 use crate::control::score::{Gesture, GestureScore};
+use crate::phonetics::beatbox::{BeatStep, MAX_SOUND_GESTURES};
 use crate::voice::human_voice::{HumanVoice, SourcePatch, VoiceTelemetry};
 
 /// Samples per sub-block: the browser's render quantum, kept for every host.
@@ -44,13 +46,14 @@ pub struct Engine {
     /// samples rendered so far (sub-block phase)
     pos: u64,
     scratch: Vec<Gesture>,
+    beat: BeatPlayer,
 }
 
 impl Engine {
     pub fn new(sample_rate: f64) -> Engine {
         crate::init();
         let body = BodyName::Male;
-        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE) }
+        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new() }
     }
 
     fn make_voice(fs: f64, body: BodyName) -> HumanVoice {
@@ -86,6 +89,11 @@ impl Engine {
         self.voice.set_articulation(&target, Some(prev.artic.tip_free));
         // the performer's breath, not the voice's (which includes breath from the score)
         self.voice.set_gate(self.gate_level);
+        // the new voice's clock starts at zero: keep the beat's phase across the switch, and
+        // queue again the hits the old voice's score was holding (built for the new body)
+        self.beat.body = body;
+        self.beat.rebase(self.voice.clock - prev.clock);
+        self.beat.rewind(self.voice.clock);
         self.info()
     }
 
@@ -153,8 +161,56 @@ impl Engine {
         }
     }
 
-    /// Per-sub-block bookkeeping (the sequencer's tick).
-    fn sub_block_start(&mut self) {}
+    /// Per-sub-block bookkeeping: the sequencer schedules the hits within its horizon.
+    fn sub_block_start(&mut self) {
+        let voice = &mut self.voice;
+        let clock = voice.clock;
+        self.beat.tick(clock, &mut |gs| voice.schedule(gs));
+    }
+
+    // ---------------------------------------------------------------- beatbox sequencer
+
+    /// Replace the pattern (at most 128 steps; `None` is a rest).
+    pub fn set_beat_steps(&mut self, steps: &[Option<BeatStep>]) {
+        self.beat.set_steps(steps);
+    }
+
+    /// Change tempo/swing (`None`: keep). The next unscheduled step keeps its time.
+    pub fn set_beat_tempo(&mut self, bpm: Option<f64>, swing: Option<f64>) {
+        let b = &mut self.beat;
+        b.set_tempo(bpm.unwrap_or(b.bpm), swing.unwrap_or(b.swing));
+    }
+
+    /// Start or stop the sequencer. Stopping also silences hits already scheduled.
+    pub fn set_beat_playing(&mut self, playing: bool) {
+        if playing && !self.beat.playing {
+            self.beat.start(self.voice.clock);
+        }
+        if !playing && self.beat.playing {
+            self.beat.stop();
+            // hits already scheduled within the horizon would still sound
+            self.voice.cancel_score();
+        }
+    }
+
+    pub fn beat(&self) -> &BeatPlayer {
+        &self.beat
+    }
+
+    /// Play one beatbox sound as soon as the mouth can make it.
+    pub fn beat_hit(&mut self, step: &BeatStep) {
+        self.scratch.clear();
+        let hit = self.voice.clock + BeatPlayer::lead_in_with(step.id.as_str(), self.body.as_str(), &mut self.scratch);
+        self.scratch.clear();
+        self.beat.gestures(step, hit, 0.18, &mut self.scratch);
+        debug_assert!(self.scratch.len() <= MAX_SOUND_GESTURES);
+        self.voice.schedule(&self.scratch);
+    }
+
+    /// The beat step under the playhead (−1 when the sequencer is stopped).
+    pub fn beat_step(&self) -> i64 {
+        self.beat.step_at(self.voice.clock)
+    }
 
     pub fn telemetry(&mut self, out: &mut VoiceTelemetry) {
         self.voice.telemetry(out);
