@@ -88,6 +88,10 @@ for (const [bname, body] of bodies) {
         c += 0.05 * Math.pow(Math.max(0, 0.55 - p[5]), 2) + 0.05 * Math.pow(Math.max(0, p[4] - 0.35), 2) + 0.03 * Math.pow(Math.max(0, Math.abs(p[3] - apPrior) - 0.35), 2);
       }
       c += 0.002 * p[6] * p[6] + 0.006 * p[7] * p[7];
+      // the tongue body near where the vowel's height and backness put it: many postures give
+      // the same formants, and without this the fit wandered (a schwa with the tongue as low as
+      // /ɑ/), making every transition through it needlessly long
+      c += 0.006 * (Math.pow(p[0] - x0[0], 2) + Math.pow(p[1] - x0[1], 2));
       if (vw.ipa !== "ɝ") c += 0.5 * p[8] * p[8];
       return c;
     };

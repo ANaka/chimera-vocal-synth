@@ -25,7 +25,9 @@ for (const c of items) {
     return m;
   };
   const vowelStep = step(0.14, 0.26);
+  // the vowel's own pulses just before the closure window (they sharpen as the tract narrows)
+  const lateStep = step(seg.t0 - 0.045, seg.t0 - 0.015);
   const closeStep = step(seg.t0 - 0.015, seg.t0 + 0.04);
-  rows.push(`${c}  closure-onset max step / vowel max step ${(closeStep / vowelStep).toFixed(2)}`);
+  rows.push(`${c}  closure-onset max step / vowel max step ${(closeStep / vowelStep).toFixed(2)}  (/ late-vowel step ${(closeStep / lateStep).toFixed(2)})`);
 }
 console.log(rows.join("\n"));

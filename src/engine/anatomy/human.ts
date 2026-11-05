@@ -112,6 +112,8 @@ export interface GridSample {
   /** distance from the glottis along the centreline (cm) */
   s: number;
   region: 0 | 1 | 2 | 3; // 0 epilarynx, 1 pharynx, 2 oral (radial), 3 front (teeth/lips)
+  /** the gap the ray measured, before the contact models (cm) */
+  ray: number;
 }
 
 export interface HumanFrame {
@@ -150,6 +152,8 @@ export interface HumanFrame {
 }
 
 const DEG = Math.PI / 180;
+/** points on the tongue body's arc */
+const ARC_POINTS = 32;
 
 export class HumanVocalTract {
   readonly body: HumanBody;
@@ -245,13 +249,35 @@ export class HumanVocalTract {
       velNasal.push(sub(c, scale(nrm, th)));
       vel.push(c);
     }
+    // the velum's oral surface runs into the hard palate's: its root sat below the palate's edge,
+    // folding the roof back on itself there, and rays crossed the fold as the velum turned
+    const pal0 = this.palate[0];
+    for (let i = 0; i < velOral.length; i++) {
+      const u = i / 10 / 0.35;
+      if (u < 1) velOral[i] = lerpV(velOral[i], pal0, (1 - u) * (1 - u));
+    }
     const uvula = vel[vel.length - 1];
 
-    // ---- outer contour: pharyngeal wall up to uvula height, then velum oral surface (tip→PNS), palate, incisors, upper lip
+    // ---- outer contour: pharyngeal wall up to just below the uvula, then velum oral surface
+    // (tip→PNS), palate, incisors, upper lip
     const outer = new Polyline();
-    const uvY = uvula.y;
-    for (const p of this.pharWall) {
-      if (p.y < uvY) outer.push(p);
+    // The port window's lid runs from the posterior wall up to the uvula's tip. It must slope
+    // up: a lid leaving the wall above the tip left rays just under the tip to hit the wall far
+    // behind, so the back of the oral tract jumped as the velum moved.
+    const uvY = velOral[velOral.length - 1].y - 0.3 * k;
+    for (let i = 0; i < this.pharWall.length; i++) {
+      const p = this.pharWall[i];
+      if (p.y < uvY) {
+        outer.push(p);
+        continue;
+      }
+      // end exactly at that height: whole wall points popping in and out made the port
+      // window, and every ray through it, jump as the velum moved
+      if (i > 0) {
+        const a = this.pharWall[i - 1];
+        outer.push(lerpV(a, p, clamp((uvY - a.y) / Math.max(1e-9, p.y - a.y), 0, 1)));
+      }
+      break;
     }
     // bridge to the uvula tip (velopharyngeal port window)
     const roofStart = outer.length;
@@ -299,7 +325,8 @@ export class HumanVocalTract {
     // arc runs from thB (200°) decreasing to thF
     while (thF > thB) thF -= 2 * Math.PI;
     while (thF < thB - 2 * Math.PI) thF += 2 * Math.PI;
-    const arcPts = arc(B, r, thB, thF, Math.max(6, Math.round(((thB - thF) / DEG) / 6)));
+    // a fixed number of points: a count that changed with the angle re-spaced every vertex at once
+    const arcPts = arc(B, r, thB, thF, ARC_POINTS);
     const pF = arcPts[arcPts.length - 1];
     const tanF = v(Math.sin(thF), -Math.cos(thF)); // direction of decreasing angle
     // blade: quadratic from the tangent point to the tip; curl lifts the tip and turns it back
@@ -336,8 +363,14 @@ export class HumanVocalTract {
     // pharyngeal rays (a pocket makes ray crossings flip discontinuously)
     const inner = new Polyline();
     inner.push(epiBase).push(epiTip);
-    let rootStart = root.findIndex((q) => q.y > epiTip.y + 0.05 * k);
+    const yRoot = epiTip.y + 0.05 * k;
+    let rootStart = root.findIndex((q) => q.y > yRoot);
     if (rootStart < 0) rootStart = root.length - 1;
+    else if (rootStart > 0) {
+      // start exactly at that height, not at the next sample point (which jumped along the root)
+      const a = root[rootStart - 1], b = root[rootStart];
+      inner.push(lerpV(a, b, clamp((yRoot - a.y) / Math.max(1e-9, b.y - a.y), 0, 1)));
+    }
     for (let i = rootStart; i < root.length; i++) inner.push(root[i]);
     inner.append(arcPts, true);
     inner.append(blade, true);
@@ -352,7 +385,9 @@ export class HumanVocalTract {
     const yEpiTop = glottis.y + 2.4 * k * this.body.pharynx;
     const yPharTop = this.polarC.y;
     const nPh = 12;
-    const measure = (o: Vec, dir: Vec, maxLen: number): { inner: Vec; outer: Vec; d: number } | null => {
+    // `fan`: a ray of the oral fan, whose origin the tongue can move off (the others start below
+    // or in front of all tissue they measure)
+    const measure = (o: Vec, dir: Vec, maxLen: number, fan = false): { inner: Vec; outer: Vec; d: number } | null => {
       // walk from o along dir: last inner crossing before the first outer crossing
       const nOut = rayPolyline(o.x, o.y, dir.x, dir.y, outer, 0, maxLen, tmp);
       if (nOut === 0) return null;
@@ -361,7 +396,16 @@ export class HumanVocalTract {
       const nIn = rayPolyline(o.x, o.y, dir.x, dir.y, inner, 0, tOut + 1.5 * k, tmp);
       let tIn = -Infinity;
       for (let i = 0; i < nIn; i++) if (tmp[i] > tIn && tmp[i] < tOut + 1.5 * k) tIn = tmp[i];
-      if (tIn === -Infinity) tIn = Math.max(0, tOut - 3.5 * k);
+      if (tIn === -Infinity && !fan) tIn = Math.max(0, tOut - 3.5 * k);
+      else if (tIn === -Infinity) {
+        // the tongue has moved off the ray's origin: its surface is behind it (a fixed fallback
+        // gap here jumped as the surface crossed the origin)
+        const back = 2.5 * k;
+        const nBack = rayPolyline(o.x, o.y, -dir.x, -dir.y, inner, 0, back, tmp);
+        let tb = back;
+        for (let i = 0; i < nBack; i++) tb = Math.min(tb, tmp[i]);
+        tIn = -tb;
+      }
       // if the tongue crosses the wall, the outermost inner crossing lies beyond tOut → closed
       const d = Math.max(0, tOut - tIn);
       const pIn = add(o, scale(dir, Math.min(tIn, tOut)));
@@ -372,7 +416,7 @@ export class HumanVocalTract {
     for (let i = 0; i < nPh; i++) {
       const y = lerp(yEpiTop + 0.12 * k, yPharTop, i / nPh);
       const m = measure(v(4.6 * k, y), v(-1, 0), 9 * k);
-      if (m) grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, region: 1 });
+      if (m) grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, ray: m.d, region: 1 });
     }
     // oral family: rays from a centre that glides from C1 (mid-oral) to C2 (behind the incisors)
     // while the angle sweeps back → up → forward; consecutive rays never cross inside the airway.
@@ -384,11 +428,11 @@ export class HumanVocalTract {
       const w = t < 0.45 ? 0 : (t - 0.45) / 0.55;
       const c = lerpV(this.polarC, this.polarC2, w * w * (3 - 2 * w));
       const dir = v(Math.cos(ang), Math.sin(ang));
-      const m = measure(c, dir, 8 * k);
+      const m = measure(c, dir, 8 * k, true);
       if (!m) continue;
       if (splitIndex < 0 && ang <= 150 * DEG) splitIndex = grid.length;
       // rays behind the velum still measure the (laterally wide) oropharynx
-      grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, region: splitIndex < 0 ? 1 : 2 });
+      grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, ray: m.d, region: splitIndex < 0 ? 1 : 2 });
     }
     // front verticals (upper incisor edge → lip opening), looking up
     const incisorTip = this.palate[this.palate.length - 1];
@@ -401,12 +445,15 @@ export class HumanVocalTract {
       const x = lerp(xStart, xEnd, i / (nFr - 1));
       const m = measure(v(x, 4.0 * k), v(0, 1), 8 * k);
       if (!m) continue;
-      grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, region: 3 });
+      grid.push({ ...m, mid: lerpV(m.inner, m.outer, 0.5), area: 0, s: 0, ray: m.d, region: 3 });
     }
 
-    // ---- soft-tissue contact model: the gap near the closest approach of the tongue (tip/blade,
-    // and dorsum) to the oral roof follows a curved-body profile d = δ + Δs²/2R (δ < 0 = pressed in),
-    // giving monotonic constriction areas and seals whose length grows with contact pressure.
+    // ---- soft-tissue contact model: near the oral roof, the gap at each roof point is its
+    // distance to the tongue surface itself (dorsum arc, blade, tip and underside), negative
+    // where the tongue is pressed into the roof. The raw ray crossings of the tissue polygon can
+    // leave sealed pockets beside a contact, and a jet released into such a pocket water-hammers;
+    // the surface distance has none, gives seals whose length grows with contact pressure, and
+    // handles two contacts at once (a single contact point hopped between them, jumping areas).
     const roof = { xs: outer.xs.slice(roofStart, roofEnd + 1), ys: outer.ys.slice(roofStart, roofEnd + 1) };
     const cum = new Float64Array(roof.xs.length);
     for (let i = 1; i < roof.xs.length; i++) cum[i] = cum[i - 1] + Math.hypot(roof.xs[i] - roof.xs[i - 1], roof.ys[i] - roof.ys[i - 1]);
@@ -417,33 +464,43 @@ export class HumanVocalTract {
     this.contactBody = bodyC.d;
     this.contactTipN = tipC.n;
     this.contactBodyN = bodyC.n;
-    // Near a close approach the contact model *defines* the gap (one parabolic constriction):
-    // the raw ray crossings of the tissue polygon can leave sealed pockets beside the contact,
-    // and a jet released into such a pocket water-hammers. Blended back to the rays with distance.
     if (tipC.d < 0.6 * k || bodyC.d < 0.6 * k) {
-      const Rt = 0.45 * k, Rb = 1.6 * k;
-      const apply = (g: GridSample, c: { d: number; s: number }, R: number, sArc: number, win: number) => {
-        const ds = sArc - c.s;
-        const ad = Math.abs(ds);
-        if (ad > 2 * win) return;
-        const dc = Math.max(0, c.d + (ds * ds) / (2 * R));
-        // override weight: full inside the window, fading out to 2× window; strongest when pressed in
-        const near = 1 - smoothstep(win, 2 * win, ad);
-        const regime = 1 - smoothstep(0.15 * k, 0.6 * k, c.d);
-        const w = near * regime;
-        // the parabola also caps the ray gap; the cap fades out at the edges of the window and
-        // of the contact regime, so the gap stays continuous as the tongue moves (a cap that
-        // switched on at full strength made the area jump, heard as a tick)
-        const cap = (1 - smoothstep(1.5 * win, 2 * win, ad)) * (1 - smoothstep(0.45 * k, 0.6 * k, c.d));
-        const dm = g.d + (Math.min(g.d, dc) - g.d) * cap;
-        g.d = dm + (dc - dm) * w;
+      // the whole tongue outline, closed: distance to its surface, signed by whether the roof
+      // point is inside it (so the sign only changes where the distance is zero)
+      const outl: Vec[] = [...root, ...arcPts.slice(1), ...blade.slice(1), ...under.slice(1), ...floor.slice(1), root[0]];
+      const tongueOutline = { xs: outl.map((q) => q.x), ys: outl.map((q) => q.y) };
+      const tongueGap = (x: number, y: number) => {
+        const gap = distToPolyline(tongueOutline, x, y);
+        return insidePolygon(tongueOutline, x, y) ? -gap : gap;
       };
+      // Each roof ray takes the narrowest gap along its own stretch of roof: ±1 mm, so the rays
+      // near a contact seal together and open together (a sharp burst), widening to ±2 mm while
+      // the tongue is pressed in, because the tip's contact on the alveolar ridge is narrower
+      // than the ~4 mm between rays there and could otherwise fall between two and never seal.
+      const press = 1 - smoothstep(-0.06 * k, 0, Math.min(tipC.d, bodyC.d));
+      const half = 0.1 * k * (1 + press);
+      const roofLen = cum[cum.length - 1];
       for (const g of grid) {
         if (g.region === 0) continue;
+        // only rays ending on the oral roof, fading out (not switching off) as they leave it
         const pr = projectOn(roof, cum, g.outer.x, g.outer.y);
-        if (pr.dist > 0.25 * k) continue; // this ray's outer point is not on the oral roof
-        if (g.region >= 2 && tipC.d < 0.6 * k) apply(g, tipC, Rt, pr.s, 0.9 * k);
-        if (bodyC.d < 0.6 * k) apply(g, bodyC, Rb, pr.s, 1.6 * k);
+        const onRoof = 1 - smoothstep(0.15 * k, 0.25 * k, pr.dist);
+        if (onRoof <= 0) continue;
+        let dc = tongueGap(g.outer.x, g.outer.y);
+        // the gap changes no faster than the distance moved along the roof
+        if (dc - half <= 0.6 * k)
+          for (const f of [-1, -0.5, 0.5, 1]) {
+            const q = pointAlong(roof, cum, clamp(pr.s + f * half, 0, roofLen));
+            dc = Math.min(dc, tongueGap(q.x, q.y));
+          }
+        // the surface distance takes over as the tongue comes within ~6 mm of this roof point,
+        // fully from 1.5 mm; it also caps the ray's gap from 4.5 mm in
+        const w = (1 - smoothstep(0.15 * k, 0.6 * k, dc)) * onRoof;
+        const cap = (1 - smoothstep(0.45 * k, 0.6 * k, dc)) * onRoof;
+        if (w <= 0 && cap <= 0) continue;
+        const dp = Math.max(0, dc);
+        const dm = g.d + (Math.min(g.d, dp) - g.d) * cap;
+        g.d = dm + (dp - dm) * w;
       }
     }
 
@@ -536,13 +593,17 @@ export class HumanVocalTract {
 
   /** Epilarynx area profile at s ∈ [0, epiLen]. */
   epilarynxArea(a: HumanArtic, s: number, epiLen: number): number {
-    const k2 = this.k * this.k;
     const u = s / epiLen;
-    const vent = 1 - 0.75 * clamp(a.ventricular, 0, 1);
-    if (u < 0.3) return 1.3 * k2; // laryngeal ventricle
-    if (u < 0.5) return 0.95 * k2 * vent; // ventricular folds
-    const top = lerp(1.9, 0.35, clamp(a.epilarynx, 0, 1)) * k2;
-    return lerp(1.2 * k2, top, (u - 0.5) / 0.5);
+    const vent = 0.95 * (1 - 0.75 * clamp(a.ventricular, 0, 1));
+    const top = lerp(1.9, 0.35, clamp(a.epilarynx, 0, 1));
+    // laryngeal ventricle, ventricular folds, then the tube to its top
+    const f = (x: number) => (x < 0.3 ? 1.3 : x < 0.5 ? vent : lerp(1.2, top, (x - 0.5) / 0.5));
+    // the steps between them are short ramps: a section boundary sliding across a step made
+    // that section's area jump
+    const r = 0.03;
+    let A = f(u);
+    for (const u0 of [0.3, 0.5]) if (Math.abs(u - u0) < r) A = lerp(f(u0 - r), f(u0 + r), (u - (u0 - r)) / (2 * r));
+    return A * this.k * this.k;
   }
 
   /**
@@ -553,9 +614,12 @@ export class HumanVocalTract {
   resample(a: HumanArtic, f: HumanFrame, nPh: number, nOr: number, outPh: Float64Array, outOr: Float64Array, minPh?: Float64Array, minOr?: Float64Array): { phLen: number; orLen: number } {
     const epiLen = 2.4 * this.k * this.body.pharynx;
     const g = f.grid;
+    // the epilarynx's last few millimetres flare into the pharynx (no step at its top)
+    const flare = 0.1 * epiLen;
     const areaAt = (s: number): number => {
-      if (s <= epiLen) return this.epilarynxArea(a, s, epiLen);
-      if (s <= g[0].s) return lerp(this.epilarynxArea(a, epiLen, epiLen), g[0].area, (s - epiLen) / Math.max(1e-6, g[0].s - epiLen));
+      if (s <= epiLen - flare) return this.epilarynxArea(a, s, epiLen);
+      if (s <= epiLen) return lerp(this.epilarynxArea(a, s, epiLen), g[0].area, (s - (epiLen - flare)) / flare);
+      if (s <= g[0].s) return g[0].area;
       // binary search
       let lo = 0, hi = g.length - 1;
       if (s >= g[hi].s) return g[hi].area;
@@ -627,21 +691,55 @@ function projectOn(pl: { xs: number[]; ys: number[] }, cum: Float64Array, px: nu
   return { s: bs, dist: best, signed: sign * best, x: bx, y: by, seg: bseg };
 }
 
-/** Closest approach of a set of tissue points to the roof: signed gap δ (negative = pressed in) and arc position. */
-function closestApproach(pl: { xs: number[]; ys: number[] }, cum: Float64Array, pts: Vec[]): { d: number; s: number; n: { x: number; y: number } } {
-  let d = Infinity, sAt = 0, seg = 0;
+/** The point at arc length s along a polyline. */
+function pointAlong(pl: { xs: number[]; ys: number[] }, cum: Float64Array, s: number): Vec {
+  let i = 0;
+  while (i < cum.length - 2 && cum[i + 1] < s) i++;
+  const L = cum[i + 1] - cum[i];
+  const u = L > 1e-9 ? clamp((s - cum[i]) / L, 0, 1) : 0;
+  return { x: pl.xs[i] + (pl.xs[i + 1] - pl.xs[i]) * u, y: pl.ys[i] + (pl.ys[i + 1] - pl.ys[i]) * u };
+}
+
+/** Shortest distance from a point to a polyline. */
+function distToPolyline(pl: { xs: number[]; ys: number[] }, px: number, py: number): number {
+  let best = Infinity;
+  const xs = pl.xs, ys = pl.ys;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const ax = xs[i], ay = ys[i], ex = xs[i + 1] - ax, ey = ys[i + 1] - ay;
+    const L2 = ex * ex + ey * ey;
+    let t = L2 > 1e-12 ? ((px - ax) * ex + (py - ay) * ey) / L2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = px - ax - ex * t, dy = py - ay - ey * t;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < best) best = d2;
+  }
+  return Math.sqrt(best);
+}
+
+/** Even-odd point-in-polygon test (the polygon's last point repeats its first). */
+function insidePolygon(pl: { xs: number[]; ys: number[] }, px: number, py: number): boolean {
+  let inside = false;
+  for (let i = 0; i < pl.xs.length - 1; i++) {
+    const xa = pl.xs[i], ya = pl.ys[i], xb = pl.xs[i + 1], yb = pl.ys[i + 1];
+    if (ya > py !== yb > py && px < xa + ((py - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Closest approach of a set of tissue points to the roof: signed gap δ (negative = pressed in) and the roof normal there. */
+function closestApproach(pl: { xs: number[]; ys: number[] }, cum: Float64Array, pts: Vec[]): { d: number; n: { x: number; y: number } } {
+  let d = Infinity, seg = 0;
   for (const p of pts) {
     const pr = projectOn(pl, cum, p.x, p.y);
     if (pr.signed < d) {
       d = pr.signed;
-      sAt = pr.s;
       seg = pr.seg;
     }
   }
   // inward normal of the roof segment (airway side is to the right of travel: (ey, −ex))
   const ex = pl.xs[seg + 1] - pl.xs[seg], ey = pl.ys[seg + 1] - pl.ys[seg];
   const L = Math.hypot(ex, ey) || 1;
-  return { d, s: sAt, n: { x: ey / L, y: -ex / L } };
+  return { d, n: { x: ey / L, y: -ex / L } };
 }
 
 /** Clamp drawn tissue points that penetrate a wall onto its surface (drawing only). */

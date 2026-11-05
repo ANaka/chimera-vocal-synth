@@ -103,11 +103,14 @@ export class HumanAirway {
    * The last part of a closure is slower than a release: contact spreads over the palate as
    * tissue compresses, while a release is ballistic. Sealing at the opening rate drove the air
    * the articulator displaces through a slit that shut within ~1 ms (an audible click). Below
-   * sealHi cm² the closing rate eases from maxAreaRate down to sealRate.
+   * sealHi cm² the closing rate eases from maxAreaRate down to sealRate, and below sealEase it
+   * slows further (∝ √A) so the seal itself is reached smoothly.
    */
   sealRate = 5;
   sealLo = 0.03;
   sealHi = 0.4;
+  /** below this area (cm²) the closing rate slows with √A, so the seal is reached smoothly */
+  sealEase = 0.03;
 
   /** areas committed at the start of the current control step (slew-limit baseline) */
   private basePh: Float64Array | null = null;
@@ -155,9 +158,13 @@ export class HumanAirway {
       const k2 = this.body.scale * this.body.scale;
       const clampArr = (cur: Float64Array, old: Float64Array, mins: Float64Array, oldMins: Float64Array) => {
         const openR = this.maxAreaRate * k2, gain = this.areaRateGain;
-        const sealR = this.sealRate * k2, lo = this.sealLo * k2, hi = this.sealHi * k2;
-        // closing rate at area A: the release rate eased down to the seal rate near contact
+        const sealR = this.sealRate * k2, lo = this.sealLo * k2, hi = this.sealHi * k2, ease = this.sealEase * k2;
+        // closing rate at area A: the release rate eased down to the seal rate near contact,
+        // and in the last part slowing with √A, so the area (and the jet through it, ∝ A) comes
+        // to rest at the seal instead of stopping dead: at a constant rate the flow's slope
+        // dropped to zero at once, a step in the radiated pressure (an audible click)
         const closeR = (A: number) => {
+          if (A < ease) return sealR * Math.sqrt(Math.max(0, A) / ease);
           const u = A <= lo ? 0 : A >= hi ? 1 : (A - lo) / (hi - lo);
           return sealR + (openR - sealR) * u * u * (3 - 2 * u);
         };

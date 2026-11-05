@@ -10,6 +10,19 @@ const ARPA: Record<string, string> = {
   B: "b", CH: "tʃ", D: "d", DH: "ð", F: "f", G: "g", HH: "h", JH: "dʒ", K: "k", L: "l", M: "m", N: "n", NG: "ŋ", P: "p", R: "ɹ", S: "s", SH: "ʃ", T: "t", TH: "θ", V: "v", W: "w", Y: "j", Z: "z", ZH: "ʒ",
 };
 const VOWELS = new Set(["ɑ", "æ", "ʌ", "ə", "ɔ", "aʊ", "aɪ", "ɛ", "ɝ", "ɚ", "eɪ", "ɪ", "i", "oʊ", "ɔɪ", "ʊ", "u"]);
+/**
+ * The dictionary keeps one pronunciation per word; for these homographs it kept the rarer one
+ * (the verb "wind", past-tense "read"). Telling them apart needs grammar; the common reading wins.
+ */
+const HOMOGRAPHS: Record<string, string> = {
+  wind: "W IH1 N D",
+  read: "R IY1 D",
+  live: "L IH1 V",
+  lead: "L IY1 D",
+  close: "K L OW1 Z",
+  wound: "W UW1 N D",
+};
+
 /** monosyllabic function words are unstressed in running speech (and reduce) */
 const FUNCTION_WORDS = new Set("a an the of to in on at by for from with as and or but nor so if is am are was were be been do does did has have had will would can could should shall may might must it its i you he she we they me him her us them my your his our their this that than then there not no".split(" "));
 const REDUCE: Record<string, string> = { ʌ: "ə", æ: "ə", ɑ: "ə", ɛ: "ə", ɔ: "ə", u: "ə", ʊ: "ə" };
@@ -96,7 +109,7 @@ export class EnglishG2P {
   /** One word → segments with lexical stress. `reduce`: weak forms of function words (speech). */
   word(w: string, reduce = true): Segment[] {
     const clean = w.toLowerCase().replace(/^'+|'+$/g, "");
-    const entry = this.dict?.get(clean);
+    const entry = HOMOGRAPHS[clean] ?? this.dict?.get(clean);
     if (entry) {
       const segs = arpabetToSegments(entry);
       if (reduce && FUNCTION_WORDS.has(clean)) {
@@ -138,8 +151,9 @@ function applyAllophones(segs: Segment[]): void {
     const prev = segs[i - 1], next = segs[i + 1];
     const pv = VOWELS.has(prev.ipa) || prev.ipa === "ɹ";
     const nv = VOWELS.has(next.ipa);
-    // /t d/ between a vowel and an unstressed vowel → tap ("water", "ladder", "got it")
-    if ((s.ipa === "t" || s.ipa === "d") && pv && nv && !next.stress) s.ipa = "ɾ";
+    // /t d/ between a vowel and an unstressed vowel → tap ("water", "ladder", "got it"), but not
+    // at the start of a word ("were disputing" keeps its /d/)
+    if ((s.ipa === "t" || s.ipa === "d") && pv && nv && !next.stress && !prev.wordEnd) s.ipa = "ɾ";
   }
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i];

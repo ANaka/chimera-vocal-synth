@@ -59,13 +59,18 @@ const VOWEL_KEYS = ["tbX", "tbY", "jaw", "lipAp", "lipProt", "lipWidth", "root",
 type VTable = Record<string, Record<string, { artic: Partial<HumanArtic> }>>;
 const VT = vowelTable as unknown as VTable;
 
-/** Diphthongs and r-coloured vowels expand to vowel sequences. */
+/**
+ * Diphthongs and r-coloured vowels expand to vowel sequences. American /eɪ oʊ/ glide toward
+ * [i u] (Hillenbrand et al. 1995: /e/ F2 rises ~150 Hz, /o/ F1 falls with F2 steady); with
+ * [ɪ ʊ] as targets they barely moved (/e/ and /ɪ/ share F2) and sounded like the steady
+ * [eː oː] of Indian English. The other offglides undershoot toward [ɪ ʊ].
+ */
 const EXPAND: Record<string, string[]> = {
   aɪ: ["a", "ɪ"],
   aʊ: ["a", "ʊ"],
   ɔɪ: ["ɔ", "ɪ"],
-  eɪ: ["e", "ɪ"],
-  oʊ: ["o", "ʊ"],
+  eɪ: ["e", "i"],
+  oʊ: ["o", "u"],
   ɚ: ["ɝ"],
 };
 

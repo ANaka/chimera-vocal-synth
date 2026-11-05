@@ -18,7 +18,10 @@ import { oralGestures, vowelArtic } from "./planner.ts";
 
 /** A beatboxer's ready posture: jaw nearly closed, lips just apart, tongue relaxed. */
 export function beatReady(body: string): Partial<HumanArtic> {
-  return { ...(vowelArtic("ə", body) ?? {}), jaw: 0.4, lipAp: 0.25, lipProt: 0.1 };
+  // with the jaw nearly closed the tongue rests a little higher than in a spoken schwa; the
+  // velar hits need it there: from lower, the release peels open and loses its punch
+  const schwa = vowelArtic("ə", body) ?? {};
+  return { ...schwa, tbY: (schwa.tbY ?? 6.85) + 0.1, jaw: 0.4, lipAp: 0.25, lipProt: 0.1 };
 }
 
 export type BeatRole = "kick" | "snare" | "hat" | "perc" | "bass";
@@ -192,7 +195,9 @@ export const BEAT_SOUNDS: BeatSound[] = [
     latency: -0.013,
     build: (body, o) => {
       const end = Math.max(0.14, Math.min(0.34, o.len * 2));
-      return [...snap(oral(body, "k", -0.06, 0, 2, "kch"), 4, 0.008), ...after(oral(body, "ʃ", 0.014, end, 1.4, "kch")), ...blow(-0.035, end, 1.45 * o.accent, 0.45, "kch", 0.14)];
+      // the "ch": the back of the tongue lingers by the velum after the burst ([x]) while the
+      // blade rises into the long rounded [ʃ]
+      return [...snap(oral(body, "k", -0.06, 0, 2, "kch"), 4, 0.008), ...after(oral(body, "x", 0.002, 0.045, 2, "kch")), ...after(oral(body, "ʃ", 0.025, end, 1.4, "kch")), ...blow(-0.035, end, 1.75 * o.accent, 0.45, "kch", 0.14)];
     },
   },
   {
@@ -205,9 +210,12 @@ export const BEAT_SOUNDS: BeatSound[] = [
     build: (body, o) => {
       const end = Math.max(0.06, o.len * 0.92);
       return [
-        // lips shut before the voice starts, so the note begins as a hum rather than a vowel
+        // lips shut before the voice starts, so the note begins as a hum rather than a vowel;
+        // the folds stay apart (breathing) while the velum drops into the sealed mouth, so the
+        // squeezed air goes to the lungs instead of popping out through the nose
         ...oral(body, "m", -0.03, end, 1.6, "m"),
         g(-0.02, end, 0.03, 0.03, 4, { velum: 0.9 }, "m"),
+        g(-0.08, -0.03, 0.02, 0.02, 5, { abduction: 0.3 }, "m"),
         g(-0.01, end, 0.02, 0.04, 1, { breath: 0.95 * o.accent }, "m"),
         g(-0.02, end, 0.015, 0.02, 8, { f0: o.f0 }, "m"),
       ];

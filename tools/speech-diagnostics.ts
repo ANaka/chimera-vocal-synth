@@ -32,6 +32,7 @@ const SENTENCES = [
   "She sells sea shells by the sea shore.",
 ];
 const NASALS = new Set(["m", "n", "ŋ"]);
+const diphthongOf = (a: string, b: string) => ["aɪ", "aʊ", "ɔɪ", "eɪ", "oʊ"].some((d) => { const p = diphthongParts(d); return p && p[0] === a && p[1] === b; });
 const g2p = new EnglishG2P();
 g2p.setDictionaryText(gunzipSync(readFileSync("public/data/cmudict.txt.gz")).toString("utf8"));
 const REF = new Map(VOWELS.map((v) => [v.ipa, v.male]));
@@ -63,6 +64,9 @@ for (const [si, text] of SENTENCES.entries()) {
   const segs = plan.segments;
   segs.forEach((s, k) => {
     if (s.kind !== "vowel") return;
+    // the second half of a diphthong is a glide, not a vowel that should reach its target
+    const pv = segs[k - 1];
+    if (pv && pv.kind === "vowel" && Math.abs(pv.t1 - s.t0) < 1e-6 && diphthongOf(pv.ipa, s.ipa)) return;
     const nasalNb = (segs[k - 1] && NASALS.has(segs[k - 1].ipa)) || (segs[k + 1] && NASALS.has(segs[k + 1].ipa));
     if (!nasalNb)
       for (let f = frameAt(s.t0); f <= frameAt(s.t1); f++) {
