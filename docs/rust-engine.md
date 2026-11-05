@@ -118,8 +118,8 @@ consumption or sums (noise sources, gestures). It retunes nothing. The checks:
      Rust's. After that, every 10 ms window's RMS must agree to 0.05 dB, and onset/release
      timing, silence, pitch and closures are covered by the ported behavioural tests. Any
      divergence before an event is investigated, not tolerated.
-   - With the TS engine gone, `CHIMERA_BLESS=1 cargo test` rewrites the fixtures from the Rust
-     engine after an intended change to the sound.
+   - With the TS engine gone, the fixtures record what it did (`crates/chimera/tests/golden/README.md`).
+     The human-voice audio can be re-blessed from the Rust engine (`CHIMERA_BLESS=1`).
 2. **The existing bun tests** (resonances against analytic values, FDTD against the chain
    matrix, stability, formants, closures, singing behaviour) are ported to `cargo test` with
    the same thresholds.

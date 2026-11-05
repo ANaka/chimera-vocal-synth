@@ -1,4 +1,4 @@
-import { FFT, hann, nextPow2 } from "../../src/engine/analysis/fft.ts";
+import { FFT, hann, nextPow2 } from "./fft.ts";
 import { Image, inferno } from "./image.ts";
 
 export interface SpectrogramOptions {

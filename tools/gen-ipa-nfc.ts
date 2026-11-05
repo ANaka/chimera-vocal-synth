@@ -13,8 +13,12 @@
  * The data comes from the JS engine's own ICU, so it matches what the TypeScript engine did.
  * Usage: bun tools/gen-ipa-nfc.ts
  */
-import { writeFileSync } from "node:fs";
-import { CONSONANT_SYMBOLS } from "../src/engine/phonetics/inventory.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { initChimera, call } from "../src/wasm/chimera.ts";
+
+// the consonant inventory, from the engine (run `bun run wasm` first)
+await initChimera(readFileSync(new URL("../src/wasm/chimera.wasm", import.meta.url)));
+const CONSONANT_SYMBOLS = call<{ consonantSymbols: string[] }>("catalog").consonantSymbols;
 
 const VOWEL_CHARS = "iyɨʉɯuɪʏʊeøɘɵɤoəɛœɜɞʌɔæɐaɶɑɒɝɚ";
 const MULTI = ["tʃ", "dʒ", "ts", "dz", "pf", "aɪ", "aʊ", "ɔɪ", "eɪ", "oʊ"];

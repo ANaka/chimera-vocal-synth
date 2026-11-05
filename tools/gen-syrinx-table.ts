@@ -1,6 +1,6 @@
 /**
  * Tabulate the Gardner–Mindlin normal form's limit cycle over (α, β): period T (in τ), and the
- * X range (for mapping labial displacement to valve opening). Output: src/engine/sources/syrinxTable.generated.json
+ * X range (for mapping labial displacement to valve opening). Output: crates/chimera/src/sources/syrinxTable.generated.json
  */
 import { writeFileSync } from "node:fs";
 const rhs = (x: number, y: number, a: number, b: number): [number, number] => [y, -a - b * x - x * x * x - x * x * y + x * x - x * y];
@@ -41,5 +41,5 @@ for (const b of betas) {
   }
   T.push(rT); lo.push(rl); hi.push(rh);
 }
-writeFileSync("src/engine/sources/syrinxTable.generated.json", JSON.stringify({ alphas, betas, T, lo, hi }));
+writeFileSync("crates/chimera/src/sources/syrinxTable.generated.json", JSON.stringify({ alphas, betas, T, lo, hi }));
 console.log("T range", Math.min(...T.flat().filter(Number.isFinite)), Math.max(...T.flat()), "NaN cells", T.flat().filter((v) => !Number.isFinite(v)).length);

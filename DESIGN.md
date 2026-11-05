@@ -44,7 +44,8 @@ A browser instrument where every sound comes from a simulated airway, not sample
 main thread (React UI, canvas renderers)
    │ commands (note/score/param/drag), timestamped in audio time
    ▼
-AudioWorklet  ──  Engine (pure TS, no DOM; also runs in Bun for tests/offline export)
+AudioWorklet  ──  Engine (Rust crate `chimera`, compiled to wasm; the same code runs natively
+                  for tests, the `chimera` CLI and, later, JDAW — see docs/rust-engine.md)
                    ├─ Voice[] (pool)
                    │   ├─ Controller: gesture scheduler → articulator dynamics (control rate)
                    │   ├─ Anatomy: articulator state → geometry → area functions (control rate)
@@ -162,17 +163,23 @@ limiter. WAV export via the same engine in a Worker (unlimited voices, faster th
 
 ## Tech
 
-TypeScript, Vite, React 19 (controls) + hand-written canvas/SVG renderers (visuals),
-Zustand state. Bun for tooling/tests. Engine uses preallocated Float64Arrays, no
-allocation in the audio loop. WASM port only if profiling demands it.
+Engine: Rust (`crates/chimera`), deterministic (libm for all transcendental math), no
+allocation while rendering, block-size-independent output; `crates/chimera-wasm` exposes it to
+the browser as a C-ABI wasm module with no imports (the worklet and the main thread each
+instantiate it; see docs/rust-engine.md for the boundary). UI: TypeScript, Vite, React 19
+(controls) + hand-written canvas/SVG renderers (visuals), Zustand state; `src/wasm/` is the
+UI's typed facade over the engine. Bun for the UI's tooling and tests.
 
 ## Validation
 
-* `bun test`: uniform-tube resonances vs analytic; FDTD impulse response vs chain-matrix
+* `cargo test --workspace` (engine): uniform-tube resonances vs analytic; FDTD impulse response vs chain-matrix
   H(f); long random-gesture stability (no NaN/blow-up); f0 accuracy; vowel formants vs
   targets; fricative spectral centroids (s > ʃ > f); stop bursts present; ingressive /
   ejective / click pressure signatures; bird pitch accuracy.
-* Offline renders → WAV + spectrogram PNG (rendered in TS) inspected visually.
+  Golden fixtures from the retired TypeScript engine (crates/chimera/tests/golden) check the
+  port; native and wasm builds render bit-identical samples (tests/wasm-engine.test.ts).
+* `bun test tests`: the UI's live paths (Sing keys, worklet ordering, MIDI) on the wasm engine.
+* Offline renders (`chimera render …`) → WAV; `tools/spectrogram.ts` draws the PNG to inspect.
 * Headless Chromium (Playwright) smoke tests: app loads, worklet runs, no console errors,
   screenshots of each mode.
 * Hosted over HTTPS via `tailscale serve` (AudioWorklet needs a secure context).

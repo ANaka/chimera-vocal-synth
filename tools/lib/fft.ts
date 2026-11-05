@@ -1,4 +1,5 @@
 /**
+ * FFT and windows for the plotting tools (the engine has its own, in Rust: chimera::analysis::fft).
  * In-place iterative radix-2 complex FFT on separate real/imag Float64Arrays.
  * Size must be a power of two. Pure TS, allocation-free after plan creation.
  */

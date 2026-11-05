@@ -163,6 +163,7 @@ fn catalog() -> Res {
         "beatSounds": &beatbox::BEAT_SOUNDS[..],
         "beatPresets": &beatbox::BEAT_PRESETS[..],
         "vowelTargets": vowels,
+        "consonantSymbols": chimera::phonetics::inventory::consonant_symbols(),
         "demoSongs": songs::DEMO_SONGS,
         "vowels": vowel_data::VOWELS,
         "creatures": &chimera::creatures::CREATURES[..],
