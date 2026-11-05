@@ -200,3 +200,5 @@ await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
 console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox|silence|sing/i.test(l)).slice(0, 40).join("\n"));
+// a run that collected errors fails, so CI and agents can't read it as a pass
+if (errors.length) process.exit(1);

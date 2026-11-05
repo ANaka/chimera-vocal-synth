@@ -1,4 +1,16 @@
 @font-face {
+  font-family: "Hershey";
+  src: url("/fonts/AVHersheySimplexLight.otf") format("opentype");
+  font-weight: 100 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hershey";
+  src: url("/fonts/AVHersheySimplexMedium.otf") format("opentype");
+  font-weight: 401 900;
+  font-display: swap;
+}
+@font-face {
   font-family: "Archivo";
   src: url("/fonts/archivo-latin.woff2") format("woff2");
   font-weight: 100 900;
@@ -16,17 +28,30 @@
 }
 
 :root {
+  /* the vector-display palette (src/ui/colors.ts V): blue is the body, amber is sound,
+     green/red/pink/white are the four control slots */
+  --blue: #4fb6f2;
+  --blue-mid: #3487c4;
+  --blue-dim: #1f5f8c;
+  --frame: #133954;
+  --green: #5be381;
+  --red: #ff5d40;
+  --pink: #ff73cf;
+  --white: #eef6f8;
+  --amber: #ffb340;
+  --glow-blue: 0 0 1.5px rgba(79, 182, 242, 0.9), 0 0 6px rgba(79, 182, 242, 0.4);
+  /* older names, remapped so screens not yet redrawn sit on black in blue and amber */
   --black: #000000;
-  --console: #2a3035;
-  --inset: #20262a;
-  --line: #3c444a;
-  --text: #e8eaeb;
-  --text-dim: #9aa3a8;
-  --caliper: #f2cf5b;
-  --caliper-dim: rgba(242, 207, 91, 0.45);
-  --radius-s: 4px;
-  --radius-m: 8px;
-  --font: "Archivo", system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
+  --console: #000000;
+  --inset: #000000;
+  --line: var(--frame);
+  --text: var(--blue);
+  --text-dim: var(--blue-mid);
+  --caliper: var(--amber);
+  --caliper-dim: rgba(255, 179, 64, 0.45);
+  --radius-s: 0;
+  --radius-m: 0;
+  --font: "Hershey", "Archivo", system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
   color-scheme: dark;
 }
 
@@ -1326,4 +1351,622 @@ button.midi.on .midi-status {
   gap: 1rem;
   justify-items: start;
   color: var(--text);
+}
+
+/* =====================================================================================
+   Vector display (issue #2, docs/mockups): a wall of black screens with thin frames,
+   single-stroke capitals and a restrained glow. Later rules here override the ones above.
+   ===================================================================================== */
+
+html,
+body {
+  background: #000;
+  color: var(--blue);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+:focus-visible {
+  outline: 1px dashed var(--blue);
+  outline-offset: 2px;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto auto;
+  align-content: start;
+  min-height: 100vh;
+  gap: 8px;
+  padding: 6px 16px 16px;
+}
+
+/* ---------- top bar */
+.topbar {
+  gap: 18px 24px;
+  padding: 4px 2px;
+  min-height: 40px;
+}
+
+.brand {
+  gap: 18px;
+  align-items: baseline;
+}
+
+.wordmark {
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  text-shadow: var(--glow-blue);
+}
+
+.tagline {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+}
+
+.segmented {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 8px;
+}
+
+.segmented button {
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 4px 11px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+}
+
+.segmented button:hover {
+  color: var(--blue-mid);
+}
+
+.segmented button.on {
+  background: transparent;
+  color: var(--blue);
+  border-color: var(--blue);
+  box-shadow: 0 0 5px rgba(79, 182, 242, 0.35), inset 0 0 4px rgba(79, 182, 242, 0.15);
+  text-shadow: var(--glow-blue);
+}
+
+.volume,
+.load {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+}
+
+/* ---------- buttons, chips */
+button.primary,
+button.ghost,
+.chip {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--frame);
+  border-radius: 0;
+  color: var(--blue-mid);
+  padding: 5px 11px;
+  font-family: var(--font);
+  font-weight: 300;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  filter: none;
+}
+
+button.primary {
+  color: var(--blue);
+  border-color: var(--blue);
+  box-shadow: 0 0 5px rgba(79, 182, 242, 0.35), inset 0 0 4px rgba(79, 182, 242, 0.15);
+  text-shadow: var(--glow-blue);
+}
+
+button.primary.large {
+  font-size: 13px;
+  padding: 10px 18px;
+}
+
+button.ghost:hover,
+.chip:hover {
+  color: var(--blue);
+  border-color: var(--blue-dim);
+}
+
+.chip.on,
+.chip[aria-pressed="true"] {
+  color: var(--blue);
+  border-color: var(--blue);
+  box-shadow: 0 0 5px rgba(79, 182, 242, 0.35), inset 0 0 4px rgba(79, 182, 242, 0.15);
+  text-shadow: var(--glow-blue);
+}
+
+/* ---------- the wall */
+.wall {
+  display: grid;
+  grid-template-columns: minmax(0, 700fr) minmax(0, 696fr);
+  gap: 12px;
+  height: max(760px, calc(100vh - 70px));
+}
+
+.right {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.right-play {
+  grid-template-columns: minmax(0, 284fr) minmax(0, 58fr) minmax(0, 342fr);
+  grid-template-rows: minmax(0, 200fr) minmax(0, 200fr) minmax(0, 224fr) minmax(0, 172fr);
+  grid-template-areas: "tube tube folds" "spec spec spec" "vowels voice voice" "keys keys keys";
+}
+
+.s-tube { grid-area: tube; }
+.s-folds { grid-area: folds; }
+.s-spec { grid-area: spec; }
+.s-vowels { grid-area: vowels; }
+.s-voice { grid-area: voice; }
+.s-keys { grid-area: keys; }
+
+/* modes not yet redrawn: their three instruments on the right, their deck below the wall */
+.right-legacy {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+/* ---------- a screen */
+.screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+  border: 1px solid var(--frame);
+}
+
+.screen.focus {
+  border-color: var(--blue-dim);
+}
+
+.screen-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  padding: 9px 14px 0;
+}
+
+.screen-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 300;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--blue);
+  text-shadow: var(--glow-blue);
+}
+
+.screen-sub {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blue-mid);
+}
+
+.screen-tools {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.screen-body {
+  position: relative;
+  flex: 1;
+  min-height: 110px;
+}
+
+.screen-body > canvas,
+.screen-body > .anatomy,
+.screen-body > .creature-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.left .screen-body {
+  min-height: 420px;
+}
+
+/* view options as chips in the face screen's header */
+.view-toggles {
+  position: static;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.view-toggles .toggle {
+  position: relative;
+  display: inline-flex;
+}
+
+.view-toggles .toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.view-toggles .toggle span {
+  border: 1px solid var(--frame);
+  padding: 2px 7px;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+  cursor: pointer;
+}
+
+.view-toggles .toggle input:checked + span {
+  color: var(--blue);
+  border-color: var(--blue-dim);
+  text-shadow: var(--glow-blue);
+}
+
+.view-toggles .toggle input:focus-visible + span {
+  outline: 1px dashed var(--blue);
+  outline-offset: 1px;
+}
+
+/* the start prompt, over the left screen */
+.start-prompt {
+  background: rgba(0, 0, 0, 0.88);
+  border: 1px solid var(--blue-dim);
+  border-radius: 0;
+  backdrop-filter: none;
+  max-width: 380px;
+  padding: 22px 26px;
+  box-shadow: 0 0 10px rgba(79, 182, 242, 0.15);
+}
+
+.start-prompt p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--blue-mid);
+}
+
+.start-prompt .hint {
+  font-size: 11px;
+  color: var(--blue-dim);
+}
+
+.start-prompt .error {
+  color: var(--red);
+}
+
+/* ---------- encoders (OP-1 style) */
+.enc-pages {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 2px 10px 10px;
+  gap: 4px;
+}
+
+.enc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.screen-tools .chip {
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
+.enc-tab {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--frame);
+  color: var(--blue-dim);
+  padding: 2px 7px;
+  font-family: var(--font);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.enc-tab.on {
+  color: var(--blue);
+  border-color: var(--blue);
+  text-shadow: var(--glow-blue);
+}
+
+.enc-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  min-height: 0;
+}
+
+.encoder {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  color: var(--slot);
+}
+
+.enc-label {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.enc-dial {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  touch-action: pan-y;
+  cursor: ns-resize;
+}
+
+.enc-dial svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 2px var(--slot));
+}
+
+.enc-tick { stroke: var(--slot); stroke-width: 1; opacity: 0.35; }
+.enc-ring { fill: none; stroke: var(--slot); stroke-width: 1.1; opacity: 0.55; }
+.enc-arc { fill: none; stroke: var(--slot); stroke-width: 2.2; stroke-linecap: round; }
+.enc-pointer { stroke: var(--slot); stroke-width: 1.6; stroke-linecap: round; }
+.enc-hub { fill: var(--slot); }
+
+.enc-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.enc-dial:has(.enc-input:focus-visible) {
+  outline: 1px dashed var(--slot);
+  outline-offset: 4px;
+}
+
+.enc-value {
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 2px var(--slot);
+}
+
+.enc-unit {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.enc-footer {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* ---------- keys */
+.s-keys .screen-body {
+  padding: 8px 14px 12px;
+  display: flex;
+  min-height: 90px;
+}
+
+.s-keys .keys-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.keys {
+  height: auto;
+  flex: 1;
+}
+
+.key.white {
+  background: transparent;
+  border: 1px solid var(--blue-dim);
+  border-radius: 0;
+}
+
+.key.white.down {
+  background: rgba(91, 227, 129, 0.12);
+  border-color: var(--green);
+  box-shadow: 0 0 6px rgba(91, 227, 129, 0.5), inset 0 0 6px rgba(91, 227, 129, 0.25);
+}
+
+.key.black {
+  background: #000;
+  border: 1px solid var(--blue-mid);
+  border-radius: 0;
+}
+
+.key.black.down {
+  background: rgba(91, 227, 129, 0.2);
+  border-color: var(--green);
+  box-shadow: 0 0 6px rgba(91, 227, 129, 0.5);
+}
+
+button.midi {
+  border-radius: 0;
+  border-color: var(--frame);
+}
+
+.midi-name {
+  font-size: 10px;
+  font-weight: 300;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.midi-status {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+}
+
+button.midi.on {
+  border-color: var(--green);
+}
+
+button.midi.on .midi-status {
+  color: var(--green);
+}
+
+/* ---------- panels of modes not yet redrawn: framed, black, capital headings */
+.panel,
+.instrument,
+.keys-bar {
+  background: #000;
+  border: 1px solid var(--frame);
+  border-radius: 0;
+}
+
+.panel h2,
+.instrument figcaption {
+  font-weight: 300;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
+textarea,
+input[type="text"],
+.sbn input {
+  background: #000;
+  color: var(--blue);
+  border: 1px solid var(--frame);
+  border-radius: 0;
+  font-family: var(--font);
+  letter-spacing: 0.06em;
+}
+
+.slider label,
+.toggle,
+.call-name,
+.pad-name,
+.specimen-name {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* sliders that remain: a thin line, the set part brighter, a small framed thumb */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 1px;
+  border-radius: 0;
+  background: linear-gradient(to right, var(--blue) 0, var(--blue) var(--pos, 0%), var(--blue-dim) var(--pos, 0%));
+}
+
+input[type="range"]::-moz-range-track {
+  height: 1px;
+  border-radius: 0;
+  background: var(--blue-dim);
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 1px;
+  background: var(--blue);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  width: 7px;
+  height: 13px;
+  margin-top: -6px;
+  border-radius: 0;
+  background: #000;
+  border: 1px solid var(--blue);
+  box-shadow: 0 0 4px rgba(79, 182, 242, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 7px;
+  height: 13px;
+  border-radius: 0;
+  background: #000;
+  border: 1px solid var(--blue);
+  box-shadow: 0 0 4px rgba(79, 182, 242, 0.5);
+}
+
+/* ---------- narrow screens: one column, the face first */
+@media (max-width: 1100px) {
+  .wall {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .left .screen-body {
+    min-height: min(78vh, 760px);
+  }
+  .right-play {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    grid-template-areas: "tube folds" "spec spec" "vowels vowels" "voice voice" "keys keys";
+  }
+  .right-play .screen-body {
+    min-height: 190px;
+  }
+  .s-voice .screen-body {
+    min-height: 230px;
+  }
+  .right-legacy {
+    grid-template-rows: none;
+  }
+  .right-legacy .screen-body {
+    min-height: 170px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 6px 8px 12px;
+  }
+  .right-play {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "tube" "folds" "spec" "vowels" "voice" "keys";
+  }
+  .left .screen-body {
+    min-height: 118vw;
+  }
+  .enc-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 10px;
+  }
+  .s-voice .screen-body {
+    min-height: 380px;
+  }
 }
