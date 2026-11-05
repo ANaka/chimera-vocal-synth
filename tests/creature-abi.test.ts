@@ -20,6 +20,7 @@ describe("creature telemetry through the worklet", () => {
       port = { onmessage: null as unknown, postMessage: (m: { type: string }) => posted.push(m) };
     };
     g.registerProcessor = (_name: string, ctor: typeof Ctor) => (Ctor = ctor);
+    // @ts-expect-error the query makes bun evaluate the module again, so this file registers its own processor
     await import("../src/worklet/processor.ts?creature-abi");
     const p = new Ctor!({ processorOptions: { module: wasmModule } });
     const send = (data: unknown) => p.port.onmessage!({ data });
