@@ -101,6 +101,8 @@ export class AnatomyRenderer {
   private oy = 0;
   private w = 0;
   private h = 0;
+  /** a narrow screen (a phone): readouts in a row above the head, slots in a row below it */
+  private compact = false;
   private sparkSeed = 1;
   private geo: Geometry | null = null;
   private echoes: Echo[] = [];
@@ -115,7 +117,9 @@ export class AnatomyRenderer {
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
-    const padX = 12, padT = 8, padB = 8;
+    // the readouts need room beside the head; a narrow screen moves them above and below it
+    this.compact = w < 560 || w / h < 0.95;
+    const padX = 12, padT = this.compact ? 62 : 8, padB = this.compact ? 92 : 8;
     this.scale = Math.max(1, Math.min((w - 2 * padX) / (VIEW.x1 - VIEW.x0), (h - padT - padB) / (VIEW.y1 - VIEW.y0)));
     // left-aligned when there is room to spare, so the readouts get the space in front of the face
     const spare = w - 2 * padX - (VIEW.x1 - VIEW.x0) * this.scale;
@@ -516,6 +520,7 @@ export class AnatomyRenderer {
   }
 
   private drawReadouts(ctx: CanvasRenderingContext2D, formants: number[], info: string[], slots: Slot[]): void {
+    if (this.compact) return this.drawReadoutsCompact(ctx, formants, info, slots);
     const fx = this.w - 18;
     let y = 26;
     if (formants.length >= 3) {
@@ -544,6 +549,33 @@ export class AnatomyRenderer {
       if (s.ipa) ipaGlyph(ctx, cx + big * 0.6, by, s.value, big * 1.45, s.color);
       else label(ctx, s.value.toUpperCase(), cx, by, { size: s.value.length > 3 ? big * 0.82 : big, color: s.color, weight: "m", ls: 0.04 });
       if (s.unit) label(ctx, s.unit.toUpperCase(), s.ipa ? cx + big * 1.5 : cx + (s.value.length > 3 ? 0 : big * 1.64), s.ipa || s.value.length <= 3 ? by : by + 18, { size: 11, color: s.color, ls: 0.16, alpha: 0.7 });
+    });
+  }
+
+  /** narrow screens: formants and info in two rows on top, the four slots in a row at the bottom */
+  private drawReadoutsCompact(ctx: CanvasRenderingContext2D, formants: number[], info: string[], slots: Slot[]): void {
+    const w = this.w, h = this.h;
+    if (formants.length >= 3) {
+      const cw = (w - 24) / 3;
+      ["F1", "F2", "F3"].forEach((lab, i) => {
+        label(ctx, lab, 12 + i * cw, 18, { size: 10, color: V.amber, ls: 0.12, alpha: 0.75 });
+        label(ctx, String(Math.round(formants[i])), 12 + i * cw + 26, 18, { size: 13, color: V.amber, ls: 0.06 });
+      });
+    }
+    label(ctx, info.slice(0, 2).join("   "), 12, 36, { size: 9, color: V.blueMid, ls: 0.12 });
+    if (info.length > 2) label(ctx, info.slice(2).join("   "), 12, 50, { size: 9, color: V.blueMid, ls: 0.12 });
+    const four = slots.slice(0, 4);
+    if (!four.length) return;
+    const cw = (w - 24) / four.length, y0 = h - 82;
+    const big = Math.max(16, Math.min(30, cw * 0.28));
+    four.forEach((s, i) => {
+      const cx = 12 + i * cw;
+      dot(ctx, cx + 4, y0, 3, s.color);
+      label(ctx, s.label.toUpperCase(), cx + 12, y0 + 3, { size: 8, color: s.color, ls: 0.14, alpha: 0.85 });
+      const by = y0 + 18 + big;
+      if (s.ipa) ipaGlyph(ctx, cx + big * 0.5, by, s.value, big * 1.4, s.color);
+      else label(ctx, s.value.toUpperCase(), cx, by, { size: s.value.length > 3 ? big * 0.62 : big, color: s.color, weight: "m", ls: 0.02 });
+      if (s.unit) label(ctx, s.unit.toUpperCase(), cx, by + 16, { size: 8, color: s.color, ls: 0.14, alpha: 0.7 });
     });
   }
 }
