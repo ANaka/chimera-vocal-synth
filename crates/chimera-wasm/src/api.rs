@@ -3,7 +3,9 @@
 //! read with `chimera_result_ptr`/`chimera_result_len`, valid until the next call. Nothing here
 //! runs on the audio thread: these calls allocate.
 
+use chimera::airway::frequency::{find_peaks, transfer_function};
 use chimera::anatomy::human::{BodyName, HumanArtic, HumanFrame};
+use chimera::math;
 use chimera::voice::human_airway::HumanAirway;
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -75,6 +77,19 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
             m.airway.apply(&a, 0.0);
             let air = &m.airway;
             Ok(json!({ "phAreas": air.ph_areas, "orAreas": air.or_areas, "phLen": air.ph_len, "orLen": air.or_len }))
+        }
+        "transfer" => {
+            // the vocal-tract transfer function the UI draws, and its formants: 360 log-spaced
+            // frequencies 60 Hz–8 kHz, injected at the first pharynx node, the glottis port cut
+            let a: HumanArtic = arg(req, "artic")?;
+            let m = model(st, req)?;
+            m.airway.apply(&a, 0.0);
+            let el = m.airway.net.linear_elements();
+            let freqs: Vec<f64> = (0..360).map(|i| 60.0 * math::pow(8000.0 / 60.0, i as f64 / 359.0)).collect();
+            let h = transfer_function(&el, m.airway.pharynx.first_node(), &freqs, &[m.airway.glottis_port]);
+            let db: Vec<f64> = h.mag.iter().map(|x| 20.0 * math::log10(x + 1e-12)).collect();
+            let formants: Vec<f64> = find_peaks(&freqs, &h.mag, 150.0).iter().map(|p| p.freq).take(5).collect();
+            Ok(json!({ "freqs": freqs, "db": db, "formants": formants }))
         }
         _ => Err(format!("unknown fn {name}")),
     }
