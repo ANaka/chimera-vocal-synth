@@ -14,14 +14,14 @@ const VOWELS = new Set(["ɑ", "æ", "ʌ", "ə", "ɔ", "aʊ", "aɪ", "ɛ", "ɝ", 
  * The dictionary keeps one pronunciation per word; for these homographs it kept the rarer one
  * (the verb "wind", past-tense "read"). Telling them apart needs grammar; the common reading wins.
  */
-const HOMOGRAPHS: Record<string, string> = {
-  wind: "W IH1 N D",
-  read: "R IY1 D",
-  live: "L IH1 V",
-  lead: "L IY1 D",
-  close: "K L OW1 Z",
-  wound: "W UW1 N D",
-};
+const HOMOGRAPHS = new Map<string, string>([
+  ["wind", "W IH1 N D"],
+  ["read", "R IY1 D"],
+  ["live", "L IH1 V"],
+  ["lead", "L IY1 D"],
+  ["close", "K L OW1 Z"],
+  ["wound", "W UW1 N D"],
+]);
 
 /** monosyllabic function words are unstressed in running speech (and reduce) */
 const FUNCTION_WORDS = new Set("a an the of to in on at by for from with as and or but nor so if is am are was were be been do does did has have had will would can could should shall may might must it its i you he she we they me him her us them my your his our their this that than then there not no".split(" "));
@@ -109,7 +109,7 @@ export class EnglishG2P {
   /** One word → segments with lexical stress. `reduce`: weak forms of function words (speech). */
   word(w: string, reduce = true): Segment[] {
     const clean = w.toLowerCase().replace(/^'+|'+$/g, "");
-    const entry = HOMOGRAPHS[clean] ?? this.dict?.get(clean);
+    const entry = HOMOGRAPHS.get(clean) ?? this.dict?.get(clean);
     if (entry) {
       const segs = arpabetToSegments(entry);
       if (reduce && FUNCTION_WORDS.has(clean)) {

@@ -89,6 +89,12 @@ export function vowelArtic(ipa: string, body: string): Partial<HumanArtic> | nul
   if (!v) return null;
   const out: Partial<HumanArtic> = {};
   for (const k of VOWEL_KEYS) if (v.artic[k] !== undefined) out[k] = v.artic[k] as number;
+  // a rhotic's tip is raised and curled back, not resting behind the teeth: without its
+  // calibrated position the tip stayed down and /ɝ/'s F3 sat ~15–20 % high (weakly rhotic)
+  if ((v.artic.ttCurl ?? 0) > 0.05) {
+    if (v.artic.ttX !== undefined) out.ttX = v.artic.ttX;
+    if (v.artic.ttY !== undefined) out.ttY = v.artic.ttY;
+  }
   return out;
 }
 

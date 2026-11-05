@@ -27,3 +27,11 @@ test("numbers are spelled out and unknown words fall back to rules", () => {
   expect(p.words).toEqual(["forty", "two"]);
   expect(ipa(letterToSound("zorblat")).length).toBeGreaterThan(4);
 });
+
+test("words that are also object property names do not break the front end", () => {
+  for (const w of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "prototype"]) {
+    const [p] = g2p.toPhrases(`The ${w} is ready.`);
+    expect(p.segments.length).toBeGreaterThan(5);
+  }
+  expect(new EnglishG2P().toPhrases("constructor")[0].segments.length).toBeGreaterThan(3); // no dictionary
+});

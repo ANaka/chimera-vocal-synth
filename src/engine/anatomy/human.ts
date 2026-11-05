@@ -12,7 +12,7 @@
  * midsagittal distance d gives area A = α·d^β per region (lips: elliptical slit d·w·π/4).
  * The epilarynx is a short parametric tube above the glottis.
  */
-import { type Vec, v, add, sub, scale, lerpV, polar, rotateAbout, Polyline, rayPolyline, bezier3, bezier2, arc, catmullRom, tangentAngle, dist, norm } from "./geom.ts";
+import { type Vec, v, add, sub, scale, lerpV, polar, rotateAbout, Polyline, rayPolyline, rayCrossings, bezier3, bezier2, arc, catmullRom, tangentAngle, dist, norm } from "./geom.ts";
 import { clamp, lerp, smoothstep } from "../util/math.ts";
 
 export interface HumanArtic {
@@ -166,6 +166,8 @@ export class HumanVocalTract {
   private readonly polarC: Vec;
   private readonly polarC2: Vec;
   private readonly tmpT: number[] = new Array(64);
+  private readonly crossT: number[] = new Array(64);
+  private readonly crossExit = new Uint8Array(64);
   /** signed closest approach (cm) of tongue tip / dorsum to the oral roof in the last frame */
   contactTip = 1;
   contactBody = 1;
@@ -385,6 +387,48 @@ export class HumanVocalTract {
     const yEpiTop = glottis.y + 2.4 * k * this.body.pharynx;
     const yPharTop = this.polarC.y;
     const nPh = 12;
+    // A fan ray's inner surface. The ray starts in the tongue: the gap begins where it leaves it
+    // (or, if the tongue has moved off the origin, at the surface behind it: a fixed fallback
+    // gap jumped as the surface crossed the origin). The gap is the air along the ray up to the
+    // roof: tissue the ray passes through on the way (a curled tip with air beneath it) is taken
+    // out by its thickness, so a layer that vanishes as the ray grazes it changes nothing ("the
+    // last crossing before the roof" jumped deep into the mouth whenever a ray slipped past the
+    // tip, as on the way into a rhotic).
+    const crossT = this.crossT, crossExit = this.crossExit;
+    const fanInner = (o: Vec, dir: Vec, tOut: number): number => {
+      const n = rayCrossings(o.x, o.y, dir.x, dir.y, inner, 0, tOut + 1.5 * k, crossT, crossExit);
+      // sort the crossings along the ray (there are only a few)
+      for (let i = 1; i < n; i++) {
+        const t = crossT[i], e = crossExit[i];
+        let j = i - 1;
+        while (j >= 0 && crossT[j] > t) {
+          crossT[j + 1] = crossT[j];
+          crossExit[j + 1] = crossExit[j];
+          j--;
+        }
+        crossT[j + 1] = t;
+        crossExit[j + 1] = e;
+      }
+      let tIn: number, i = 0;
+      if (n > 0 && crossExit[0] === 1) {
+        tIn = crossT[0];
+        i = 1;
+      } else {
+        const back = 2.5 * k;
+        const nBack = rayPolyline(o.x, o.y, -dir.x, -dir.y, inner, 0, back, tmp);
+        let tb = back;
+        for (let q = 0; q < nBack; q++) tb = Math.min(tb, tmp[q]);
+        tIn = -tb;
+      }
+      let tissue = 0;
+      for (; i < n && crossT[i] < tOut; i++) {
+        if (crossExit[i] === 1) continue; // a surface without its entry: nothing to take out
+        const b = i + 1 < n ? crossT[i + 1] : tOut + 1.5 * k;
+        tissue += Math.min(b, tOut) - crossT[i];
+        i++; // skip the layer's exit
+      }
+      return tIn + tissue;
+    };
     // `fan`: a ray of the oral fan, whose origin the tongue can move off (the others start below
     // or in front of all tissue they measure)
     const measure = (o: Vec, dir: Vec, maxLen: number, fan = false): { inner: Vec; outer: Vec; d: number } | null => {
@@ -393,18 +437,13 @@ export class HumanVocalTract {
       if (nOut === 0) return null;
       let tOut = Infinity;
       for (let i = 0; i < nOut; i++) tOut = Math.min(tOut, tmp[i]);
-      const nIn = rayPolyline(o.x, o.y, dir.x, dir.y, inner, 0, tOut + 1.5 * k, tmp);
-      let tIn = -Infinity;
-      for (let i = 0; i < nIn; i++) if (tmp[i] > tIn && tmp[i] < tOut + 1.5 * k) tIn = tmp[i];
-      if (tIn === -Infinity && !fan) tIn = Math.max(0, tOut - 3.5 * k);
-      else if (tIn === -Infinity) {
-        // the tongue has moved off the ray's origin: its surface is behind it (a fixed fallback
-        // gap here jumped as the surface crossed the origin)
-        const back = 2.5 * k;
-        const nBack = rayPolyline(o.x, o.y, -dir.x, -dir.y, inner, 0, back, tmp);
-        let tb = back;
-        for (let i = 0; i < nBack; i++) tb = Math.min(tb, tmp[i]);
-        tIn = -tb;
+      let tIn: number;
+      if (fan) tIn = fanInner(o, dir, tOut);
+      else {
+        const nIn = rayPolyline(o.x, o.y, dir.x, dir.y, inner, 0, tOut + 1.5 * k, tmp);
+        tIn = -Infinity;
+        for (let i = 0; i < nIn; i++) if (tmp[i] > tIn && tmp[i] < tOut + 1.5 * k) tIn = tmp[i];
+        if (tIn === -Infinity) tIn = Math.max(0, tOut - 3.5 * k);
       }
       // if the tongue crosses the wall, the outermost inner crossing lies beyond tOut → closed
       const d = Math.max(0, tOut - tIn);
@@ -464,15 +503,14 @@ export class HumanVocalTract {
     this.contactBody = bodyC.d;
     this.contactTipN = tipC.n;
     this.contactBodyN = bodyC.n;
-    if (tipC.d < 0.6 * k || bodyC.d < 0.6 * k) {
+    // No outer gate: each ray's own weight fades the contact in. A gate on the sampled
+    // tongue-to-roof distance could open with the per-ray correction already part-way on.
+    {
       // the whole tongue outline, closed: distance to its surface, signed by whether the roof
       // point is inside it (so the sign only changes where the distance is zero)
       const outl: Vec[] = [...root, ...arcPts.slice(1), ...blade.slice(1), ...under.slice(1), ...floor.slice(1), root[0]];
       const tongueOutline = { xs: outl.map((q) => q.x), ys: outl.map((q) => q.y) };
-      const tongueGap = (x: number, y: number) => {
-        const gap = distToPolyline(tongueOutline, x, y);
-        return insidePolygon(tongueOutline, x, y) ? -gap : gap;
-      };
+      const tongueGap = (x: number, y: number) => signedGap(tongueOutline, x, y);
       // Each roof ray takes the narrowest gap along its own stretch of roof: ±1 mm, so the rays
       // near a contact seal together and open together (a sharp burst), widening to ±2 mm while
       // the tongue is pressed in, because the tip's contact on the alveolar ridge is narrower
@@ -700,30 +738,26 @@ function pointAlong(pl: { xs: number[]; ys: number[] }, cum: Float64Array, s: nu
   return { x: pl.xs[i] + (pl.xs[i + 1] - pl.xs[i]) * u, y: pl.ys[i] + (pl.ys[i + 1] - pl.ys[i]) * u };
 }
 
-/** Shortest distance from a point to a polyline. */
-function distToPolyline(pl: { xs: number[]; ys: number[] }, px: number, py: number): number {
-  let best = Infinity;
+/**
+ * Distance from a point to a closed polygon's boundary (its last point repeats its first),
+ * negative inside (even-odd rule), in one pass over the edges.
+ */
+function signedGap(pl: { xs: number[]; ys: number[] }, px: number, py: number): number {
+  let best = Infinity, inside = false;
   const xs = pl.xs, ys = pl.ys;
   for (let i = 0; i < xs.length - 1; i++) {
-    const ax = xs[i], ay = ys[i], ex = xs[i + 1] - ax, ey = ys[i + 1] - ay;
+    const ax = xs[i], ay = ys[i], bx = xs[i + 1], by = ys[i + 1];
+    const ex = bx - ax, ey = by - ay;
     const L2 = ex * ex + ey * ey;
     let t = L2 > 1e-12 ? ((px - ax) * ex + (py - ay) * ey) / L2 : 0;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const dx = px - ax - ex * t, dy = py - ay - ey * t;
     const d2 = dx * dx + dy * dy;
     if (d2 < best) best = d2;
+    if (ay > py !== by > py && px < ax + ((py - ay) * ex) / ey) inside = !inside;
   }
-  return Math.sqrt(best);
-}
-
-/** Even-odd point-in-polygon test (the polygon's last point repeats its first). */
-function insidePolygon(pl: { xs: number[]; ys: number[] }, px: number, py: number): boolean {
-  let inside = false;
-  for (let i = 0; i < pl.xs.length - 1; i++) {
-    const xa = pl.xs[i], ya = pl.ys[i], xb = pl.xs[i + 1], yb = pl.ys[i + 1];
-    if (ya > py !== yb > py && px < xa + ((py - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
-  }
-  return inside;
+  const d = Math.sqrt(best);
+  return inside ? -d : d;
 }
 
 /** Closest approach of a set of tissue points to the roof: signed gap δ (negative = pressed in) and the roof normal there. */

@@ -76,6 +76,30 @@ export function rayPolyline(ox: number, oy: number, dx: number, dy: number, pl: 
   return n;
 }
 
+/**
+ * Like rayPolyline, also telling for each crossing whether the ray leaves the tissue (the
+ * polyline's right-hand side, along its direction) for the air: `exit[i]` is 1 then, else 0.
+ */
+export function rayCrossings(ox: number, oy: number, dx: number, dy: number, pl: Polyline, tMin: number, tMax: number, outT: number[], exit: Uint8Array): number {
+  let n = 0;
+  const xs = pl.xs, ys = pl.ys;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const ax = xs[i], ay = ys[i];
+    const ex = xs[i + 1] - ax, ey = ys[i + 1] - ay;
+    const den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const wx = ax - ox, wy = ay - oy;
+    const t = (wx * ey - wy * ex) / den;
+    const u = (wx * dy - wy * dx) / den;
+    if (u >= 0 && u < 1 && t >= tMin && t <= tMax && n < outT.length) {
+      outT[n] = t;
+      exit[n] = den < 0 ? 1 : 0;
+      n++;
+    }
+  }
+  return n;
+}
+
 /** Sample a cubic Bézier into `count` points (including both ends). */
 export function bezier3(p0: Vec, p1: Vec, p2: Vec, p3: Vec, count: number): Vec[] {
   const pts: Vec[] = [];
