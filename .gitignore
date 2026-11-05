@@ -3,3 +3,4 @@ dist
 out
 *.wav
 .DS_Store
+target/
