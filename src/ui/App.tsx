@@ -18,6 +18,8 @@ import { Scope } from "./components/Scope.tsx";
 import { CreatureTubes } from "./components/CreatureTubes.tsx";
 import { creatureById } from "../engine/creatures/index.ts";
 import { BeatboxPanel, BeatOverlay } from "./components/BeatboxPanel.tsx";
+import { SingPanel } from "./components/SingPanel.tsx";
+import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
@@ -49,6 +51,7 @@ function TopBar() {
         options={[
           { value: "play", label: "Play" },
           { value: "speak", label: "Speak" },
+          { value: "sing", label: "Sing" },
           { value: "bestiary", label: "Bestiary" },
           { value: "beatbox", label: "Beatbox" },
         ]}
@@ -113,7 +116,8 @@ function StartPrompt() {
     bestiary: ["Each animal's sound comes from a simulation of its own sound source and airway.", "Start and hear a call", "Then play its calls, or hold the keys to sustain it at a pitch."],
     beatbox: ["Every drum here is a mouth sound: lips, tongue and larynx pushing, sealing and sucking air.", "Start the beat", "Then edit the pattern, tap the pads, or hum a bass note on the keys."],
     speak: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start the voice", "Then type something and press Speak, or tap a sound in the chart."],
-  }[mode as "bestiary" | "beatbox" | "speak"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
+    sing: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start and hear a song", "Then play the keys: each note sings the next syllable of the lyrics."],
+  }[mode as "bestiary" | "beatbox" | "speak" | "sing"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
   return (
     <div className="start-prompt">
       <p>{copy[0]}</p>
@@ -125,6 +129,7 @@ function StartPrompt() {
           const first = creatureById(creature)?.calls[0];
           if (mode === "bestiary" && first) playCall(first.id);
           else if (mode === "beatbox") setBeatPlaying(true);
+          else if (mode === "sing") void playDemo(DEMO_SONGS[0].name, useStore.getState().body);
           else if (mode === "play") setHold(true);
         }}
       >
@@ -138,6 +143,7 @@ function StartPrompt() {
 function Deck() {
   const mode = useStore((s) => s.mode);
   if (mode === "speak") return <SpeakPanel />;
+  if (mode === "sing") return <SingPanel />;
   if (mode === "bestiary") return <BestiaryPanel />;
   if (mode === "beatbox") return <BeatboxPanel />;
   return (

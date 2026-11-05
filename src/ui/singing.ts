@@ -1,0 +1,265 @@
+/**
+ * Sing mode on the main thread. The lyrics become syllables with a cursor; each key sings the
+ * next syllable at its pitch. A key pressed while the previous one is still down sings legato
+ * (the previous syllable's coda runs straight into the next onset); a "-" in the lyrics holds
+ * the vowel onto a new pitch (melisma). Releasing the sounding key while another is still down
+ * glides back to that key on the same vowel. Key velocity sets the breath.
+ * Demo songs are planned whole (planSong) and sent as one score.
+ */
+import { create } from "zustand";
+import { engine } from "../audio/AudioEngine.ts";
+import { g2p } from "./speech.ts";
+import { lyricsToSyllables, type Syllable } from "../engine/phonetics/syllables.ts";
+import { planSong, planNoteOn, planNoteOff, planMelisma } from "../engine/phonetics/sing.ts";
+import { DEMO_SONGS } from "../engine/phonetics/songs.ts";
+import type { Gesture } from "../engine/control/score.ts";
+import type { BodyName } from "../worklet/protocol.ts";
+
+/** A note on the piano roll, on the voice clock (s); t1 is null while it is held. */
+export interface RollNote {
+  midi: number;
+  t0: number;
+  t1: number | null;
+  text: string;
+  demo: boolean;
+}
+
+/** What the piano roll draws, read every frame (mutated in place: no re-render per note). */
+export const roll: { notes: RollNote[] } = { notes: [] };
+
+export const DEFAULT_LYRICS = "Hello there, I am a voice made of air.";
+
+/** sung when the lyrics are empty */
+const AH: Syllable = { text: "ah", onset: [], nucleus: { ipa: "ɑ", stress: 1 }, coda: [], wordEnd: true, phraseEnd: false };
+
+interface SingState {
+  lyrics: string;
+  syllables: Syllable[];
+  /** the syllable the next key sings */
+  cursor: number;
+  /** vibrato depth on held vowels (cents) */
+  vibrato: number;
+  /** the demo song playing, if any */
+  demo: string | null;
+  /** index of the demo syllable being sung (−1: none yet) */
+  demoAt: number;
+  setLyrics: (text: string) => void;
+  setCursor: (i: number) => void;
+  setVibrato: (cents: number) => void;
+}
+
+export const useSing = create<SingState>((set, get) => ({
+  lyrics: DEFAULT_LYRICS,
+  syllables: lyricsToSyllables(DEFAULT_LYRICS, g2p),
+  cursor: 0,
+  vibrato: 35,
+  demo: null,
+  demoAt: -1,
+  setLyrics: (text) => {
+    stopDemo();
+    set({ lyrics: text, syllables: lyricsToSyllables(text, g2p), cursor: 0 });
+  },
+  setCursor: (i) => set({ cursor: Math.max(0, Math.min(i, Math.max(0, get().syllables.length - 1))) }),
+  setVibrato: (cents) => set({ vibrato: cents }),
+}));
+
+/** Load the pronouncing dictionary, then re-read the lyrics with it (the cursor stays). */
+export function ensureDictionary(): void {
+  if (g2p.loaded) return;
+  g2p
+    .load()
+    .then(() => {
+      const s = useSing.getState();
+      const syllables = lyricsToSyllables(s.lyrics, g2p);
+      useSing.setState({ syllables, cursor: Math.min(s.cursor, Math.max(0, syllables.length - 1)) });
+    })
+    .catch(() => {
+      // no dictionary: the letter-to-sound rules keep working
+    });
+}
+
+// ---- live notes
+
+interface Sounding {
+  midi: number;
+  /** the syllable whose vowel is sounding (a melisma keeps its parent's, for the coda) */
+  syl: Syllable;
+  tag: number;
+  note: RollNote;
+}
+
+let sounding: Sounding | null = null;
+/** keys down, oldest first */
+let keys: number[] = [];
+/** gesture tags: a note uses tag (articulation, breath) and tag + 1 (pitch, vibrato) */
+let nextTag = 2;
+
+/** breath level for a key velocity (1 at the on-screen keys' default of 96) */
+const breathFor = (velocity: number) => 0.62 + 0.4 * Math.min(1, Math.max(0, velocity / 96)) + 0.12 * Math.max(0, (velocity - 96) / 31);
+
+const now = () => engine.voiceClock() ?? 0;
+
+function addNote(midi: number, t0: number, text: string, demo = false, t1: number | null = null): RollNote {
+  const n: RollNote = { midi, t0, t1, text, demo };
+  roll.notes.push(n);
+  // keep a minute of history
+  const cut = t0 - 60;
+  if (roll.notes.length > 400 || (roll.notes[0] && (roll.notes[0].t1 ?? t0) < cut)) roll.notes = roll.notes.filter((x) => (x.t1 ?? t0) >= cut).slice(-400);
+  return n;
+}
+
+/** The syllable a melisma at index i continues. */
+function parentOf(syls: Syllable[], i: number): Syllable {
+  for (let k = i; k >= 0; k--) if (!syls[k].melisma) return syls[k];
+  return AH;
+}
+
+function startNote(syl: Syllable, midi: number, velocity: number, body: BodyName, text: string): void {
+  const t = now();
+  const tag = nextTag;
+  nextTag += 2;
+  const from = sounding;
+  if (from) {
+    engine.release(from.tag);
+    engine.release(from.tag + 1);
+    from.note.t1 = t;
+  }
+  const gs: Gesture[] = planNoteOn(syl, midi, { body, vibrato: useSing.getState().vibrato, tag, legatoFrom: from ? { syl: from.syl, midi: from.midi } : undefined });
+  const breath = breathFor(velocity);
+  for (const g of gs) if (g.targets.breath !== undefined) g.targets = { ...g.targets, breath: g.targets.breath * breath };
+  engine.scheduleGestures(gs);
+  sounding = { midi, syl, tag, note: addNote(midi, t, text) };
+}
+
+/** The held vowel moves to a new pitch (melisma, or back to a key still down). */
+function glide(midi: number, text: string): void {
+  const s = sounding!;
+  const t = now();
+  engine.release(s.tag + 1);
+  engine.scheduleGestures(planMelisma(midi, { vibrato: useSing.getState().vibrato, tag: s.tag }));
+  s.note.t1 = t;
+  s.midi = midi;
+  s.note = addNote(midi, t, text);
+}
+
+export function singNoteOn(midi: number, velocity: number, body: BodyName): void {
+  stopDemo();
+  keys = keys.filter((k) => k !== midi).concat(midi);
+  const st = useSing.getState();
+  const syls = st.syllables.length ? st.syllables : [AH];
+  const i = st.cursor % syls.length;
+  const syl = syls[i];
+  if (syl.melisma && sounding) glide(midi, syl.text);
+  // a melisma with nothing held: sing its vowel again, without the onset
+  else startNote(syl.melisma ? { ...parentOf(syls, i), onset: [] } : syl, midi, velocity, body, syl.text);
+  useSing.setState({ cursor: (i + 1) % syls.length });
+}
+
+export function singNoteOff(midi: number, body: BodyName): void {
+  keys = keys.filter((k) => k !== midi);
+  const s = sounding;
+  if (!s || s.midi !== midi) return;
+  if (keys.length) {
+    glide(keys[keys.length - 1], "~");
+    return;
+  }
+  engine.release(s.tag);
+  engine.release(s.tag + 1);
+  s.note.t1 = now();
+  sounding = null;
+  // a melisma comes next: this vowel carries on there, and the coda waits for the chain's end
+  const st = useSing.getState();
+  if (st.syllables[st.cursor]?.melisma) return;
+  const tail = planNoteOff(s.syl, midi, body);
+  if (tail.length) engine.scheduleGestures(tail);
+}
+
+// ---- demo songs
+
+interface DemoRun {
+  id: number;
+  /** note start/end times in plan time (s) */
+  times: [number, number][];
+  midi: number[];
+  text: string[];
+  end: number;
+  /** voice clock of plan time 0, once the worklet has it */
+  offset: number | null;
+}
+
+let demoRun: DemoRun | null = null;
+
+engine.onPlanned((m) => {
+  const d = demoRun;
+  if (!d || m.id !== d.id) return;
+  d.offset = m.t0;
+  d.times.forEach(([a, b], k) => addNote(d.midi[k], m.t0 + a, d.text[k], true, m.t0 + b - 0.02));
+});
+
+export async function playDemo(name: string, body: BodyName): Promise<void> {
+  const song = DEMO_SONGS.find((s) => s.name === name);
+  if (!song) return;
+  stopSinging();
+  try {
+    await g2p.load();
+  } catch {
+    // letter-to-sound rules
+  }
+  const syl = lyricsToSyllables(song.lyrics, g2p);
+  if (!syl.length) return;
+  const shift = song.octave[body] * 12;
+  const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));
+  const t0 = 0.35;
+  const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato });
+  const beat = 60 / song.bpm;
+  let t = t0;
+  const times = notes.map((n): [number, number] => {
+    const a = t;
+    t += n.beats * beat;
+    return [a, t];
+  });
+  const id = engine.schedule({ gestures: plan.gestures, segments: plan.segments, end: plan.end });
+  demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), end: plan.end, offset: null };
+  useSing.setState({ lyrics: song.lyrics, syllables: syl, cursor: 0, demo: song.name, demoAt: -1 });
+}
+
+function stopDemo(): void {
+  const d = demoRun;
+  if (!d) return;
+  demoRun = null;
+  engine.stopSpeech();
+  // notes not yet sung leave the roll; the one sounding ends now
+  const t = now();
+  roll.notes = roll.notes.filter((n) => !(n.demo && n.t0 > t));
+  for (const n of roll.notes) if (n.demo && n.t1 !== null && n.t1 > t) n.t1 = t;
+  useSing.setState({ demo: null, demoAt: -1 });
+}
+
+/** Called every frame while Sing mode is shown: follow the demo's progress. */
+export function tickSinging(): void {
+  const d = demoRun;
+  if (!d || d.offset === null) return;
+  const t = now() - d.offset;
+  if (t > d.end + 0.4) {
+    demoRun = null;
+    useSing.setState({ demo: null, demoAt: -1 });
+    return;
+  }
+  let k = -1;
+  while (k + 1 < d.times.length && d.times[k + 1][0] <= t) k++;
+  if (k !== useSing.getState().demoAt) useSing.setState({ demoAt: k });
+}
+
+/** Stop everything sung (leaving Sing mode, changing body). */
+export function stopSinging(): void {
+  stopDemo();
+  if (sounding) {
+    engine.release(sounding.tag);
+    engine.release(sounding.tag + 1);
+    sounding.note.t1 = now();
+    sounding = null;
+  }
+  keys = [];
+}
+
+export { DEMO_SONGS };

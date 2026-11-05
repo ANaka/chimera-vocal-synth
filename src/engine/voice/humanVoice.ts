@@ -323,6 +323,9 @@ export class HumanVoice {
     const tau = gateGoal > this.gate ? 0.025 : this.scoreBreathHold > 0 ? 0.02 : 0.07;
     this.gate += (gateGoal - this.gate) * (1 - Math.exp(-dt / tau));
     this.pLung = this.source.pressure * CM_H2O * this.gate;
+    // vocal effort follows the pressure actually applied: a harder breath (a louder sung note)
+    // gives wider, sharper-closing pulses, as in real phonation, not just more flow
+    this.glottis.params.effort = clamp((Math.abs(this.source.pressure * this.gate) - 3) / 10, 0, 1);
     // pitch glide
     const g = Math.max(0.002, this.scoreF0 !== null ? 0.03 : this.source.glide);
     this.f0 *= Math.pow(f0Target / this.f0, 1 - Math.exp(-dt / g));

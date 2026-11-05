@@ -727,6 +727,147 @@ button.ghost {
   row-gap: 4px;
 }
 
+/* ---------- sing */
+.sing {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.6fr) minmax(260px, 1fr);
+  gap: 10px;
+}
+
+.lyrics-panel,
+.song-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lyrics-panel textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 52px;
+  background: var(--black);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.song-panel h2 + .examples {
+  margin-bottom: 6px;
+}
+
+.syllables {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+  min-height: 34px;
+}
+
+.syl-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+}
+
+.syl-wrap.word-end {
+  margin-right: 10px;
+}
+
+.syl {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--black);
+  padding: 2px 7px 3px;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.syl.held {
+  color: var(--text-dim);
+}
+
+.syl.next {
+  border-color: var(--caliper);
+  color: var(--caliper);
+  box-shadow: 0 0 0 1px var(--caliper-dim);
+}
+
+.syl.now {
+  background: var(--caliper);
+  border-color: var(--caliper);
+  color: var(--black);
+}
+
+.breath-mark {
+  margin-left: 4px;
+  color: var(--caliper);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.roll-panel {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+
+.roll-canvas {
+  height: 168px;
+  border-radius: var(--radius-s);
+}
+
+.keys-row {
+  display: flex;
+  gap: 8px;
+}
+
+.keys-row .keys {
+  flex: 1;
+  min-width: 0;
+}
+
+button.midi {
+  flex: 0 0 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.midi-name {
+  font-size: 12.5px;
+  font-weight: 550;
+  font-stretch: 87%;
+  line-height: 1.15;
+}
+
+.midi-status {
+  font-size: 12px;
+  font-stretch: 87%;
+  color: var(--text-dim);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+button.midi.on {
+  border-color: var(--caliper-dim);
+}
+
+button.midi.on .midi-status {
+  color: var(--caliper);
+}
+
 /* ---------- beatbox */
 .beatbox {
   display: grid;
@@ -1046,7 +1187,8 @@ button.ghost {
 }
 
 @media (max-width: 900px) {
-  .speak {
+  .speak,
+  .sing {
     grid-template-columns: 1fr;
   }
 }
@@ -1067,9 +1209,16 @@ button.ghost {
   }
   .deck,
   .speak,
+  .sing,
   .bestiary,
   .beatbox {
     order: 2;
+  }
+  .sing {
+    grid-template-columns: 1fr;
+  }
+  .roll-canvas {
+    height: 140px;
   }
   .seq-row {
     grid-template-columns: 34px repeat(var(--steps), minmax(12px, 1fr));
@@ -1144,6 +1293,18 @@ button.ghost {
   }
   .keys {
     height: 64px;
+  }
+  .keys-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+  button.midi {
+    flex: none;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 4px 8px;
   }
 }
 

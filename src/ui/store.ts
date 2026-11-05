@@ -6,10 +6,12 @@ import type { BodyName } from "../worklet/protocol.ts";
 import { creatureById } from "../engine/creatures/index.ts";
 import type { ParamDef } from "../engine/creatures/types.ts";
 import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../engine/phonetics/beatbox.ts";
+import { singNoteOn, singNoteOff, stopSinging, ensureDictionary } from "./singing.ts";
+import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
 
 export const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
 
-export type Mode = "play" | "speak" | "bestiary" | "beatbox";
+export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox";
 
 export interface BeatState {
   steps: (BeatStep | null)[];
@@ -70,8 +72,11 @@ interface State {
   setArtic: (v: Partial<HumanArtic>, tipFree?: boolean) => void;
   setVolume: (v: number) => void;
   setHold: (h: boolean) => void;
-  noteOn: (midi: number) => void;
+  /** a key went down (velocity 1..127; the on-screen keys send 96) */
+  noteOn: (midi: number, velocity?: number) => void;
   noteOff: (midi: number) => void;
+  midi: { status: MidiStatus; inputs: string[] };
+  setMidi: (on: boolean) => void;
   setView: (v: Partial<ViewOptions>) => void;
 }
 
@@ -90,8 +95,8 @@ export function creatureKeyHz(midi: number, p: Pick<ParamDef, "min" | "max">): n
 }
 
 function updateGate(s: { hold: boolean; heldNotes: number[]; mode: Mode; keyCall: string | null }) {
-  // keys that trigger calls leave the breath to the call
-  const keysBreathe = !(s.mode === "bestiary" && s.keyCall);
+  // keys that trigger calls leave the breath to the call; sung notes breathe by themselves
+  const keysBreathe = !(s.mode === "bestiary" && s.keyCall) && s.mode !== "sing";
   engine.gate(s.hold || (keysBreathe && s.heldNotes.length > 0) ? 1 : 0);
 }
 
@@ -132,8 +137,10 @@ export const useStore = create<State>((set, get) => ({
       get().setBeatPlaying(false);
       engine.setMic(false);
     }
-    // speech breathes by itself: a held breath would drone under it and through every pause
-    if (m === "speak") set({ hold: false });
+    if (prev === "sing") stopSinging();
+    // speech and song breathe by themselves: a held breath would drone under them
+    if (m === "speak" || m === "sing") set({ hold: false });
+    if (m === "sing") ensureDictionary();
     if (m === "beatbox") {
       // a beatboxer waits with the jaw nearly closed; the sounds bring their own breath
       set({ hold: false });
@@ -243,6 +250,8 @@ export const useStore = create<State>((set, get) => ({
     return startPromise;
   },
   setBody: (b) => {
+    // the new voice starts without the old one's score: a sung note would hang
+    if (get().mode === "sing") stopSinging();
     const f0 = DEFAULT_F0[b];
     set((s) => ({ body: b, source: { ...s.source, f0 } }));
     engine.setBody(b);
@@ -263,11 +272,12 @@ export const useStore = create<State>((set, get) => ({
     set({ hold: h });
     updateGate(get());
   },
-  noteOn: (midi) => {
+  noteOn: (midi, velocity = 96) => {
     const held = get().heldNotes.filter((n) => n !== midi).concat(midi);
     set({ heldNotes: held });
     const s = get();
-    if (s.mode === "bestiary") {
+    if (s.mode === "sing") singNoteOn(midi, velocity, s.body);
+    else if (s.mode === "bestiary") {
       const pp = creatureById(s.creature)?.params.find((p) => p.role === "pitch");
       const f = pp ? creatureKeyHz(midi, pp) : undefined;
       if (s.keyCall) s.playCall(s.keyCall, f);
@@ -284,6 +294,10 @@ export const useStore = create<State>((set, get) => ({
     const held = get().heldNotes.filter((n) => n !== midi);
     set({ heldNotes: held });
     const s = get();
+    if (s.mode === "sing") {
+      singNoteOff(midi, s.body);
+      return;
+    }
     if (s.mode === "beatbox" && !held.length) s.setArtic({ lipAp: beatReady(s.body).lipAp, velum: NEUTRAL.velum });
     if (held.length) {
       // fall back to the most recent note still held (legato)
@@ -297,4 +311,24 @@ export const useStore = create<State>((set, get) => ({
     updateGate(get());
   },
   setView: (v) => set((s) => ({ view: { ...s.view, ...v } })),
+  midi: { status: "off", inputs: [] },
+  setMidi: (on) => {
+    const noteOff = (n: number) => get().noteOff(n);
+    if (!on) {
+      disconnectMidi({ noteOff });
+      set({ midi: { status: "off", inputs: [] } });
+      return;
+    }
+    set({ midi: { status: "connecting", inputs: [] } });
+    // the click that connects is also the gesture that may start audio
+    void get().start();
+    connectMidi({
+      noteOn: (n, v) => {
+        void get().start();
+        get().noteOn(n, v);
+      },
+      noteOff,
+      inputs: (names) => set({ midi: { status: "on", inputs: names } }),
+    }).catch(() => set({ midi: { status: "denied", inputs: [] } }));
+  },
 }));

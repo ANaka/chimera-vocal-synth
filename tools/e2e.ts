@@ -79,6 +79,42 @@ async function run(viewport: { width: number; height: number }, tag: string) {
   await page.locator("button.ipa", { hasText: "ʃ" }).first().click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${outDir}/${tag}-4-pad.png` });
+  // sing mode: a key sings the marked syllable and moves the cursor; legato; a demo song
+  await page.getByRole("radio", { name: "Sing" }).click();
+  await page.waitForTimeout(600);
+  const rms = () =>
+    page.evaluate(() => {
+      // @ts-expect-error debug handle
+      return window.__chimeraEngine?.latest?.t?.outRms ?? -1;
+    });
+  const nextSyl = () => page.locator(".syl.next").textContent().catch(() => null);
+  const sylBefore = await nextSyl();
+  await page.keyboard.down("d");
+  await page.waitForTimeout(450);
+  const singing = await rms();
+  await page.keyboard.down("g"); // legato into the next syllable
+  await page.waitForTimeout(350);
+  await page.keyboard.up("d");
+  await page.waitForTimeout(250);
+  await page.keyboard.up("g");
+  await page.waitForTimeout(900);
+  const after = await rms();
+  const sylAfter = await nextSyl();
+  logs.push(`[${tag}] sing: next syllable ${sylBefore} -> ${sylAfter}, rms while held ${singing.toFixed(4)}, then silence ${after.toFixed(4)}`);
+  if (!(singing > 0.01)) errors.push(`[${tag}] a sung key made no sound (${singing})`);
+  if (!(after < 1e-3)) errors.push(`[${tag}] voice still sounding after the sung notes: ${after}`);
+  if (sylBefore === sylAfter) errors.push(`[${tag}] the syllable cursor did not move (${sylBefore})`);
+  await page.getByRole("button", { name: "Made of air" }).click();
+  await page.waitForTimeout(2200);
+  const demoRms = await rms();
+  const demoNow = await page.locator(".syl.now").textContent().catch(() => null);
+  await page.screenshot({ path: `${outDir}/${tag}-5-sing.png`, fullPage: tag !== "desktop" });
+  await page.getByRole("button", { name: /^Stop “Made of air”$/ }).click();
+  await page.waitForTimeout(700);
+  const demoStopped = await rms();
+  logs.push(`[${tag}] sing demo: rms ${demoRms.toFixed(4)} on "${demoNow}", after stop ${demoStopped.toFixed(4)}`);
+  if (!(demoRms > 0.01) || !demoNow) errors.push(`[${tag}] demo song not singing (rms ${demoRms}, syllable ${demoNow})`);
+  if (!(demoStopped < 1e-3)) errors.push(`[${tag}] demo still sounding after stop: ${demoStopped}`);
   // bestiary: every creature, its first call, a key in held-voice mode, and the sustain toggle
   await page.getByRole("radio", { name: "Bestiary" }).click();
   await page.waitForTimeout(300);
@@ -145,4 +181,4 @@ await run({ width: 1440, height: 980 }, "desktop");
 await run({ width: 390, height: 844 }, "mobile");
 await browser.close();
 console.log("console errors:", errors.length ? "\n" + errors.join("\n") : "none");
-console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox|silence/i.test(l)).slice(0, 40).join("\n"));
+console.log(logs.filter((l) => /load|warn|transcription|creature|held|back to|beatbox|silence|sing/i.test(l)).slice(0, 40).join("\n"));

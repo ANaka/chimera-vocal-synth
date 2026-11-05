@@ -22,6 +22,8 @@ export class AudioEngine {
   private micIn: AudioNode | null = null;
   private micOn = false;
   latest: TelemetryMessage | null = null;
+  /** performance.now() when `latest` arrived */
+  private latestAt = 0;
   latestCreature: CreatureTelemetryMessage | null = null;
   /** load of the most recent telemetry of either kind */
   load = 0;
@@ -38,6 +40,12 @@ export class AudioEngine {
   lastPlan: PlannedMessage | null = null;
   private speakId = 0;
   error: string | null = null;
+
+  /** The human voice's clock now (s), extrapolated from the latest telemetry; null if none. */
+  voiceClock(): number | null {
+    if (!this.latest) return null;
+    return this.latest.t.clock + Math.min(0.25, (performance.now() - this.latestAt) / 1000);
+  }
 
   get running(): boolean {
     return !!this.ctx && this.ctx.state === "running";
@@ -97,6 +105,7 @@ export class AudioEngine {
       const m = e.data;
       if (m.type === "telemetry") {
         this.latest = m;
+        this.latestAt = performance.now();
         this.latestCreature = null;
         this.load = m.load;
         for (const l of this.listeners) l(m);

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store.ts";
+import { midiSupported } from "../midi.ts";
 
 /** Computer-keyboard layout: two rows like a piano (A W S E D F T G Y H U J K O L P ;). */
 const KEYMAP: Record<string, number> = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12, o: 13, l: 14, p: 15, ";": 16 };
@@ -61,21 +62,48 @@ export function Keys() {
   };
   const release = (m: number) => () => noteOff(m);
   return (
-    <div className="keys" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
-      <div className="white-row">
-        {whites.map((m) => (
-          <button key={m} className={`key white${held.includes(m) ? " down" : ""}`} onPointerDown={press(m)} onPointerUp={release(m)} onPointerCancel={release(m)} aria-label={`Note ${m}`} />
-        ))}
-      </div>
-      <div className="black-row">
-        {whites.map((m, i) => {
-          const b = m + 1;
-          const hasBlack = isBlack(b) && i < whites.length - 1;
-          return hasBlack ? (
-            <button key={b} className={`key black${held.includes(b) ? " down" : ""}`} style={{ left: `calc(${((i + 1) / whites.length) * 100}% - 1.1%)` }} onPointerDown={press(b)} onPointerUp={release(b)} onPointerCancel={release(b)} aria-label={`Note ${b}`} />
-          ) : null;
-        })}
+    <div className="keys-row">
+      <MidiButton />
+      <div className="keys" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
+        <div className="white-row">
+          {whites.map((m) => (
+            <button key={m} className={`key white${held.includes(m) ? " down" : ""}`} onPointerDown={press(m)} onPointerUp={release(m)} onPointerCancel={release(m)} aria-label={`Note ${m}`} />
+          ))}
+        </div>
+        <div className="black-row">
+          {whites.map((m, i) => {
+            const b = m + 1;
+            const hasBlack = isBlack(b) && i < whites.length - 1;
+            return hasBlack ? (
+              <button key={b} className={`key black${held.includes(b) ? " down" : ""}`} style={{ left: `calc(${((i + 1) / whites.length) * 100}% - 1.1%)` }} onPointerDown={press(b)} onPointerUp={release(b)} onPointerCancel={release(b)} aria-label={`Note ${b}`} />
+            ) : null;
+          })}
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Connect a MIDI keyboard (any mode with keys); shows what is connected. */
+function MidiButton() {
+  const midi = useStore((s) => s.midi);
+  const setMidi = useStore((s) => s.setMidi);
+  if (!midiSupported()) return null;
+  const on = midi.status === "on";
+  const status =
+    midi.status === "connecting"
+      ? "Connecting…"
+      : midi.status === "denied"
+        ? "Blocked by the browser"
+        : on
+          ? midi.inputs.length
+            ? midi.inputs.join(", ")
+            : "Plug one in"
+          : "Off";
+  return (
+    <button className={`midi${on ? " on" : ""}`} aria-pressed={on} onClick={() => setMidi(!on)} title={on ? "Disconnect the MIDI keyboard" : "Play with a MIDI keyboard (the browser asks for access)"}>
+      <span className="midi-name">MIDI keyboard</span>
+      <span className="midi-status">{status}</span>
+    </button>
   );
 }
