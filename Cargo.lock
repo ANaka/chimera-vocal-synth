@@ -25,6 +25,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chimera-cli"
+version = "0.1.0"
+dependencies = [
+ "chimera",
+ "flate2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chimera-wasm"
 version = "0.1.0"
 dependencies = [
