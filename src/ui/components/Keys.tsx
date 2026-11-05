@@ -1,0 +1,81 @@
+import { useEffect, useRef } from "react";
+import { useStore } from "../store.ts";
+
+/** Computer-keyboard layout: two rows like a piano (A W S E D F T G Y H U J K O L P ;). */
+const KEYMAP: Record<string, number> = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12, o: 13, l: 14, p: 15, ";": 16 };
+const BASE: Record<string, number> = { male: 48, female: 57, child: 60 };
+
+export function Keys() {
+  const body = useStore((s) => s.body);
+  const held = useStore((s) => s.heldNotes);
+  const noteOn = useStore((s) => s.noteOn);
+  const noteOff = useStore((s) => s.noteOff);
+  const start = useStore((s) => s.start);
+  const octave = useRef(0);
+  const base = BASE[body] + octave.current * 12;
+
+  useEffect(() => {
+    const down = new Set<string>();
+    const onDown = (e: KeyboardEvent) => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        if ((target as HTMLInputElement).type !== "range" && (target as HTMLInputElement).type !== "checkbox") return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === "z") octave.current = Math.max(-2, octave.current - 1);
+      if (k === "x") octave.current = Math.min(2, octave.current + 1);
+      if (!(k in KEYMAP) || down.has(k)) return;
+      down.add(k);
+      void start();
+      noteOn(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+      e.preventDefault();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (!down.has(k)) return;
+      down.delete(k);
+      noteOff(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+    };
+    const onBlur = () => {
+      for (const k of down) noteOff(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+      down.clear();
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [noteOn, noteOff, start]);
+
+  const notes = Array.from({ length: 25 }, (_, i) => base + i);
+  const isBlack = (m: number) => [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
+  const whites = notes.filter((m) => !isBlack(m));
+  const press = (m: number) => (e: React.PointerEvent) => {
+    (e.target as Element).setPointerCapture(e.pointerId);
+    void start();
+    noteOn(m);
+  };
+  const release = (m: number) => () => noteOff(m);
+  return (
+    <div className="keys" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
+      <div className="white-row">
+        {whites.map((m) => (
+          <button key={m} className={`key white${held.includes(m) ? " down" : ""}`} onPointerDown={press(m)} onPointerUp={release(m)} onPointerCancel={release(m)} aria-label={`Note ${m}`} />
+        ))}
+      </div>
+      <div className="black-row">
+        {whites.map((m, i) => {
+          const b = m + 1;
+          const hasBlack = isBlack(b) && i < whites.length - 1;
+          return hasBlack ? (
+            <button key={b} className={`key black${held.includes(b) ? " down" : ""}`} style={{ left: `calc(${((i + 1) / whites.length) * 100}% - 1.1%)` }} onPointerDown={press(b)} onPointerUp={release(b)} onPointerCancel={release(b)} aria-label={`Note ${b}`} />
+          ) : null;
+        })}
+      </div>
+    </div>
+  );
+}

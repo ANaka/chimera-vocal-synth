@@ -195,6 +195,21 @@ export class HumanVocalTract {
     return { x: xx * k, y: yy * k };
   }
 
+  /** Inverse of P(): body coordinates → template coordinates (for direct manipulation). */
+  unP(x: number, y: number): Vec {
+    const k = this.k;
+    const ph = this.body.pharynx;
+    let xx = x / k;
+    let yy = y / k;
+    if (xx > 0.5) xx = 0.5 + (xx - 0.5) / 0.86;
+    if (yy < 7) yy = 7 - (7 - yy) / ph;
+    return { x: xx, y: yy };
+  }
+
+  get scale(): number {
+    return this.k;
+  }
+
   compute(a: HumanArtic): HumanFrame {
     const k = this.k;
     const P = (x: number, y: number) => this.P(x, y);

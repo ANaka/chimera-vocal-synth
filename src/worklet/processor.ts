@@ -1,0 +1,98 @@
+/**
+ * CHIMERA AudioWorklet processor. Execution contract: message handlers only record state;
+ * all DSP happens in process(); telemetry is fixed-size and rate-limited (~60 Hz).
+ */
+import { HumanVoice } from "../engine/voice/humanVoice.ts";
+import { BODY_MALE, BODY_FEMALE, BODY_CHILD, type HumanBody } from "../engine/anatomy/human.ts";
+import type { ToWorklet, FromWorklet, BodyName } from "./protocol.ts";
+
+// Minimal AudioWorkletGlobalScope typings
+declare const sampleRate: number;
+declare function registerProcessor(name: string, ctor: unknown): void;
+declare class AudioWorkletProcessor {
+  readonly port: MessagePort;
+  constructor(options?: unknown);
+}
+
+const BODIES: Record<BodyName, HumanBody> = { male: BODY_MALE, female: BODY_FEMALE, child: BODY_CHILD };
+const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
+
+class ChimeraProcessor extends AudioWorkletProcessor {
+  private voice: HumanVoice;
+  private body: BodyName = "male";
+  private telemetryOn = true;
+  private blocks = 0;
+  private load = 0;
+  private pendingBody: BodyName | null = null;
+
+  constructor() {
+    super();
+    this.voice = this.makeVoice("male");
+    this.port.onmessage = (e: MessageEvent<ToWorklet>) => this.onMessage(e.data);
+    this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+  }
+
+  private makeVoice(body: BodyName): HumanVoice {
+    const v = new HumanVoice({ fsOut: sampleRate, body: BODIES[body], oversample: sampleRate > 60000 ? 1 : 2 });
+    v.setSource({ f0: DEFAULT_F0[body] });
+    return v;
+  }
+
+  private post(msg: FromWorklet): void {
+    this.port.postMessage(msg);
+  }
+
+  private onMessage(m: ToWorklet): void {
+    switch (m.type) {
+      case "body":
+        this.pendingBody = m.body;
+        break;
+      case "artic":
+        this.voice.setArticulation(m.values, m.tipFree);
+        break;
+      case "source":
+        this.voice.setSource(m.values);
+        break;
+      case "gate":
+        this.voice.setGate(m.level);
+        break;
+      case "telemetry":
+        this.telemetryOn = m.enabled;
+        break;
+    }
+  }
+
+  process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+    const out = outputs[0];
+    if (!out || out.length === 0) return true;
+    if (this.pendingBody) {
+      // carry the performer's settings across the body change
+      const prev = this.voice;
+      this.body = this.pendingBody;
+      this.pendingBody = null;
+      this.voice = this.makeVoice(this.body);
+      this.voice.setSource({ ...prev.source, f0: DEFAULT_F0[this.body] });
+      this.voice.setArticulation({ ...prev.artic.target }, prev.artic.tipFree);
+      this.voice.setGate(prev.gate > 0.5 ? 1 : 0);
+      this.post({ type: "ready", sampleRate, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+    }
+    const ch0 = out[0];
+    const t0 = Date.now();
+    try {
+      this.voice.render(ch0, 0, ch0.length);
+    } catch (err) {
+      ch0.fill(0);
+      this.post({ type: "error", message: String(err) });
+    }
+    for (let c = 1; c < out.length; c++) out[c].set(ch0);
+    const dt = Date.now() - t0;
+    const budget = (ch0.length / sampleRate) * 1000;
+    this.load += 0.05 * (dt / budget - this.load);
+    if (this.telemetryOn && ++this.blocks % 6 === 0) {
+      this.post({ type: "telemetry", t: this.voice.telemetry(), load: this.load, body: this.body, nPh: this.voice.airway.nPh, nOr: this.voice.airway.nOr });
+    }
+    return true;
+  }
+}
+
+registerProcessor("chimera", ChimeraProcessor);
