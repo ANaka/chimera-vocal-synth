@@ -19,7 +19,7 @@ usage: chimera <command> [args] [--float]
   render text    <out> [\"English text.\"] [male|female|child]
   render song    [outdir] [male|female|child]
   render notes   <in.json> <out> [male|female|child]   (melody file; midi <= 0 is a rest)
-  render beatbox [outdir] [preset name] [male|female|child]
+  render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child] [out]
   diagnose       [outdir]
