@@ -18,6 +18,7 @@ usage: chimera <command> [args] [--float]
   render speech  <out> [\"ipa / ipa\"] [male|female|child]
   render text    <out> [\"English text.\"] [male|female|child]
   render song    [outdir] [male|female|child]
+  render notes   <in.json> <out> [male|female|child]   (melody file; midi <= 0 is a rest)
   render beatbox [outdir] [preset name] [male|female|child]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child] [out]
@@ -85,6 +86,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 "speech" => render::speech(&ctx, rest),
                 "text" => render::text(&ctx, rest),
                 "song" => render::song(&ctx, rest),
+                "notes" => render::notes(&ctx, rest),
                 "beatbox" => render::beatbox(&ctx, rest),
                 "creature" => render::creature(&ctx, rest),
                 "vowels" => render::vowels(&ctx, rest),
