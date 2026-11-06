@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
+import { sameBody } from "../body.ts";
 import { useStore } from "../store.ts";
 import { useModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
@@ -27,7 +28,7 @@ export function SpectrumView(props: { ring?: boolean }) {
     const left = 36, right = w - 14, top = 22, bot = h - 22;
     const fx = (f: number) => left + ((Math.log(f) - Math.log(FMIN)) / (Math.log(FMAX) - Math.log(FMIN))) * (right - left);
     const dbY = (db: number) => top + (Math.min(0, Math.max(-RANGE, db)) / -RANGE) * (bot - top);
-    const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+    const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
     const f0 = tele && tele.t.voicing > 0.3 ? tele.t.f0 : 0;
 
     for (const f of [100, 200, 500, 1000, 2000, 5000]) {

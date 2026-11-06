@@ -56,7 +56,7 @@ fn the_beat_player_does_not_allocate() {
             p.set_steps(&other);
         }
         if b == 1300 {
-            p.body = chimera::anatomy::human::BodyName::Child;
+            p.body = chimera::anatomy::human::BodyName::Child.into();
             p.rebase(-clock);
             clock = 0.0;
             p.rewind(clock);
@@ -66,7 +66,7 @@ fn the_beat_player_does_not_allocate() {
         clock += 128.0 / 48000.0;
     }
     for s in &BEAT_SOUNDS {
-        let lead = BeatPlayer::lead_in_with(s.id, "female", &mut scratch);
+        let lead = BeatPlayer::lead_in_with(s.id, "female".into(), &mut scratch);
         scratch.clear();
         p.gestures(&BeatStep { note: Some(45.0), accent: Some(1.2), ..BeatStep::new(s.id) }, clock + lead, 0.18, &mut scratch);
         assert!(!scratch.is_empty() && scratch.len() <= MAX_SOUND_GESTURES);

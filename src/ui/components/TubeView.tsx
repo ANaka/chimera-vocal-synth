@@ -1,5 +1,6 @@
 import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
+import { sameBody } from "../body.ts";
 import { useStore } from "../store.ts";
 import { useModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
@@ -16,7 +17,7 @@ export function TubeView() {
     const st = useStore.getState();
     const m = model.current;
     if (!m) return;
-    const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+    const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
     let ph: ArrayLike<number>, or: ArrayLike<number>, phLen: number, orLen: number;
     let rms: ArrayLike<number> | null = null;
     if (tele) {

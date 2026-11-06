@@ -1163,9 +1163,17 @@ body {
 
 /* ---------- top bar */
 .topbar {
-  gap: 18px 24px;
+  gap: 18px 16px;
   padding: 4px 2px;
   min-height: 40px;
+}
+
+.topbar-right {
+  gap: 14px;
+}
+
+.volume input {
+  width: 90px;
 }
 
 .brand {
@@ -1217,6 +1225,50 @@ body {
   border-color: var(--blue);
   box-shadow: 0 0 5px rgba(79, 182, 242, 0.35), inset 0 0 4px rgba(79, 182, 242, 0.15);
   text-shadow: var(--glow-blue);
+}
+
+/* the body: preset chips and the triangle between them */
+.body-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.body-pad {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+  outline: none;
+  line-height: 0;
+}
+
+.body-pad svg {
+  overflow: visible;
+}
+
+.body-pad .body-grid {
+  fill: none;
+  stroke: var(--blue-dim);
+  stroke-width: 0.6;
+  opacity: 0.7;
+}
+
+.body-pad .body-frame {
+  fill: none;
+  stroke: var(--blue-mid);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.body-pad:hover .body-frame,
+.body-pad:focus-visible .body-frame {
+  stroke: var(--blue);
+  filter: drop-shadow(0 0 2px rgba(79, 182, 242, 0.6));
+}
+
+.body-pad .body-dot {
+  fill: var(--blue);
+  filter: drop-shadow(0 0 3px rgba(79, 182, 242, 0.9));
 }
 
 .volume,

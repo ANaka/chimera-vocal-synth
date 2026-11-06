@@ -9,7 +9,7 @@
 //! - Rendering, gestures, releases, artic/source/gate changes and beat edits allocate nothing once
 //!   warm. A body or creature switch builds a new airway network (it allocates).
 
-use crate::anatomy::human::{ArticPatch, BodyName};
+use crate::anatomy::human::{ArticPatch, BodyMix, BodyName};
 use crate::control::beat_player::BeatPlayer;
 use crate::control::score::{Gesture, GestureScore};
 use crate::creatures::types::CreatureDef;
@@ -22,26 +22,31 @@ pub const SUB_BLOCK: usize = 128;
 /// Gestures taken from one schedule command (as the TypeScript worklet did).
 pub const MAX_SCHEDULE: usize = 4000;
 
-/// Default pitch per body (Hz).
-pub fn default_f0(body: BodyName) -> f64 {
-    match body {
+/// Default pitch per body (Hz): the presets', blended geometrically in between.
+pub fn default_f0(body: impl Into<BodyMix>) -> f64 {
+    let body = body.into();
+    let f = |b: BodyName| match b {
         BodyName::Male => 110.0,
         BodyName::Female => 205.0,
         BodyName::Child => 260.0,
+    };
+    match body.preset() {
+        Some(b) => f(b),
+        None => crate::math::exp(body.blend(|b| crate::math::ln(f(b)))),
     }
 }
 
 /// Identity of the voice the engine is playing (the browser's "ready" message).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VoiceInfo {
-    pub body: BodyName,
+    pub body: BodyMix,
     pub n_ph: usize,
     pub n_or: usize,
 }
 
 pub struct Engine {
     pub sample_rate: f64,
-    body: BodyName,
+    body: BodyMix,
     voice: HumanVoice,
     /// the performer's breath (the voice's own gate also follows the score)
     gate_level: f64,
@@ -56,11 +61,11 @@ pub struct Engine {
 impl Engine {
     pub fn new(sample_rate: f64) -> Engine {
         crate::init();
-        let body = BodyName::Male;
+        let body = BodyMix::MALE;
         Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new(), creature: None }
     }
 
-    fn make_voice(fs: f64, body: BodyName) -> HumanVoice {
+    fn make_voice(fs: f64, body: BodyMix) -> HumanVoice {
         let mut v = HumanVoice::new(fs, body.body(), if fs > 60000.0 { 1 } else { 2 });
         v.set_source(&SourcePatch::f0(default_f0(body)));
         v
@@ -80,7 +85,9 @@ impl Engine {
 
     /// Switch the human body. The performer's settings carry over: source (pitch reset to the
     /// new body's default), posture, breath. Allocates (a new airway network).
-    pub fn set_body(&mut self, body: BodyName) -> VoiceInfo {
+    pub fn set_body(&mut self, body: impl Into<BodyMix>) -> VoiceInfo {
+        let body: BodyMix = body.into();
+        let body = BodyMix::new(body.female, body.child);
         let prev = core::mem::replace(&mut self.voice, Self::make_voice(self.sample_rate, body));
         self.body = body;
         let mut src = SourcePatch::from_source(&prev.source);
@@ -261,7 +268,7 @@ impl Engine {
     /// Play one beatbox sound as soon as the mouth can make it.
     pub fn beat_hit(&mut self, step: &BeatStep) {
         self.scratch.clear();
-        let hit = self.voice.clock + BeatPlayer::lead_in_with(step.id.as_str(), self.body.as_str(), &mut self.scratch);
+        let hit = self.voice.clock + BeatPlayer::lead_in_with(step.id.as_str(), self.body, &mut self.scratch);
         self.scratch.clear();
         self.beat.gestures(step, hit, 0.18, &mut self.scratch);
         debug_assert!(self.scratch.len() <= MAX_SOUND_GESTURES);

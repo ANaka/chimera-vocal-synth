@@ -6,7 +6,7 @@
 //! Real time: [`phoneme`] returns a `Copy` definition (targets inline, strings static) and
 //! allocates nothing once [`init`] has parsed the tables.
 
-use crate::anatomy::human::{ArticKey, ArticPatch};
+use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -241,18 +241,25 @@ fn by_ipa(ipa: &str) -> Option<&'static PhonemeDef> {
     BASE.iter().rev().find(|p| p.ipa == ipa)
 }
 
-/// Phoneme definition with calibrated targets for a body (falls back to defaults).
-/// Allocates nothing (the definition is `Copy`).
-pub fn phoneme(ipa: &str, body: &str) -> Option<PhonemeDef> {
+/// Phoneme definition with calibrated targets for a body (falls back to defaults); between
+/// presets the calibrated targets blend by the body's weights. Allocates nothing (the definition
+/// is `Copy`).
+pub fn phoneme(ipa: &str, body: BodyMix) -> Option<PhonemeDef> {
     let p = by_ipa(ipa)?;
-    match CAL.get(body).and_then(|b| b.get(ipa)) {
+    let of = |b: BodyName| match CAL.get(b.as_str()).and_then(|t| t.get(ipa)) {
         Some(cal) => {
-            let mut out = *p;
-            out.targets.merge(cal);
-            Some(out)
+            let mut t = p.targets;
+            t.merge(cal);
+            t
         }
-        None => Some(*p),
-    }
+        None => p.targets,
+    };
+    let mut out = *p;
+    out.targets = match body.preset() {
+        Some(b) => of(b),
+        None => ArticPatch::blend(&body.weights().map(|(b, w)| (w, of(b)))),
+    };
+    Some(out)
 }
 
 pub fn consonants() -> &'static [PhonemeDef] {

@@ -14,7 +14,7 @@ import { planSong, planNoteOn, planNoteOff, planMelisma } from "../wasm/engine.t
 import { EXHALE_LABEL } from "../wasm/engine.ts";
 import { DEMO_SONGS } from "../wasm/engine.ts";
 import type { Gesture } from "../wasm/types.ts";
-import type { BodyName } from "../worklet/protocol.ts";
+import { nearestBody, type BodyMix } from "./body.ts";
 
 /** A note on the piano roll, on the voice clock (s); t1 is null while it is held. */
 export interface RollNote {
@@ -124,7 +124,7 @@ function parentOf(syls: Syllable[], i: number): Syllable {
   return AH;
 }
 
-function startNote(syl: Syllable, midi: number, velocity: number, body: BodyName, text: string): void {
+function startNote(syl: Syllable, midi: number, velocity: number, body: BodyMix, text: string): void {
   const t = now();
   const tag = nextTag;
   nextTag += 2;
@@ -155,7 +155,7 @@ function glide(midi: number, text: string): void {
   s.note = addNote(midi, t, text);
 }
 
-export function singNoteOn(midi: number, velocity: number, body: BodyName): void {
+export function singNoteOn(midi: number, velocity: number, body: BodyMix): void {
   stopDemo();
   keys = keys.filter((k) => k !== midi).concat(midi);
   const st = useSing.getState();
@@ -168,7 +168,7 @@ export function singNoteOn(midi: number, velocity: number, body: BodyName): void
   useSing.setState({ cursor: (i + 1) % syls.length });
 }
 
-export function singNoteOff(midi: number, body: BodyName): void {
+export function singNoteOff(midi: number, body: BodyMix): void {
   keys = keys.filter((k) => k !== midi);
   const s = sounding;
   if (!s || s.midi !== midi) return;
@@ -218,7 +218,7 @@ engine.onPlanned((m) => {
 });
 
 /** Sing a demo song (after `ready`, e.g. audio startup, resolves; unless stopped meanwhile). */
-export async function playDemo(name: string, body: BodyName, ready?: () => Promise<void>): Promise<void> {
+export async function playDemo(name: string, body: BodyMix, ready?: () => Promise<void>): Promise<void> {
   const song = DEMO_SONGS.find((s) => s.name === name);
   if (!song) return;
   stopSinging();
@@ -232,7 +232,7 @@ export async function playDemo(name: string, body: BodyName, ready?: () => Promi
   if (token !== demoToken) return;
   const syl = lyricsToSyllables(song.lyrics);
   if (!syl.length) return;
-  const shift = song.octave[body] * 12;
+  const shift = song.octave[nearestBody(body)] * 12;
   const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));
   const t0 = 0.35;
   const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato });

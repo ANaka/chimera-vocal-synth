@@ -3,7 +3,7 @@
 //! the same keys everywhere, strings and labels exact, `speed`/`releaseHold`/`tag` exact, other
 //! numbers to 1e-9 relative (absolute floor 1e-9).
 mod common;
-use chimera::anatomy::human::{BODY_MALE, BodyName};
+use chimera::anatomy::human::BODY_MALE;
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
 use chimera::phonetics::Segment;
@@ -142,7 +142,7 @@ fn live_notes_match_typescript() {
                 legato += o.legato_from.is_some() as usize;
                 plan_note_on(&de(&n["syl"]), midi, &o)
             }
-            "off" => plan_note_off(&de(&n["syl"]), midi, n["body"].as_str().unwrap()),
+            "off" => plan_note_off(&de(&n["syl"]), midi, n["body"].as_str().unwrap().into()),
             "melisma" => plan_melisma(midi, &de::<MelismaOptions>(&n["opts"])),
             k => panic!("{k}"),
         };
@@ -168,15 +168,15 @@ fn beat_sounds_match_typescript() {
             let body = b["body"].as_str().unwrap();
             let o: BeatBuild = de(&b["o"]);
             let mut out = Vec::new();
-            (s.build)(body, &o, &mut out);
+            (s.build)(body.into(), &o, &mut out);
             cmp(&format!("sound {} {body} {}", s.id, b["o"]), &b["gestures"], &val(&out), &mut st);
         }
         for body in ["male", "female", "child"] {
-            cmp(&format!("leadIn {} {body}", s.id), &want["leadIn"][body], &json!(BeatPlayer::lead_in(s.id, body)), &mut st);
+            cmp(&format!("leadIn {} {body}", s.id), &want["leadIn"][body], &json!(BeatPlayer::lead_in(s.id, body.into())), &mut st);
         }
     }
     for body in ["male", "female", "child"] {
-        cmp(&format!("ready {body}"), &f["ready"][body], &val(&beat_ready(body)), &mut st);
+        cmp(&format!("ready {body}"), &f["ready"][body], &val(&beat_ready(body.into())), &mut st);
     }
     report("sounds", &st);
 }
@@ -207,7 +207,7 @@ fn run_player(ops: &[Value]) -> Vec<Value> {
             "tempo" => p.set_tempo(num(&o["bpm"]), num(&o["swing"])),
             "start" => p.start(num(&o["clock"])),
             "stop" => p.stop(),
-            "body" => p.body = BodyName::parse(o["body"].as_str().unwrap()),
+            "body" => p.body = o["body"].as_str().unwrap().into(),
             "rebase" => p.rebase(num(&o["delta"])),
             "rewind" => p.rewind(num(&o["clock"])),
             "stepAt" => out.push(json!(nums(&o["clocks"]).iter().map(|c| p.step_at(*c)).collect::<Vec<_>>())),
@@ -257,7 +257,7 @@ fn beatbox_bar_audio_matches_typescript() {
     chimera::phonetics::beatbox::init();
     let mut v = HumanVoice::new(fs, BODY_MALE, 2);
     v.set_source(&SourcePatch::f0(num(&a["f0"])));
-    v.set_articulation(&beat_ready("male"), None);
+    v.set_articulation(&beat_ready("male".into()), None);
     let mut p = BeatPlayer::new();
     p.set_steps(&parse_beat(a["text"].as_str().unwrap()));
     p.set_tempo(num(&a["bpm"]), num(&a["swing"]));

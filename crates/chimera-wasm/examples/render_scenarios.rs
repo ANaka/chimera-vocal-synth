@@ -25,13 +25,13 @@ fn render(s: &Value) -> Vec<f32> {
     let n = s["samples"].as_u64().unwrap() as usize;
     let h = engine_new(fs);
     unsafe {
-        let body = match s["body"].as_str().unwrap() {
-            "female" => 1,
-            "child" => 2,
-            _ => 0,
+        let (female, child) = match s["body"].as_str().unwrap() {
+            "female" => (1.0, 0.0),
+            "child" => (0.0, 1.0),
+            _ => (0.0, 0.0),
         };
-        if body != 0 {
-            engine_set_body(h, body);
+        if (female, child) != (0.0, 0.0) {
+            engine_set_body(h, female, child);
         }
         let mut ops: Vec<&Value> = s["ops"].as_array().unwrap().iter().collect();
         ops.sort_by_key(|o| o["at"].as_u64().unwrap());

@@ -215,6 +215,24 @@ impl ArticPatch {
     pub fn is_empty(&self) -> bool {
         self.values.iter().all(|x| x.is_none())
     }
+    /// Each key's weighted mean over the parts that have it (parts weighing 0 or less are left
+    /// out). Allocates nothing.
+    pub fn blend(parts: &[(f64, ArticPatch)]) -> ArticPatch {
+        let mut out = ArticPatch::default();
+        for i in 0..N_ARTIC {
+            let (mut sum, mut wsum) = (0.0, 0.0);
+            for (w, p) in parts {
+                if let (true, Some(x)) = (*w > 0.0, p.values[i]) {
+                    sum += w * x;
+                    wsum += w;
+                }
+            }
+            if wsum > 0.0 {
+                out.values[i] = Some(sum / wsum);
+            }
+        }
+        out
+    }
 }
 
 impl Serialize for ArticPatch {
@@ -290,6 +308,112 @@ impl BodyName {
             "child" => BodyName::Child,
             _ => BodyName::Male,
         }
+    }
+}
+
+/// A body anywhere between the three calibrated ones: `female` runs from the adult male (0) to
+/// the adult female (1), `child` from adult (0) to child (1). The child has no female axis, so
+/// the weights are male (1−c)(1−f), female (1−c)·f, child c. Everything body-dependent (the
+/// anatomy, the calibrated phoneme targets, the default pitch) blends with these weights; at a
+/// preset it is exactly that preset.
+///
+/// Deserializes from a preset name (`"female"`) or `{ "female": f, "child": c }`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct BodyMix {
+    pub female: f64,
+    pub child: f64,
+}
+
+impl BodyMix {
+    pub const MALE: BodyMix = BodyMix { female: 0.0, child: 0.0 };
+    pub const FEMALE: BodyMix = BodyMix { female: 1.0, child: 0.0 };
+    pub const CHILD: BodyMix = BodyMix { female: 0.0, child: 1.0 };
+
+    /// Clamped to 0..1 (non-finite values count as 0).
+    pub fn new(female: f64, child: f64) -> BodyMix {
+        let c = |x: f64| if x.is_finite() { clamp(x, 0.0, 1.0) } else { 0.0 };
+        BodyMix { female: c(female), child: c(child) }
+    }
+
+    /// Weights of male, female and child (they sum to 1).
+    pub fn weights(self) -> [(BodyName, f64); 3] {
+        let BodyMix { female: f, child: c } = BodyMix::new(self.female, self.child);
+        [(BodyName::Male, (1.0 - c) * (1.0 - f)), (BodyName::Female, (1.0 - c) * f), (BodyName::Child, c)]
+    }
+
+    /// The preset this is exactly, if any.
+    pub fn preset(self) -> Option<BodyName> {
+        self.weights().iter().find(|(_, w)| *w == 1.0).map(|(b, _)| *b)
+    }
+
+    /// The preset with the largest weight.
+    pub fn nearest(self) -> BodyName {
+        let w = self.weights();
+        let mut best = w[0];
+        for x in &w[1..] {
+            if x.1 > best.1 {
+                best = *x;
+            }
+        }
+        best.0
+    }
+
+    /// `f` of each preset, blended by weight (exactly `f(preset)` at a preset).
+    pub fn blend(self, f: impl Fn(BodyName) -> f64) -> f64 {
+        if let Some(b) = self.preset() {
+            return f(b);
+        }
+        self.weights().iter().fold(0.0, |acc, (b, w)| acc + w * f(*b))
+    }
+
+    /// The blended anatomy (named after the nearest preset).
+    pub fn body(self) -> HumanBody {
+        if let Some(b) = self.preset() {
+            return b.body();
+        }
+        HumanBody {
+            name: self.nearest().body().name,
+            scale: self.blend(|b| b.body().scale),
+            pharynx: self.blend(|b| b.body().pharynx),
+            tongue_radius: self.blend(|b| b.body().tongue_radius),
+            lip_width: self.blend(|b| b.body().lip_width),
+        }
+    }
+}
+
+impl From<BodyName> for BodyMix {
+    fn from(b: BodyName) -> BodyMix {
+        match b {
+            BodyName::Male => BodyMix::MALE,
+            BodyName::Female => BodyMix::FEMALE,
+            BodyName::Child => BodyMix::CHILD,
+        }
+    }
+}
+
+impl From<&str> for BodyMix {
+    fn from(s: &str) -> BodyMix {
+        BodyName::parse(s).into()
+    }
+}
+
+impl<'de> Deserialize<'de> for BodyMix {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Name(String),
+            Mix {
+                #[serde(default)]
+                female: f64,
+                #[serde(default)]
+                child: f64,
+            },
+        }
+        Ok(match Wire::deserialize(d)? {
+            Wire::Name(s) => BodyMix::from(s.as_str()),
+            Wire::Mix { female, child } => BodyMix::new(female, child),
+        })
     }
 }
 

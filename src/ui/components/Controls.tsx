@@ -44,7 +44,7 @@ export function Toggle(props: { label: string; checked: boolean; onChange: (v: b
   );
 }
 
-export function Segmented<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+export function Segmented<T extends string>(props: { value: T | null; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
   return (
     <div className="segmented" role="radiogroup" aria-label={props.label}>
       {props.options.map((o) => (

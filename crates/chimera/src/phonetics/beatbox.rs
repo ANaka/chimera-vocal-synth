@@ -17,7 +17,7 @@
 
 use super::inventory::phoneme;
 use super::planner::{oral_gestures_into, vowel_artic};
-use crate::anatomy::human::{ArticKey, ArticPatch};
+use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix};
 use crate::control::score::{ControlKey, Gesture, Label, Targets};
 use crate::math::{js_max, js_min};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ pub fn init() {
 }
 
 /// A beatboxer's ready posture: jaw nearly closed, lips just apart, tongue relaxed.
-pub fn beat_ready(body: &str) -> ArticPatch {
+pub fn beat_ready(body: BodyMix) -> ArticPatch {
     // with the jaw nearly closed the tongue rests a little higher than in a spoken schwa; the
     // velar hits need it there: from lower, the release peels open and loses its punch
     let schwa = vowel_artic("ə", body).unwrap_or_default();
@@ -69,7 +69,7 @@ pub struct BeatBuild {
 }
 
 /// Builds a sound's gestures (acoustic hit at t = 0), appending them to `out`.
-pub type BuildFn = fn(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>);
+pub type BuildFn = fn(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>);
 
 /// The most gestures any sound builds (a `Vec` with this much room never reallocates).
 pub const MAX_SOUND_GESTURES: usize = 16;
@@ -92,7 +92,7 @@ pub struct BeatSound {
 
 impl BeatSound {
     /// `build` into a new `Vec` (allocates; for tools and tests).
-    pub fn build_vec(&self, body: &str, o: &BeatBuild) -> Vec<Gesture> {
+    pub fn build_vec(&self, body: BodyMix, o: &BeatBuild) -> Vec<Gesture> {
         let mut out = Vec::with_capacity(MAX_SOUND_GESTURES);
         (self.build)(body, o, &mut out);
         out
@@ -107,7 +107,7 @@ impl core::fmt::Debug for BeatSound {
 
 /// The consonant's oral gestures with `extra` targets over its own; returns where they start in `out`.
 #[allow(clippy::too_many_arguments)]
-fn oral(body: &str, ipa: &str, a: f64, b: f64, speed: f64, label: &str, extra: &[(ArticKey, f64)], out: &mut Vec<Gesture>) -> usize {
+fn oral(body: BodyMix, ipa: &str, a: f64, b: f64, speed: f64, label: &str, extra: &[(ArticKey, f64)], out: &mut Vec<Gesture>) -> usize {
     let start = out.len();
     let Some(d) = phoneme(ipa, body) else { return start };
     let mut tg = d.targets;
@@ -170,13 +170,13 @@ fn blow(t0: f64, t1: f64, level: f64, abduction: f64, label: &str, tail: f64, ou
 
 use ArticKey::{Jaw, LipAp, TbY};
 
-fn kick(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn kick(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let s = oral(body, "p", -0.075, 0.0, 2.0, "B", &[(Jaw, 0.3)], out);
     snap(&mut out[s..], 3.5, 0.01);
     ejective(-0.075, o.accent, "B", out);
 }
 
-fn hat(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn hat(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let s = oral(body, "t", -0.05, 0.0, 2.0, "t", &[(Jaw, 0.3)], out);
     snap(&mut out[s..], 3.5, 0.01);
     let s = oral(body, "s", 0.012, 0.03, 1.6, "t", &[], out);
@@ -184,7 +184,7 @@ fn hat(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
     blow(-0.03, 0.026, 1.25 * o.accent, 0.36, "t", 0.02, out);
 }
 
-fn open_hat(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn open_hat(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let end = js_max(0.09, js_min(0.26, o.len * 1.6));
     let s = oral(body, "t", -0.05, 0.0, 2.0, "tss", &[(Jaw, 0.3)], out);
     snap(&mut out[s..], 3.5, 0.01);
@@ -193,7 +193,7 @@ fn open_hat(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
     blow(-0.03, end, 1.2 * o.accent, 0.4, "tss", 0.09, out);
 }
 
-fn snare(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn snare(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let s = oral(body, "p", -0.06, 0.0, 2.0, "Pf", &[], out);
     snap(&mut out[s..], 3.5, 0.01);
     let s = oral(body, "f", 0.018, 0.08, 1.6, "Pf", &[], out);
@@ -201,13 +201,13 @@ fn snare(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
     blow(-0.045, 0.075, 1.7 * o.accent, 0.45, "Pf", 0.04, out);
 }
 
-fn rimshot(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn rimshot(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let s = oral(body, "k", -0.08, 0.0, 2.0, "K", &[(Jaw, 0.35)], out);
     snap(&mut out[s..], 4.0, 0.008);
     ejective(-0.08, o.accent, "K", out);
 }
 
-fn inward_snare(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn inward_snare(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let s = oral(body, "k", -0.06, 0.0, 2.0, "^K", &[(Jaw, 0.35)], out);
     snap(&mut out[s..], 4.0, 0.008);
     let s = oral(body, "x", 0.012, 0.085, 1.4, "^K", &[(TbY, 7.35)], out);
@@ -217,7 +217,7 @@ fn inward_snare(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
     out.push(g(-0.035, 0.085, 0.015, 0.05, 2.0, tg(&[(ControlKey::BREATH, -1.7 * o.accent)]), "^K", None));
 }
 
-fn tongue_click(body: &str, _o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn tongue_click(body: BodyMix, _o: &BeatBuild, out: &mut Vec<Gesture>) {
     // the tip seals without the alveolar's fronted tongue body (that would close the pocket)
     let s = oral(body, "t", -0.12, 0.0, 2.0, "!", &[], out);
     snap(&mut out[s..], 3.5, 0.01);
@@ -234,7 +234,7 @@ fn tongue_click(body: &str, _o: &BeatBuild, out: &mut Vec<Gesture>) {
     out.push(g(-0.03, 0.006, 0.04, 0.03, 40.0, tg(&[(a(ArticKey::Dorsum), 1.0)]), "!", Some(2.0)));
 }
 
-fn lip_pop(body: &str, _o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn lip_pop(body: BodyMix, _o: &BeatBuild, out: &mut Vec<Gesture>) {
     // a light seal (pressing the lips squeezes the pocket before the suction starts)
     let s = oral(body, "p", -0.12, 0.0, 2.0, "P!", &[(LipAp, -0.08)], out);
     snap(&mut out[s..], 5.0, 0.006);
@@ -243,7 +243,7 @@ fn lip_pop(body: &str, _o: &BeatBuild, out: &mut Vec<Gesture>) {
     out.push(g(-0.07, 0.004, 0.04, 0.05, 40.0, tg(&[(a(Jaw), 1.6), (a(ArticKey::Dorsum), 1.0)]), "P!", Some(2.0)));
 }
 
-fn crash(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn crash(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let end = js_max(0.14, js_min(0.34, o.len * 2.0));
     // the "ch": the back of the tongue lingers by the velum after the burst ([x]) while the
     // blade rises into the long rounded [ʃ]
@@ -256,7 +256,7 @@ fn crash(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
     blow(-0.035, end, 1.75 * o.accent, 0.45, "kch", 0.14, out);
 }
 
-fn hum(body: &str, o: &BeatBuild, out: &mut Vec<Gesture>) {
+fn hum(body: BodyMix, o: &BeatBuild, out: &mut Vec<Gesture>) {
     let end = js_max(0.06, o.len * 0.92);
     // lips shut before the voice starts, so the note begins as a hum rather than a vowel;
     // the folds stay apart (breathing) while the velum drops into the sealed mouth, so the

@@ -136,6 +136,9 @@ branching (nasal tract, sinuses, piriform fossae, two bronchi, vocal sacs, OEC).
 * Calibration: optimise vowel targets against reference formants (Hillenbrand 1995 male
   means, plus cardinal vowels for non-English) with the chain-matrix model. Female/child
   via anatomical scaling (shorter pharynx proportion), not formant warping.
+* The body is continuous (`BodyMix`: a female axis and a child axis): anatomy, calibrated
+  phoneme targets and default pitch blend the three calibrated bodies by weight. A body
+  change rebuilds the airway (its node counts follow the tract length).
 * Other mammals/reptiles: same topology, species parameters (snout length, palate
   shape, larynx position/descent, nasal length, lip shape, trunk = long nasal tube,
   vocal sac = Helmholtz side branch). Birds: separate topology (syrinx/trachea/OEC/beak,
