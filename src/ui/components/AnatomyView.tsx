@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AnatomyRenderer, type HandleId, type Slot } from "../render/anatomy.ts";
+import { AnatomyRenderer, type FaceView, type HandleId, type Slot } from "../render/anatomy.ts";
 import { Glow } from "../render/vector.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { sameBody } from "../body.ts";
@@ -16,7 +16,7 @@ export type SlotsFn = (m: VoiceModel, a: HumanArtic, f: HumanFrame, formants: nu
 export type InfoFn = (m: VoiceModel, f: HumanFrame, tele: TelemetryMessage | null) => string[];
 
 /** drawn over the face each frame, before the glow (Sing and Speak write the words at the mouth) */
-export type OverlayFn = (ctx: CanvasRenderingContext2D, r: AnatomyRenderer, m: VoiceModel, f: HumanFrame, a: HumanArtic, size: { w: number; h: number; dt: number }) => void;
+export type OverlayFn = (ctx: CanvasRenderingContext2D, r: FaceView, m: VoiceModel, f: HumanFrame, a: HumanArtic, size: { w: number; h: number; dt: number }) => void;
 
 /** the tract's length and mouth opening, then the live pitch and lungs */
 export const tractInfo: InfoFn = (_m, f, tele) => {

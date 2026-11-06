@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useStore } from "./store.ts";
 import { engine } from "../audio/AudioEngine.ts";
 import { AnatomyView } from "./components/AnatomyView.tsx";
@@ -21,6 +21,9 @@ import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 import { BodyPad } from "./components/BodyPad.tsx";
 import { bodyLabel, presetOf, PRESETS } from "./body.ts";
+
+// three.js only loads when the 3D view is first shown
+const AnatomyView3D = lazy(() => import("./components/AnatomyView3D.tsx").then((m) => ({ default: m.AnatomyView3D })));
 
 function TopBar() {
   const started = useStore((s) => s.started);
@@ -95,6 +98,7 @@ function ViewToggles() {
   const bestiary = useStore((s) => s.mode === "bestiary");
   return (
     <div className="view-toggles">
+      {!bestiary && <Toggle label="3D" checked={view.threeD} onChange={(v) => setView({ threeD: v })} />}
       <Toggle label="Sound pressure" checked={view.pressure} onChange={(v) => setView({ pressure: v })} />
       {!bestiary && <Toggle label="Airflow" checked={view.particles} onChange={(v) => setView({ particles: v })} />}
       <Toggle label={bestiary ? "Labels" : "Measurements"} checked={view.calipers} onChange={(v) => setView({ calipers: v })} />
@@ -147,17 +151,21 @@ function StartPrompt() {
 function LeftScreen() {
   const mode = useStore((s) => s.mode);
   const body = useStore((s) => s.body);
+  const threeD = useStore((s) => s.view.threeD);
   const bestiary = mode === "bestiary";
+  const Face = threeD ? AnatomyView3D : AnatomyView;
   return (
     <Screen
       className="left"
       focus
       title={bestiary ? "Creature" : "Vocal tract"}
-      sub={bestiary ? "Airway / live" : `${bodyLabel(body)} / midsagittal`}
+      sub={bestiary ? "Airway / live" : `${bodyLabel(body)} / ${threeD ? "3D" : "midsagittal"}`}
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >
-      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} overlay={speechWords} /> : mode === "sing" ? <AnatomyView info={singInfo} overlay={singWords} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
+      <Suspense fallback={null}>
+        {bestiary ? <CreatureView /> : mode === "speak" ? <Face slots={speechSlots} info={speechInfo} overlay={speechWords} /> : mode === "sing" ? <Face info={singInfo} overlay={singWords} /> : mode === "beatbox" ? <Face slots={beatSlots} info={beatInfo} showFormants={false} /> : <Face />}
+      </Suspense>
       {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
     </Screen>
