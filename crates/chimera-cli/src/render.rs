@@ -338,8 +338,72 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?}`.
+/// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
+/// melody into phrases planned separately on one voice. `render notes <in.json> <out> [body]`
+pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
+    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child]")?;
+    let out_name = wav_name(arg(a, 1, "out/notes"));
+    let body_name = arg(a, 2, "male");
+    let b = body(body_name)?;
+    let text = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
+    let j: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{input}: {e}"))?;
+    let bpm = j["bpm"].as_f64().ok_or("bpm missing")?;
+    let vibrato = j["vibrato"].as_f64().unwrap_or(35.0);
+    let raw: Vec<[f64; 2]> = serde_json::from_value(j["notes"].clone()).map_err(|e| format!("notes: {e}"))?;
+    let g = g2p()?;
+    let syl = lyrics_to_syllables(j["lyrics"].as_str().ok_or("lyrics missing")?, &g);
+    let sounding = raw.iter().filter(|n| n[0] > 0.0).count();
+    if syl.len() != sounding {
+        return Err(format!("{} syllables for {sounding} notes: {}", syl.len(),
+            syl.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ")));
+    }
+    let t0 = j["t0"].as_f64().unwrap_or(0.3);
+    let beat = 60.0 / bpm;
+    let mut v = HumanVoice::new(FS, b, 2);
+    let first = raw.iter().find(|n| n[0] > 0.0).ok_or("no notes")?;
+    v.set_source(&SourcePatch {
+        f0: Some(midi_to_hz(first[0])),
+        voiced: Some(true),
+        pressure: Some(9.0),
+        tension: Some(0.55),
+        ..Default::default()
+    });
+    let (mut t, mut k, mut end) = (t0, 0usize, 0.0f64);
+    let mut phrase: Vec<SungNote> = Vec::new();
+    let mut start = t;
+    let flush = |phrase: &mut Vec<SungNote>, start: f64, v: &mut HumanVoice, end: &mut f64| {
+        if phrase.is_empty() {
+            return;
+        }
+        let plan = plan_song(phrase, &SongOptions { body: body_name.into(), bpm, t0: start, vibrato });
+        v.schedule(&plan.gestures);
+        *end = js_max(*end, plan.end);
+        phrase.clear();
+    };
+    for n in &raw {
+        if n[0] > 0.0 {
+            if phrase.is_empty() {
+                start = t;
+            }
+            phrase.push(SungNote { midi: n[0], beats: n[1], syl: syl[k].clone() });
+            k += 1;
+        } else {
+            flush(&mut phrase, start, &mut v, &mut end);
+        }
+        t += n[1] * beat;
+    }
+    flush(&mut phrase, start, &mut v, &mut end);
+    let n = js_round(FS * (end + 0.4)) as usize;
+    let mut out = vec![0f32; n];
+    render_blocks(&mut v, &mut out);
+    ctx.write_wav(&out_name, &out)?;
+    println!("{out_name}: {} s, peak {}, {} notes", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), sounding);
+    Ok(())
+}
+
 /// The beatbox kit, each sound alone, and a preset pattern through the sequencer.
-/// `render beatbox [outdir] [preset name] [body]`
+/// `render beatbox [outdir] [preset name | pattern] [body] [bpm] [bars]`
 pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let out_dir = arg(a, 0, "out/beatbox");
     let preset_name = arg(a, 1, "Boots and cats");
@@ -418,17 +482,28 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     ctx.write_wav(&format!("{out_dir}/kit.wav"), &strip)?;
 
     // ---- a pattern, two bars, through the sequencer exactly as the worklet ran it
+    // a preset by name, or a pattern in beat notation (with optional bpm and bar count)
     let preset = BEAT_PRESETS
         .iter()
-        .find(|p| p.name.to_lowercase() == preset_name.to_lowercase())
-        .unwrap_or(&BEAT_PRESETS[0]);
+        .find(|p| p.name.to_lowercase() == preset_name.to_lowercase());
+    let (name, text, mut bpm, swing) = match preset {
+        Some(p) => (p.name, p.text, p.bpm, p.swing),
+        None if parse_beat(preset_name).iter().any(Option::is_some) => ("pattern", preset_name, 100.0, 0.0),
+        None => (BEAT_PRESETS[0].name, BEAT_PRESETS[0].text, BEAT_PRESETS[0].bpm, BEAT_PRESETS[0].swing),
+    };
+    if let Some(b) = a.get(3) {
+        bpm = b.parse().map_err(|_| format!("bad bpm {b:?}"))?;
+    }
+    let bars: f64 = match a.get(4) {
+        Some(n) => n.parse().map_err(|_| format!("bad bar count {n:?}"))?,
+        None => 2.0,
+    };
     let mut v = voice();
     let mut seq = BeatPlayer::new();
     seq.body = body_name.into();
-    seq.set_steps(&parse_beat(preset.text));
-    seq.set_tempo(preset.bpm, preset.swing);
+    seq.set_steps(&parse_beat(text));
+    seq.set_tempo(bpm, swing);
     seq.start(v.clock);
-    let bars = 2.0;
     let total = js_round(
         FS * (BeatPlayer::HORIZON + bars * seq.steps().len() as f64 * seq.step_dur() + 0.3),
     ) as usize;
@@ -438,11 +513,11 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         seq.tick(clock, &mut |gs: &[Gesture]| v.schedule(gs));
         v.render(block);
     }
-    let file = format!("{out_dir}/{}.wav", slug(preset.name));
+    let file = format!("{out_dir}/{}.wav", slug(name));
     ctx.write_wav(&file, &out)?;
     println!(
         "pattern \"{}\": {} s, peak {} -> {file}",
-        preset.name,
+        name,
         fixed(total as f64 / FS, 2),
         fixed(peak(&out), 3)
     );

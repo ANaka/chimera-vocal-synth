@@ -10,7 +10,7 @@ use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, phoneme};
 use super::{Intonation, Plan, PlannedSegment, Segment};
 use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
 use crate::control::score::{ControlKey, Gesture, Targets};
-use crate::math::{js_max, js_round};
+use crate::math::{js_max, js_min, js_round};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -131,6 +131,10 @@ pub struct PlanOptions {
     /// the last segment is held open-ended (a sung note): no end-of-breath release
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_end: Option<bool>,
+    /// a sung phrase (`plan_song`): consonants given a pitch hold it, and pitch ramps shrink to
+    /// fit short notes. Speech and live notes leave it unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sung: Option<bool>,
 }
 
 /// JS truthiness of an optional number (`if (s.f0)`: 0 and NaN are false).
@@ -306,6 +310,7 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
         }
     }
     let open_end = o.open_end == Some(true);
+    let sung = o.sung == Some(true);
     // ---- breath: on through the utterance
     gestures.push(Gesture::new(o.t0 + 0.04, end, 0.04, if open_end { 0.07 } else { 0.05 }, 1.0, one(ControlKey::BREATH, 1.0)).label("breath"));
     // ---- end of the breath group: the folds part as the breath stops, so a final obstruent is
@@ -364,9 +369,26 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
                 target = f0 * 0.82;
             }
         }
-        gestures.push(Gesture::new(t0, if has_f0 { t1 } else { hold }, 0.06, 0.06, if has_f0 { 6.0 } else { 1.0 }, one(ControlKey::F0, target)).label("pitch"));
+        let r = if has_f0 && sung { pitch_ramp(t1 - t0) } else { 0.06 };
+        gestures.push(Gesture::new(t0, if has_f0 { t1 } else { hold }, r, r, if has_f0 { 6.0 } else { 1.0 }, one(ControlKey::F0, target)).label("pitch"));
+    }
+    // sung: a consonant given its note's pitch holds it, so the pitch moves during an onset
+    // consonant and has arrived when the vowel starts
+    for (i, s) in segs.iter().enumerate() {
+        if sung && s.vowel.is_none() && truthy(s.f0) {
+            let Span { t0, t1 } = times[i];
+            let r = pitch_ramp(t1 - t0);
+            gestures.push(Gesture::new(t0, t1, r, r, 6.0, one(ControlKey::F0, s.f0.unwrap())).label("pitch"));
+        }
     }
     Plan { gestures, segments: planned, end }
+}
+
+/// Ramps of a given pitch (a sung note's) on a segment `dur` long: 60 ms, but at most half the
+/// segment. A ramp-in starts before the segment, so in a fast run a full 60 ms would pull the
+/// previous vowel off its note for most of its length.
+fn pitch_ramp(dur: f64) -> f64 {
+    js_min(0.06, js_max(0.008, 0.5 * dur))
 }
 
 /// Oral gestures for one consonant constriction held acoustically from `a` to `b` (closure to

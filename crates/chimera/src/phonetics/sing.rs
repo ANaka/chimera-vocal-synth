@@ -31,6 +31,38 @@ fn consonants(segs: &[Segment], body: BodyMix, k: f64) -> Vec<Segment> {
     segs.iter().map(|c| Segment { ipa: c.ipa.clone(), dur: Some(cdur(&c.ipa, body, k)), ..Default::default() }).collect()
 }
 
+/// Sung consonants at their note's pitch: an onset consonant moves the pitch to the new note
+/// before its vowel (as singers do), a coda holds the old one.
+fn consonants_at(segs: &[Segment], body: BodyMix, k: f64, hz: f64) -> Vec<Segment> {
+    let mut out = consonants(segs, body, k);
+    for c in out.iter_mut() {
+        c.f0 = Some(hz);
+    }
+    out
+}
+
+/// a sung vowel keeps at least this long when a short note squeezes its consonants (s)
+const MIN_VOWEL: f64 = 0.05;
+/// a squeezed consonant keeps at least this long (s); a flap is 16 ms
+const MIN_CONSONANT: f64 = 0.012;
+
+/// Fit the consonants between a vowel and the next one into `span`, the time from the vowel's
+/// beat to the next vowel's (or to the end of a phrase's last note): when they leave the vowel
+/// less than [`MIN_VOWEL`], they shrink in proportion (each down to [`MIN_CONSONANT`]), so the
+/// next vowel still lands on its beat and a fast run doesn't drift later note by note.
+fn fit(groups: [&mut [Segment]; 2], span: f64) {
+    let [a, b] = groups;
+    let cons = total(a) + total(b);
+    let room = span - MIN_VOWEL;
+    if cons <= room || cons <= 0.0 {
+        return;
+    }
+    let scale = js_max(0.0, room) / cons;
+    for c in a.iter_mut().chain(b.iter_mut()) {
+        c.dur = Some(js_max(MIN_CONSONANT, c.dur.unwrap_or(0.0) * scale));
+    }
+}
+
 fn total(segs: &[Segment]) -> f64 {
     segs.iter().fold(0.0, |s, c| s + c.dur.unwrap_or(0.0))
 }
@@ -85,17 +117,30 @@ pub fn plan_song(notes: &[SungNote], o: &SongOptions) -> Plan {
         }
         let mut segs: Vec<Segment> = Vec::new();
         let mut vowel_spans: Vec<(f64, f64)> = Vec::new();
-        let onset_of = |k: usize| if melisma(&notes[k].syl) { Vec::new() } else { consonants(&notes[k].syl.onset, o.body, 0.8) };
+        // each note's onset and coda consonants, at the note's pitch (a coda at the pitch of the
+        // note whose syllable it ends; a melisma has neither)
+        let hz_of = |k: usize| midi_to_hz(notes[k].midi);
+        let mut onsets: Vec<Vec<Segment>> = (i..=j).map(|k| if melisma(&notes[k].syl) { Vec::new() } else { consonants_at(&notes[k].syl.onset, o.body, 0.8, hz_of(k)) }).collect();
+        let mut codas: Vec<Vec<Segment>> = (i..=j)
+            .map(|k| if k < j && melisma(&notes[k + 1].syl) { Vec::new() } else { consonants_at(&last_of_chain(notes, k).coda, o.body, 0.8, hz_of(k)) })
+            .collect();
+        // the phrase's last vowel leaves a short breath before the next phrase
+        let last_end = times[j] + notes[j].beats * beat - js_min(0.12, 0.3 * notes[j].beats * beat);
+        for k in i..=j {
+            let (span, next) = if k < j { (times[k + 1] - times[k], &mut onsets[k + 1 - i][..]) } else { (last_end - times[k], &mut [][..]) };
+            fit([&mut codas[k - i][..], next], span);
+        }
+        let first_onset = total(&onsets[0]);
         for k in i..=j {
             let n = &notes[k];
-            let hz = midi_to_hz(n.midi);
+            let hz = hz_of(k);
             let next_melisma = k < j && melisma(&notes[k + 1].syl);
-            let coda = if next_melisma { Vec::new() } else { consonants(&last_of_chain(notes, k).coda, o.body, 0.8) };
-            let onset = onset_of(k);
-            // vowel from this note's beat to the next note's onset (less this note's coda);
-            // the phrase's last vowel leaves a short breath before the next phrase
-            let note_end = if k < j { times[k + 1] - total(&onset_of(k + 1)) } else { times[j] + notes[j].beats * beat - js_min(0.12, 0.3 * notes[j].beats * beat) };
-            let vdur = js_max(0.05, note_end - times[k] - total(&coda));
+            let coda = std::mem::take(&mut codas[k - i]);
+            let onset = std::mem::take(&mut onsets[k - i]);
+            // vowel from this note's beat to the next note's onset (less this note's coda)
+            let note_end = if k < j { times[k + 1] - total(&onsets[k + 1 - i]) } else { last_end };
+            // only consonants squeezed to their floor can leave less than MIN_VOWEL
+            let vdur = js_max(0.02, note_end - times[k] - total(&coda));
             segs.extend(onset);
             let parts = diphthong_parts(&n.syl.nucleus.ipa);
             match parts {
@@ -113,7 +158,7 @@ pub fn plan_song(notes: &[SungNote], o: &SongOptions) -> Plan {
         }
         if !segs.is_empty() {
             // the planner lays segments out from t0 + 0.06: start so the first vowel lands on its beat
-            let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: times[i] - total(&onset_of(i)) - 0.06, f0: Some(midi_to_hz(notes[i].midi)), intonation: Some(Intonation::Flat), ..Default::default() });
+            let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: times[i] - first_onset - 0.06, f0: Some(hz_of(i)), intonation: Some(Intonation::Flat), sung: Some(true), ..Default::default() });
             gestures.extend_from_slice(&plan.gestures);
             segments.extend(plan.segments);
             for (a, b) in vowel_spans {
