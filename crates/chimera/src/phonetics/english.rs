@@ -88,6 +88,7 @@ pub struct Phrase {
     pub intonation: Intonation,
     /// pause after the phrase (s)
     pub pause: f64,
+    /// the words said, one per word end in `segments`
     pub words: Vec<String>,
 }
 
@@ -139,11 +140,15 @@ impl EnglishG2P {
                 return;
             }
             let mut segs: Vec<Segment> = Vec::new();
+            // the words said: a token with no sound ("--", a lone apostrophe) is left out, so
+            // the n-th word ends at the n-th word end
+            let mut said: Vec<String> = Vec::new();
             for w in words.iter() {
                 let mut ws = self.word(w, true);
                 let Some(last) = ws.last_mut() else { continue };
                 last.word_end = Some(true);
                 segs.append(&mut ws);
+                said.push(w.clone());
             }
             apply_allophones(&mut segs);
             let q = delim.contains('?');
@@ -154,9 +159,9 @@ impl EnglishG2P {
             } else {
                 0.3
             };
-            let words = std::mem::take(words);
+            words.clear();
             if !segs.is_empty() {
-                phrases.push(Phrase { segments: segs, intonation: if q { Intonation::Question } else { Intonation::Statement }, pause, words });
+                phrases.push(Phrase { segments: segs, intonation: if q { Intonation::Question } else { Intonation::Statement }, pause, words: said });
             }
         };
         for part in &parts {

@@ -103,7 +103,8 @@ export function sungNow(): { key: unknown; text: string } | null {
   if (d) {
     if (d.offset === null) return null;
     const t = now() - d.offset;
-    const k = d.times.findIndex(([a, b]) => t >= a && t < b - 0.02);
+    // notes follow one another without a gap, so a melisma's syllable stays put
+    const k = d.times.findIndex(([a, b]) => t >= a && t < b);
     return k < 0 ? null : { key: `${d.id}:${d.parent[k]}`, text: d.shown[k] };
   }
   return sounding ? { key: sounding, text: written(sounding.syl) } : null;

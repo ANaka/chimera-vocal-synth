@@ -15,17 +15,34 @@ export interface MouthWord {
 /** how long a word takes to fly off (s) */
 const FADE = 0.45;
 
+export interface Trail {
+  entries: { word: MouthWord; left: number | null }[];
+}
+
+/**
+ * The trail at `clock` given the word sounding now: a new key starts a new entry and sends the
+ * last one off; the same key coming back while its entry is still flying off brings it back
+ * (a brief gap in what is being said is not a new word).
+ */
+export function advanceTrail(t: Trail, word: MouthWord | null, clock: number): void {
+  const e = t.entries;
+  const top = e[e.length - 1];
+  if (top && word && top.word.key === word.key) top.left = null;
+  else {
+    if (top && top.left === null) top.left = clock;
+    if (word) e.push({ word, left: null });
+  }
+  while (e.length && (e.length > 8 || (e[0].left !== null && clock - e[0].left > FADE))) e.shift();
+}
+
 /** An overlay writing `now()`'s word at the mouth in `color`; each call keeps its own trail. */
 export function mouthWords(now: () => MouthWord | null, color: string): OverlayFn {
-  const trail: { word: MouthWord; left: number | null }[] = [];
+  const t: Trail = { entries: [] };
+  const trail = t.entries;
   let clock = 0;
   return (ctx, r, m, f, a, { w, dt }) => {
     clock += dt;
-    const word = now();
-    const top = trail[trail.length - 1];
-    if (top && top.left === null && top.word.key !== word?.key) top.left = clock;
-    if (word && top?.word.key !== word.key) trail.push({ word, left: null });
-    while (trail.length && (trail.length > 8 || (trail[0].left !== null && clock - trail[0].left > FADE))) trail.shift();
+    advanceTrail(t, now(), clock);
     if (!trail.length) return;
     const lips = r.handles(m, f, a).find((h) => h.id === "lips");
     if (!lips) return;
