@@ -403,7 +403,7 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
 }
 
 /// The beatbox kit, each sound alone, and a preset pattern through the sequencer.
-/// `render beatbox [outdir] [preset name] [body]`
+/// `render beatbox [outdir] [preset name | pattern] [body] [bpm] [bars]`
 pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let out_dir = arg(a, 0, "out/beatbox");
     let preset_name = arg(a, 1, "Boots and cats");
@@ -482,17 +482,28 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     ctx.write_wav(&format!("{out_dir}/kit.wav"), &strip)?;
 
     // ---- a pattern, two bars, through the sequencer exactly as the worklet ran it
+    // a preset by name, or a pattern in beat notation (with optional bpm and bar count)
     let preset = BEAT_PRESETS
         .iter()
-        .find(|p| p.name.to_lowercase() == preset_name.to_lowercase())
-        .unwrap_or(&BEAT_PRESETS[0]);
+        .find(|p| p.name.to_lowercase() == preset_name.to_lowercase());
+    let (name, text, mut bpm, swing) = match preset {
+        Some(p) => (p.name, p.text, p.bpm, p.swing),
+        None if parse_beat(preset_name).iter().any(Option::is_some) => ("pattern", preset_name, 100.0, 0.0),
+        None => (BEAT_PRESETS[0].name, BEAT_PRESETS[0].text, BEAT_PRESETS[0].bpm, BEAT_PRESETS[0].swing),
+    };
+    if let Some(b) = a.get(3) {
+        bpm = b.parse().map_err(|_| format!("bad bpm {b:?}"))?;
+    }
+    let bars: f64 = match a.get(4) {
+        Some(n) => n.parse().map_err(|_| format!("bad bar count {n:?}"))?,
+        None => 2.0,
+    };
     let mut v = voice();
     let mut seq = BeatPlayer::new();
     seq.body = body_name.into();
-    seq.set_steps(&parse_beat(preset.text));
-    seq.set_tempo(preset.bpm, preset.swing);
+    seq.set_steps(&parse_beat(text));
+    seq.set_tempo(bpm, swing);
     seq.start(v.clock);
-    let bars = 2.0;
     let total = js_round(
         FS * (BeatPlayer::HORIZON + bars * seq.steps().len() as f64 * seq.step_dur() + 0.3),
     ) as usize;
@@ -502,11 +513,11 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         seq.tick(clock, &mut |gs: &[Gesture]| v.schedule(gs));
         v.render(block);
     }
-    let file = format!("{out_dir}/{}.wav", slug(preset.name));
+    let file = format!("{out_dir}/{}.wav", slug(name));
     ctx.write_wav(&file, &out)?;
     println!(
         "pattern \"{}\": {} s, peak {} -> {file}",
-        preset.name,
+        name,
         fixed(total as f64 / FS, 2),
         fixed(peak(&out), 3)
     );
