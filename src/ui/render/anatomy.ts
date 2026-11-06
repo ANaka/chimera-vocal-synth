@@ -70,7 +70,7 @@ interface Geometry {
   brain: Vec[];
   sulcus: Vec[];
   eye: Vec[];
-  lens: Vec[];
+  eyeC: Vec;
   vertebrae: Vec[][];
   cords: Vec[][];
   nasal: Vec[];
@@ -108,6 +108,8 @@ export class AnatomyRenderer {
   private echoes: Echo[] = [];
   private clock = 0;
   private lastEcho = -1;
+  /** where the eye looks (pitch up +, yaw out of the plane), easing toward a target picked now and then */
+  private gaze = { pitch: 0, yaw: 0, toPitch: 0, toYaw: 0, next: 2 };
 
   constructor() {
     for (let i = 0; i < 170; i++) this.particles.push({ s: Math.random() * 17, u: Math.random() * 2 - 1, life: Math.random(), px: NaN, py: NaN });
@@ -258,7 +260,7 @@ export class AnatomyRenderer {
       brain: catmullRom([B(6.55, 16.3), B(6.75, 18.4), B(5.5, 20.1), B(2.8, 21.4), B(-1.9, 21.3), B(-5.8, 18.8), B(-7.1, 15.4), B(-6.7, 13.1), B(-4.4, 12.8), B(-2.1, 13.9), B(1.0, 14.3), B(4.0, 14.7), B(5.9, 15.4)], 4),
       sulcus: catmullRom([B(5.4, 19.4), B(2.4, 20.5), B(-1.4, 20.4), B(-4.8, 18.4)], 4),
       eye: ellipse(B(6.5, 15.4), 1.1 * k, 0.95 * k),
-      lens: ellipse(B(7.35, 15.4), 0.18 * k, 0.42 * k, 0, 20),
+      eyeC: B(6.5, 15.4),
       vertebrae,
       cords: [[P(-5.3, -4.6), P(-4.5, -4.6), P(-4.5, 11.8), P(-5.1, 12.4), P(-5.6, 11.6)], [P(-5.1, -4.6), P(-4.7, -4.6), P(-4.72, 11.4), P(-5.15, 11.6)]],
       nasal: catmullRom([B(0.3, 11.2), B(1.1, 10.25), B(2.7, 10.75), B(4.6, 10.85), B(6.4, 10.65), B(7.6, 10.85), B(8.45, 11.3), B(8.0, 12.2), B(6.7, 13.4), B(4.4, 13.9), B(1.8, 13.6), B(0.2, 12.6)], 4),
@@ -284,6 +286,36 @@ export class AnatomyRenderer {
     return geo;
   }
 
+  /**
+   * The lens, moved by the eye's gaze: it holds still for a few seconds, then darts somewhere
+   * new (a saccade), and every so often back to straight ahead. Pitch swings it round the front
+   * of the eyeball; yaw (looking towards or away from the viewer) foreshortens its offset and
+   * opens the edge-on disc out.
+   */
+  private lens(c: Vec, k: number, dt: number): Vec[] {
+    const g = this.gaze;
+    if (this.clock >= g.next) {
+      const centre = Math.random() < 0.35;
+      g.toPitch = centre ? 0 : (Math.random() * 2 - 1) * 0.55;
+      g.toYaw = centre ? 0 : (Math.random() * 2 - 1) * 0.9;
+      g.next = this.clock + 1.2 + Math.random() * 3.5;
+    }
+    const ease = 1 - Math.exp(-dt * 28);
+    g.pitch += (g.toPitch - g.pitch) * ease;
+    g.yaw += (g.toYaw - g.yaw) * ease;
+    const off = 0.85 * k * Math.cos(g.yaw);
+    const cp = Math.cos(g.pitch), sp = Math.sin(g.pitch);
+    const lc = { x: c.x + off * cp, y: c.y + off * sp };
+    const rx = (0.18 + 0.2 * Math.abs(Math.sin(g.yaw))) * k, ry = 0.42 * k;
+    const o: Vec[] = [];
+    for (let i = 0; i <= 20; i++) {
+      const an = (i / 20) * Math.PI * 2;
+      const x = Math.cos(an) * rx, y = Math.sin(an) * ry;
+      o.push({ x: lc.x + x * cp - y * sp, y: lc.y + x * sp + y * cp });
+    }
+    return o;
+  }
+
   // ------------------------------------------------------------------ main draw
   draw(
     ctx: CanvasRenderingContext2D,
@@ -305,7 +337,7 @@ export class AnatomyRenderer {
     line(G.brain, V.blueMid, 1.1, { close: true });
     line(G.sulcus, V.blueDim, 0.9);
     line(G.eye, V.blueMid, 1.1);
-    line(G.lens, V.blueDim, 0.9);
+    line(this.lens(G.eyeC, model.tract.scale, opts.dt), V.blueDim, 0.9);
     for (const v of G.vertebrae) line(v, V.blueDim, 1);
     line(G.cords[0], V.blueDim, 0.8, { alpha: 0.8 });
     line(G.cords[1], V.blueDim, 0.8, { alpha: 0.6 });
