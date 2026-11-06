@@ -69,6 +69,17 @@ function pointAt(t: TubeGeom, s: number): P {
   return [t.pts[i - 1][0] + (t.pts[i][0] - t.pts[i - 1][0]) * u, t.pts[i - 1][1] + (t.pts[i][1] - t.pts[i - 1][1]) * u];
 }
 
+/** text cut to fit a width (in the Hershey font at this size and spacing), ending in an ellipsis */
+function fit(ctx: CanvasRenderingContext2D, text: string, maxW: number, size: number, ls: number): string {
+  ctx.save();
+  ctx.font = hfont(size);
+  const width = (s: string) => ctx.measureText(s).width + s.length * size * ls;
+  let t = text;
+  while (t.length > 2 && width(t) > maxW) t = t.slice(0, -2) + "…";
+  ctx.restore();
+  return t;
+}
+
 /** a creature parameter's value for display */
 function fmtParam(v: number, p: CreatureDef["params"][number]): { value: string; unit: string } {
   const digits = p.digits ?? (p.max - p.min <= 2 ? 2 : v < 100 && p.log ? 1 : 0);
@@ -91,7 +102,9 @@ export function CreatureView() {
     const geo = geometry(def);
     const live = liveTelemetry(def.id);
     const tele = live ?? previewTelemetry(def, st.cparams[def.id]);
-    const top = 64, slotH = Math.min(118, h * 0.2);
+    // a narrow screen (a phone) stacks the title and status, and puts the readouts two by two
+    const compact = w < 560;
+    const top = compact ? 96 : 64, slotH = compact ? 132 : Math.min(118, h * 0.2);
     const vw = vis.view.x1 - vis.view.x0, vh = vis.view.y1 - vis.view.y0;
     const sc = Math.min((w * 0.86) / vw, ((h - top - slotH) * 0.9) / vh);
     const ox = w / 2 - ((vis.view.x0 + vis.view.x1) / 2) * sc;
@@ -178,13 +191,15 @@ export function CreatureView() {
     }
 
     // like a map's title: the name, the latin name, and what it is doing
-    label(ctx, def.name.toUpperCase(), 16, 34, { size: 24, color: V.blue, ls: 0.18 });
-    label(ctx, def.latin.toUpperCase(), 18, 54, { size: 10, color: V.blueMid, ls: 0.16 });
+    label(ctx, fit(ctx, def.name.toUpperCase(), w - 32, compact ? 18 : 24, 0.18), 16, compact ? 30 : 34, { size: compact ? 18 : 24, color: V.blue, ls: 0.18 });
+    label(ctx, fit(ctx, def.latin.toUpperCase(), w - 34, 10, 0.16), 18, compact ? 48 : 54, { size: 10, color: V.blueMid, ls: 0.16 });
     const state = live ? (live.call ? (def.calls.find((c) => c.id === live.call)?.name ?? live.call) : live.gate > 0.05 ? "Sustaining" : "At rest") : "Not started";
-    label(ctx, state.toUpperCase(), w - 16, 30, { size: 13, color: V.amber, align: "right", ls: 0.16 });
-    if (pp) {
-      const f = fmtParam(pitch, pp);
-      label(ctx, `${f.value} ${f.unit}`.trim().toUpperCase(), w - 16, 50, { size: 11, color: V.amber, align: "right", ls: 0.12, alpha: 0.8 });
+    const pitchText = pp ? (() => { const f = fmtParam(pitch, pp); return `${f.value} ${f.unit}`.trim().toUpperCase(); })() : "";
+    if (compact) {
+      label(ctx, `${state.toUpperCase()}${pitchText ? "   " + pitchText : ""}`, 18, 70, { size: 11, color: V.amber, ls: 0.14 });
+    } else {
+      label(ctx, state.toUpperCase(), w - 16, 30, { size: 13, color: V.amber, align: "right", ls: 0.16 });
+      if (pitchText) label(ctx, pitchText, w - 16, 50, { size: 11, color: V.amber, align: "right", ls: 0.12, alpha: 0.8 });
     }
     // a scale bar: 1 drawing unit (about a centimetre)
     const unit = vw > 60 ? 10 : 1;
@@ -196,13 +211,14 @@ export function CreatureView() {
 
     // the first four parameters, OP-1 style, across the bottom (the encoders on the right share the colours)
     const params = def.params.slice(0, 4);
-    const cw = (w - 28) / Math.max(1, params.length);
-    const big = Math.max(18, Math.min(40, slotH * 0.36, cw * 0.2));
+    const perRow = compact ? 2 : Math.max(1, params.length);
+    const cw = (w - 28) / perRow, rowH = compact ? slotH / 2 : slotH;
+    const big = Math.max(18, Math.min(40, rowH * (compact ? 0.42 : 0.36), cw * 0.2));
     params.forEach((p, i) => {
       const color = SLOTS[i];
-      const cx = 16 + i * cw, cy = h - slotH + 12;
+      const cx = 16 + (i % perRow) * cw, cy = h - slotH + 12 + Math.floor(i / perRow) * rowH;
       dot(ctx, cx + 5, cy, 4, color);
-      label(ctx, p.label.toUpperCase(), cx + 15, cy + 4, { size: 10, color, ls: 0.16, alpha: 0.85 });
+      label(ctx, fit(ctx, p.label.toUpperCase(), cw - 22, 10, 0.16), cx + 15, cy + 4, { size: 10, color, ls: 0.16, alpha: 0.85 });
       const f = fmtParam(paramValue(p.key, p.default), p);
       label(ctx, f.value, cx, cy + 14 + big, { size: big, color, weight: "m", ls: 0.02 });
       if (f.unit) label(ctx, f.unit.toUpperCase(), cx, cy + 32 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });

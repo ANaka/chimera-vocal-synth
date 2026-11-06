@@ -90,6 +90,11 @@ interface Sounding {
 }
 
 let sounding: Sounding | null = null;
+
+/** The syllable whose vowel is sounding from the keys now (null when no key sings). */
+export function soundingSyllable(): string | null {
+  return sounding?.syl.text ?? null;
+}
 /** keys down, oldest first */
 let keys: number[] = [];
 /** gesture tags: a note uses tag (articulation, breath) and tag + 1 (pitch, vibrato) */
