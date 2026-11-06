@@ -19,7 +19,11 @@ export class AudioEngine {
   analyserFast: AnalyserNode | null = null;
   /** long time-domain window for the waveform scope */
   analyserScope: AnalyserNode | null = null;
-  private master: GainNode | null = null;
+  /** the voice's output level (public for the Good Evening demo, which rides it per section) */
+  master: GainNode | null = null;
+  /** everything heard goes through here: a pass-through unless the demo gives it a soft-clip curve */
+  bus: GainNode | null = null;
+  shaper: WaveShaperNode | null = null;
   /** "close mic" chain: proximity bass, presence, compression (beatboxers cup the mic) */
   private micIn: AudioNode | null = null;
   private micOn = false;
@@ -100,7 +104,12 @@ export class AudioEngine {
     shelf.connect(presence).connect(comp).connect(makeup).connect(master);
     this.micIn = shelf;
     node.connect(this.micOn ? shelf : master);
-    master.connect(ctx.destination);
+    const bus = ctx.createGain();
+    const shaper = ctx.createWaveShaper();
+    bus.connect(shaper).connect(ctx.destination);
+    this.bus = bus;
+    this.shaper = shaper;
+    master.connect(bus);
     master.connect(analyser);
     master.connect(fast);
     master.connect(scope);
@@ -195,6 +204,17 @@ export class AudioEngine {
   /** End the sung note (open-ended gestures) with this tag. */
   release(tag: number): void {
     this.send({ type: "release", tag });
+  }
+
+  /** Gestures whose time 0 is voice-clock time `at` (see voiceClock): messages sent apart share one clock. */
+  scheduleAt(gestures: import("../wasm/types.ts").Gesture[], at: number, replace: boolean): void {
+    this.send({ type: "schedule", gestures, segments: [], end: 0, id: ++this.speakId, replace, at });
+  }
+
+  /** The AudioContext time at which the voice clock reads `clock` (null before any telemetry). */
+  ctxTimeOf(clock: number): number | null {
+    const l = this.latest;
+    return l ? l.ctxEnd + (clock - l.t.clock) : null;
   }
 
   /** Gestures planned on the main thread, times relative to arrival + lead (live playing). */

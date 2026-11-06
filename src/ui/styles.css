@@ -2728,3 +2728,79 @@ input[type="range"]::-moz-range-thumb {
     min-height: 300px;
   }
 }
+
+/* ---------- Good Evening (demo branch) */
+.right-show {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 250fr) minmax(0, 330fr) minmax(0, 252fr);
+  grid-template-areas: "song" "roll" "wf";
+}
+
+.s-song { grid-area: song; }
+
+.show-lyrics {
+  position: absolute;
+  inset: 0;
+  padding: 10px 16px;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  align-content: center;
+  gap: 10px;
+}
+
+.show-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-height: 1.4em;
+  font-family: var(--font);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue-dim);
+}
+
+.show-line.current {
+  font-size: 24px;
+  color: var(--blue-mid);
+}
+
+.show-cue.done {
+  color: var(--blue-dim);
+}
+
+.show-line.current .show-cue.done {
+  color: var(--blue-mid);
+}
+
+.show-cue.now.k-sing {
+  color: var(--green);
+  text-shadow: 0 0 6px rgba(91, 227, 129, 0.7);
+}
+
+.show-cue.now.k-beat {
+  color: var(--amber);
+  text-shadow: 0 0 6px rgba(255, 179, 64, 0.7);
+}
+
+.show-cue.now.k-speech {
+  color: var(--white);
+  text-shadow: 0 0 6px rgba(238, 246, 248, 0.6);
+}
+
+.show-hint {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--blue-mid);
+}
+
+.show-hint.error {
+  color: var(--red);
+}
+
+@media (max-width: 1100px) {
+  .right-show .screen-body {
+    min-height: 220px;
+  }
+}

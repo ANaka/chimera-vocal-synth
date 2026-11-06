@@ -5,3 +5,4 @@ out
 .DS_Store
 target/
 src/wasm/chimera.wasm
+!public/demo/**/*.wav

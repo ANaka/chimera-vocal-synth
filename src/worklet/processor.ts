@@ -12,6 +12,8 @@ import type { BodyMix, CreatureTelemetry } from "../wasm/types.ts";
 
 // Minimal AudioWorkletGlobalScope typings
 declare const sampleRate: number;
+/** the AudioContext time of the quantum being rendered (absent outside a real worklet) */
+const ctxTime = (): number => (globalThis as { currentTime?: number }).currentTime ?? 0;
 declare function registerProcessor(name: string, ctor: unknown): void;
 declare class AudioWorkletProcessor {
   readonly port: MessagePort;
@@ -136,7 +138,9 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "schedule": {
         // planning happened on the main thread; the engine shifts the gestures onto its clock
         const n = writeGestures(this.mem, x.engine_records(h), m.gestures, MAX_GESTURES);
-        const off = x.engine_schedule(h, n, m.lead ?? 0.03, m.replace ? 1 : 0);
+        // `at`: plan time 0 lands at this voice-clock time (several messages can share one clock)
+        const lead = m.at !== undefined ? m.at - x.engine_clock(h) : (m.lead ?? 0.03);
+        const off = x.engine_schedule(h, n, lead, m.replace ? 1 : 0);
         if (m.segments.length) this.post({ type: "planned", id: m.id, t0: off, end: m.end + off, segments: m.segments.map((s) => ({ ...s, t0: s.t0 + off, t1: s.t1 + off })) });
         break;
       }
@@ -202,7 +206,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     if (this.telemetryOn && !this.failed && ++this.blocks % 6 === 0) {
       try {
         if (this.creature) this.post({ type: "ctelemetry", t: this.creatureTelemetry(this.creature), load: this.load });
-        else this.post(this.humanTelemetry());
+        else this.post(this.humanTelemetry(ctxTime() + ch0.length / sampleRate));
       } catch (err) {
         this.fail(err);
       }
@@ -211,7 +215,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   }
 
   /** The human voice's telemetry block → the message the UI reads. */
-  private humanTelemetry(): TelemetryMessage {
+  private humanTelemetry(ctxEnd: number): TelemetryMessage {
     const x = this.x, h = this.h;
     const p = x.engine_telemetry(h);
     const [phLen, orLen, velumPort, f0, voicing, pLung, outRms, noiseLevel, noiseNode, gate, clock, nArtic, nPh, nOr, nScope, nActive] = new Float64Array(this.mem, p, TELE_HEADER);
@@ -230,6 +234,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       nPh,
       nOr,
       beatStep: x.engine_beat_step(h),
+      ctxEnd,
     };
   }
 

@@ -16,6 +16,8 @@ import { CreatureView } from "./components/CreatureView.tsx";
 import { creatureById } from "../wasm/engine.ts";
 import { BeatboxRight, BeatOverlay, beatInfo, beatSlots } from "./components/BeatboxPanel.tsx";
 import { SingRight, singInfo } from "./components/SingPanel.tsx";
+import { ShowRight, showGrab, showInfo, showOverlay } from "./components/ShowPanel.tsx";
+import { playShow } from "./show.ts";
 import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
@@ -53,9 +55,10 @@ function TopBar() {
           { value: "sing", label: "Sing" },
           { value: "bestiary", label: "Bestiary" },
           { value: "beatbox", label: "Beatbox" },
+          { value: "show", label: "Good Evening" },
         ]}
       />
-      {mode !== "bestiary" && (
+      {mode !== "bestiary" && mode !== "show" && (
         <div className="body-control">
           <Segmented<BodyName>
             label="Body"
@@ -119,7 +122,8 @@ function StartPrompt() {
     beatbox: ["Every drum here is a mouth sound: lips, tongue and larynx pushing, sealing and sucking air.", "Start the beat", "Then edit the pattern, tap the pads, or hum a bass note on the keys."],
     speak: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start the voice", "Then type something and press Speak, or tap a sound in the chart."],
     sing: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start and hear a song", "Then play the keys: each note sings the next syllable of the lyrics."],
-  }[mode as "bestiary" | "beatbox" | "speak" | "sing"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
+    show: ["One simulated throat sings, beatboxes and talks over a band.", "Play “Good Evening”", "Then grab the tongue and play with it."],
+  }[mode as "bestiary" | "beatbox" | "speak" | "sing" | "show"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
   return (
     <div className="start-prompt">
       <p>{copy[0]}</p>
@@ -129,6 +133,7 @@ function StartPrompt() {
         onClick={async () => {
           // the demo waits for audio itself, so a stop meanwhile (body, mode) cancels it
           if (mode === "sing") return void playDemo(DEMO_SONGS[0].name, useStore.getState().body, start);
+          if (mode === "show") return void playShow();
           await start();
           const first = creatureById(creature)?.calls[0];
           if (mode === "bestiary" && first) playCall(first.id);
@@ -157,7 +162,7 @@ function LeftScreen() {
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >
-      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : mode === "sing" ? <AnatomyView info={singInfo} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
+      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : mode === "sing" ? <AnatomyView info={singInfo} /> : mode === "show" ? <AnatomyView info={showInfo} overlay={showOverlay} onGrab={showGrab} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
       {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
     </Screen>
@@ -197,7 +202,7 @@ export function App() {
       <TopBar />
       <main className={`wall wall-${mode}`}>
         <LeftScreen />
-        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : mode === "beatbox" ? <BeatboxRight /> : <BestiaryRight />}
+        {mode === "play" ? <PlayRight /> : mode === "speak" ? <SpeakRight /> : mode === "sing" ? <SingRight /> : mode === "show" ? <ShowRight /> : mode === "beatbox" ? <BeatboxRight /> : <BestiaryRight />}
       </main>
     </div>
   );

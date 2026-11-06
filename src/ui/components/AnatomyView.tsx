@@ -15,6 +15,9 @@ export type SlotsFn = (m: VoiceModel, a: HumanArtic, f: HumanFrame, formants: nu
 /** The small lines under the formants; a mode can pass its own. */
 export type InfoFn = (m: VoiceModel, f: HumanFrame, tele: TelemetryMessage | null) => string[];
 
+/** drawn over the face each frame, before the glow (the demo writes the words at the mouth) */
+export type OverlayFn = (ctx: CanvasRenderingContext2D, r: AnatomyRenderer, m: VoiceModel, f: HumanFrame, a: HumanArtic, size: { w: number; h: number; dt: number }) => void;
+
 /** the tract's length and mouth opening, then the live pitch and lungs */
 export const tractInfo: InfoFn = (_m, f, tele) => {
   const info = [`Tract ${f.length.toFixed(1)} cm`, `Mouth ${f.lipArea.toFixed(1)} cm²`];
@@ -43,7 +46,11 @@ export const articulatorSlots: SlotsFn = (m, a, f, formants) => [
   f.velumPort > 0.02 ? { label: "Soft palate", value: f.velumPort.toFixed(2), unit: "cm²", color: V.white } : { label: "Soft palate", value: "Shut", color: V.white },
 ];
 
-export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormants?: boolean }) {
+export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormants?: boolean; overlay?: OverlayFn; onGrab?: () => void }) {
+  const overlayRef = useRef<OverlayFn | undefined>(props.overlay);
+  overlayRef.current = props.overlay;
+  const grabRef = useRef(props.onGrab);
+  grabRef.current = props.onGrab;
   const formantsRef = useRef(props.showFormants ?? true);
   formantsRef.current = props.showFormants ?? true;
   const slotsRef = useRef<SlotsFn>(props.slots ?? articulatorSlots);
@@ -100,6 +107,7 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormant
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         r.draw(ctx, m, f, a, tele, st.view, { hover: hoverRef.current, drag: dragRef.current?.id ?? null, dt, formants: formantsRef.current ? formants : [], slots: slotsRef.current(m, a, f, formants, tele), info: info.map((s) => s.toUpperCase()) });
+        overlayRef.current?.(ctx, r, m, f, a, { w, h, dt });
         glow.apply(canvas, ctx, dpr);
       }
       raf = requestAnimationFrame(loop);
@@ -141,6 +149,7 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormant
     const p = r.toBody(e.clientX - rect.left, e.clientY - rect.top);
     (e.target as Element).setPointerCapture(e.pointerId);
     dragRef.current = { id, start: p, artic: { ...useStore.getState().artic } };
+    grabRef.current?.();
     e.preventDefault();
   };
 

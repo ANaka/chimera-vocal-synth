@@ -8,8 +8,9 @@ import type { ParamDef } from "../wasm/types.ts";
 import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../wasm/engine.ts";
 import { singNoteOn, singNoteOff, stopSinging, ensureDictionary } from "./singing.ts";
 import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
+import { stopShow } from "./show.ts";
 
-export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox";
+export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox" | "show";
 
 export interface BeatState {
   steps: (BeatStep | null)[];
@@ -149,8 +150,9 @@ export const useStore = create<State>((set, get) => ({
       engine.setMic(false);
     }
     if (prev === "sing") stopSinging();
+    if (prev === "show") stopShow();
     // speech and song breathe by themselves: a held breath would drone under them
-    if (m === "speak" || m === "sing") set({ hold: false });
+    if (m === "speak" || m === "sing" || m === "show") set({ hold: false });
     if (m === "sing") ensureDictionary();
     if (m === "beatbox") {
       // a beatboxer waits with the jaw nearly closed; the sounds bring their own breath

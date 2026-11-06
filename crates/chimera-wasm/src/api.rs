@@ -148,6 +148,27 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         "formatBeat" => Ok(Value::String(beatbox::format_beat(&arg::<Vec<Option<BeatStep>>>(req, "steps")?))),
         "beatReady" => to_json(&beatbox::beat_ready(arg::<BodyMix>(req, "body")?)),
         "leadIn" => Ok(json!(BeatPlayer::lead_in(&arg::<String>(req, "id")?, arg::<BodyMix>(req, "body")?))),
+        // one pass of a pattern as gestures, step 0's hit at t0: what the sequencer schedules,
+        // laid out ahead of time (a demo puts it in a longer score)
+        "planBeat" => {
+            let steps = beatbox::parse_beat(&arg::<String>(req, "text")?);
+            let t0: f64 = arg(req, "t0")?;
+            let mut p = BeatPlayer::new();
+            p.body = arg::<BodyMix>(req, "body")?;
+            p.set_tempo(arg(req, "bpm")?, 0.0);
+            let (dur, l) = (p.step_dur(), steps.len());
+            let mut out = Vec::new();
+            for (n, cell) in steps.iter().enumerate() {
+                let Some(cell) = cell else { continue };
+                // as the sequencer does: a sound may last until the next one
+                let mut rests = 0;
+                while rests + 1 < l && steps[(n + 1 + rests) % l].is_none() {
+                    rests += 1;
+                }
+                p.gestures(cell, t0 + n as f64 * dur, (1 + rests) as f64 * dur, &mut out);
+            }
+            to_json(&out)
+        }
         _ => Err(format!("unknown fn {name}")),
     }
 }
