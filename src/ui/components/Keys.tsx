@@ -19,7 +19,8 @@ export function Keys() {
   const base = BASE(body) + octave.current * 12;
 
   useEffect(() => {
-    const down = new Set<string>();
+    /** pressed key → the note it played (released as that note, whatever the body or octave now) */
+    const down = new Map<string, number>();
     const onDown = (e: KeyboardEvent) => {
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
@@ -30,19 +31,21 @@ export function Keys() {
       if (k === "z") octave.current = Math.max(-2, octave.current - 1);
       if (k === "x") octave.current = Math.min(2, octave.current + 1);
       if (!(k in KEYMAP) || down.has(k)) return;
-      down.add(k);
+      const midi = BASE(useStore.getState().body) + octave.current * 12 + KEYMAP[k];
+      down.set(k, midi);
       void start();
-      noteOn(BASE(useStore.getState().body) + octave.current * 12 + KEYMAP[k]);
+      noteOn(midi);
       e.preventDefault();
     };
     const onUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (!down.has(k)) return;
+      const midi = down.get(k);
+      if (midi === undefined) return;
       down.delete(k);
-      noteOff(BASE(useStore.getState().body) + octave.current * 12 + KEYMAP[k]);
+      noteOff(midi);
     };
     const onBlur = () => {
-      for (const k of down) noteOff(BASE(useStore.getState().body) + octave.current * 12 + KEYMAP[k]);
+      for (const midi of down.values()) noteOff(midi);
       down.clear();
     };
     window.addEventListener("keydown", onDown);

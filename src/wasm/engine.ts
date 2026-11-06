@@ -226,6 +226,11 @@ export function airwayModel(body: BodyMix, sampleRate: number): AirwayModel {
   return call("model", { body, sampleRate });
 }
 
+/** Free a model (its id is invalid afterwards). */
+export function dropAirwayModel(m: AirwayModel): void {
+  call("dropModel", { model: m.model });
+}
+
 export function airwayFrame(m: AirwayModel, artic: HumanArtic): HumanFrame {
   return call("frame", { model: m.model, artic });
 }
