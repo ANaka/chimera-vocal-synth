@@ -47,6 +47,18 @@ fn numbers_are_spelled_out_and_unknown_words_fall_back_to_rules() {
 }
 
 #[test]
+fn a_phrase_lists_the_words_said_one_per_word_end() {
+    // "--" and a lone apostrophe have no sound: they are not words of the phrase
+    for text in ["hello -- world", "rock ' roll", "it's - fine"] {
+        for p in g2p().to_phrases(text) {
+            let ends = p.segments.iter().filter(|s| s.word_end == Some(true)).count();
+            assert_eq!(p.words.len(), ends, "{text:?}: {:?}", p.words);
+        }
+    }
+    assert_eq!(g2p().to_phrases("hello -- world")[0].words, ["hello", "world"]);
+}
+
+#[test]
 fn words_that_are_also_object_property_names_do_not_break_the_front_end() {
     for w in ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "prototype"] {
         let p = &g2p().to_phrases(&format!("The {w} is ready."))[0];

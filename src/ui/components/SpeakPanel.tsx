@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.ts";
-import { speakText, speakPhrases, stopSpeaking, onPlan, currentPlan } from "../speech.ts";
+import { speakText, speakPhrases, stopSpeaking, onPlan, currentPlan, spokenWordNow } from "../speech.ts";
+import { mouthWords } from "../mouthWords.ts";
 import { tokenizeIpa } from "../../wasm/engine.ts";
 import { Slider, Toggle } from "./Controls.tsx";
 import { Chip, Screen } from "./Screen.tsx";
@@ -38,6 +39,9 @@ function soundingSegment(): string | null {
 }
 
 /** Speak mode's readouts under the chin: the sound being made, jaw, lip shape, soft palate */
+/** the word being spoken, at the mouth */
+export const speechWords = mouthWords(spokenWordNow, V.white);
+
 export const speechSlots: SlotsFn = (_m, a, f) => {
   const sound = soundingSegment();
   const lips = a.lipAp < 0.05 ? "Closed" : a.lipWidth < 0.55 ? "Round" : a.lipAp > 1.3 ? "Open" : "Spread";
