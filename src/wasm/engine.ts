@@ -132,6 +132,9 @@ export interface PlanOptions {
   accent?: number;
   /** the last segment is held open-ended (a sung note): no end-of-breath release */
   openEnd?: boolean;
+  /** a sung phrase (planSong sets it): consonants given a pitch hold it, and pitch ramps shrink
+   *  to fit short notes */
+  sung?: boolean;
 }
 
 export function planUtterance(segments: Segment[], options: PlanOptions): Plan {
