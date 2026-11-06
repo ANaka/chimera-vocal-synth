@@ -17,10 +17,6 @@ use chimera::voice::human_airway::HumanAirway;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 
-/// Models kept at once. A body is continuous, so the page can ask for any number of them; it
-/// keeps fewer of its own (`useModel.ts`), so a model it still holds is never dropped here.
-const MAX_MODELS: usize = 16;
-
 struct Model {
     id: usize,
     body: BodyMix,
@@ -31,7 +27,8 @@ struct Model {
 #[derive(Default)]
 struct State {
     result: Vec<u8>,
-    /// oldest first
+    /// the page's models; a body is continuous, so the page drops the ones it no longer keeps
+    /// (`dropModel`, from `useModel.ts`)
     models: Vec<Model>,
     next_model: usize,
     /// the page's English G2P (one dictionary, loaded once)
@@ -71,9 +68,6 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
             let i = match st.models.iter().position(|x| x.body == body && x.fs == fs * m) {
                 Some(i) => i,
                 None => {
-                    if st.models.len() >= MAX_MODELS {
-                        st.models.remove(0);
-                    }
                     st.models.push(Model { id: st.next_model, body, fs: fs * m, airway: HumanAirway::new(fs * m, body.body()) });
                     st.next_model += 1;
                     st.models.len() - 1
@@ -89,6 +83,11 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
                 "oralBranches": { "base": a.oral.branch_base, "n": a.oral.n },
                 "glottisPort": a.glottis_port,
             }))
+        }
+        "dropModel" => {
+            let id: usize = arg(req, "model")?;
+            st.models.retain(|m| m.id != id);
+            Ok(Value::Null)
         }
         "restTip" => to_json(&chimera::anatomy::human::rest_tip(arg(req, "jaw")?, arg(req, "tbX")?, arg(req, "tbY")?)),
         "frame" => {
