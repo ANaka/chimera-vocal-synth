@@ -4,7 +4,6 @@ use crate::js::{fixed, num, pad_end, pad_start};
 use crate::{Ctx, FS, arg, body, peak, repo_path, wav_name};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
-use chimera::anatomy::human::BodyName;
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
 use chimera::creatures::types::ParamRole;
@@ -328,7 +327,7 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             } else if let Some(h) = held.take_if(|h| h.midi == m) {
                 v.release(h.tag);
                 v.release(h.tag + 1.0);
-                let gs = shift(plan_note_off(&h.syl, h.midi, body_name));
+                let gs = shift(plan_note_off(&h.syl, h.midi, body_name.into()));
                 v.schedule(&gs);
             }
         }
@@ -348,7 +347,7 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let b = body(body_name)?;
     let voice = || {
         let mut v = HumanVoice::new(FS, b, 2);
-        v.set_articulation(&beat_ready(body_name), None);
+        v.set_articulation(&beat_ready(body_name.into()), None);
         v.set_source(&SourcePatch {
             f0: Some(100.0),
             voiced: Some(true),
@@ -362,7 +361,7 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
 
     // ---- each sound alone
     let mut player = BeatPlayer::new();
-    player.body = BodyName::parse(body_name);
+    player.body = body_name.into();
     let mut rows: Vec<String> = Vec::new();
     let n = js_round(FS * 0.5) as usize;
     let mut strip = vec![0f32; js_round(FS * 0.5 * BEAT_SOUNDS.len() as f64) as usize];
@@ -406,7 +405,7 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             fixed(pk, 3),
             fixed(20.0 * log10(js_max(1e-6, pre) / pk), 1),
             fixed(20.0 * log10(js_max(1e-6, tail) / pk), 1),
-            fixed(BeatPlayer::lead_in(s.id, body_name) * 1000.0, 0),
+            fixed(BeatPlayer::lead_in(s.id, body_name.into()) * 1000.0, 0),
         ));
         strip[idx * n..(idx + 1) * n].copy_from_slice(&out);
         let file: String =
@@ -425,7 +424,7 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         .unwrap_or(&BEAT_PRESETS[0]);
     let mut v = voice();
     let mut seq = BeatPlayer::new();
-    seq.body = BodyName::parse(body_name);
+    seq.body = body_name.into();
     seq.set_steps(&parse_beat(preset.text));
     seq.set_tempo(preset.bpm, preset.swing);
     seq.start(v.clock);

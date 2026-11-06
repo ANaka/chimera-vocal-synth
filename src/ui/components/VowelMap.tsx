@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 import { useStore } from "../store.ts";
+import { blendLog, sameBody, type BodyMix } from "../body.ts";
 import { useModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
 import { V } from "../colors.ts";
@@ -18,7 +19,8 @@ export function VowelMap() {
   const dragging = useRef(false);
   const range = () => {
     const b = useStore.getState().body;
-    return b === "male" ? { f1: [230, 950], f2: [700, 2700] } : b === "female" ? { f1: [280, 1150], f2: [800, 3200] } : { f1: [300, 1250], f2: [900, 3500] };
+    const at = (male: number, female: number, child: number) => blendLog(b, { male, female, child });
+    return { f1: [at(230, 280, 300), at(950, 1150, 1250)], f2: [at(700, 800, 900), at(2700, 3200, 3500)] };
   };
   const toXY = (F1: number, F2: number, w: number, h: number) => {
     const r = range();
@@ -37,7 +39,7 @@ export function VowelMap() {
     return { F1, F2 };
   };
   /** recent (F1, F2) of the live tract, so the trail survives resizes and fades out */
-  const trail = useRef<{ F1: number; F2: number; t: number; body: string }[]>([]);
+  const trail = useRef<{ F1: number; F2: number; t: number; body: BodyMix }[]>([]);
   const ref = usePhosphor(({ ctx, w, h }) => {
     const m = model.current;
     if (!m) return;
@@ -45,7 +47,7 @@ export function VowelMap() {
     // vowel trapezoid guide, like a border on a map
     const corners = [toXY(300, 2500, w, h), toXY(320, 850, w, h), toXY(720, 1050, w, h), toXY(780, 1650, w, h)];
     beamPts(ctx, corners.map((p) => [p.x, p.y] as Pt), V.blueDim, 1, { close: true, alpha: 0.9 });
-    const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+    const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
     const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
     const fm = m.transfer(a).formants;
     const live = fm.length >= 2 ? toXY(fm[0], fm[1], w, h) : null;
@@ -58,7 +60,7 @@ export function VowelMap() {
     if (live) {
       // where the tongue has been: a trail of the last 1.5 s, fading with age
       const now = performance.now();
-      const tr = (trail.current = trail.current.filter((p) => p.body === st.body && now - p.t < 1500));
+      const tr = (trail.current = trail.current.filter((p) => sameBody(p.body, st.body) && now - p.t < 1500));
       const last = tr[tr.length - 1];
       if (!last || Math.abs(Math.log(last.F1 / fm[0])) + Math.abs(Math.log(last.F2 / fm[1])) > 0.004) tr.push({ F1: fm[0], F2: fm[1], t: now, body: st.body });
       for (let i = 1; i < tr.length; i++) {

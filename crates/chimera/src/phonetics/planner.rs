@@ -8,7 +8,7 @@
 use super::durations::{SegInfo, klatt_durations};
 use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, phoneme};
 use super::{Intonation, Plan, PlannedSegment, Segment};
-use crate::anatomy::human::{ArticKey, ArticPatch};
+use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
 use crate::control::score::{ControlKey, Gesture, Targets};
 use crate::math::{js_max, js_round};
 use serde::{Deserialize, Serialize};
@@ -61,13 +61,30 @@ pub fn diphthong_parts(ipa: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-pub fn is_vowel(ipa: &str, body: &str) -> bool {
-    vowel_table().get(body).is_some_and(|t| t.contains_key(ipa)) || expand(ipa).is_some()
+pub fn is_vowel(ipa: &str, body: BodyMix) -> bool {
+    let t = vowel_table();
+    body.weights().iter().any(|(b, w)| *w > 0.0 && t.get(b.as_str()).is_some_and(|t| t.contains_key(ipa))) || expand(ipa).is_some()
 }
 
-pub fn vowel_artic(ipa: &str, body: &str) -> Option<ArticPatch> {
+/// The calibrated articulation of a vowel for a body: between presets, the presets' calibrated
+/// articulations blended by the body's weights.
+pub fn vowel_artic(ipa: &str, body: BodyMix) -> Option<ArticPatch> {
+    if let Some(b) = body.preset() {
+        return preset_vowel_artic(ipa, b);
+    }
+    let w = body.weights();
+    let mut parts = [(0.0, ArticPatch::default()); 3];
+    for (i, (b, wi)) in w.iter().enumerate() {
+        if *wi > 0.0 {
+            parts[i] = (*wi, preset_vowel_artic(ipa, *b)?);
+        }
+    }
+    Some(ArticPatch::blend(&parts))
+}
+
+fn preset_vowel_artic(ipa: &str, body: BodyName) -> Option<ArticPatch> {
     let t = vowel_table();
-    let v = t.get(body).and_then(|b| b.get(ipa)).or_else(|| t.get("male").and_then(|m| m.get(ipa)))?;
+    let v = t.get(body.as_str()).and_then(|b| b.get(ipa)).or_else(|| t.get("male").and_then(|m| m.get(ipa)))?;
     let mut out = ArticPatch::default();
     for k in VOWEL_KEYS {
         if let Some(x) = v.artic.get(k) {
@@ -96,7 +113,7 @@ pub fn init() {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanOptions {
-    pub body: String,
+    pub body: BodyMix,
     /// voice-clock start time (s)
     pub t0: f64,
     /// speaking-rate multiplier (>1 = faster)
@@ -156,7 +173,7 @@ struct Span {
 
 pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
     let rate = o.rate.unwrap_or(1.0);
-    let body = o.body.as_str();
+    let body = o.body;
     // durations by the Klatt rules, on whole segments (diphthongs before they are split)
     let durs = klatt_durations(input, |s| {
         if is_vowel(&s.ipa, body) {

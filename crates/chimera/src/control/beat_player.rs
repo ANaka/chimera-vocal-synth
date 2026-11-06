@@ -10,7 +10,7 @@
 //! phoneme tables are not parsed on the audio thread.
 
 use super::score::Gesture;
-use crate::anatomy::human::BodyName;
+use crate::anatomy::human::BodyMix;
 use crate::math::{js_max, js_min, midi_to_hz};
 use crate::phonetics::beatbox::{BASS_NOTE, BeatBuild, BeatStep, MAX_SOUND_GESTURES, beat_sound};
 
@@ -24,7 +24,7 @@ pub struct BeatPlayer {
     /// 0..0.6: off-beat sixteenths are delayed by swing × half a step
     pub swing: f64,
     pub playing: bool,
-    pub body: BodyName,
+    pub body: BodyMix,
     anchor_time: f64,
     anchor_step: i64,
     next: i64,
@@ -55,7 +55,7 @@ impl BeatPlayer {
             bpm: 96.0,
             swing: 0.0,
             playing: false,
-            body: BodyName::Male,
+            body: BodyMix::MALE,
             anchor_time: 0.0,
             anchor_step: 0,
             next: 0,
@@ -196,7 +196,7 @@ impl BeatPlayer {
     pub fn gestures(&self, cell: &BeatStep, hit: f64, len: f64, out: &mut Vec<Gesture>) {
         let Some(s) = beat_sound(cell.id.as_str()) else { return };
         let start = out.len();
-        (s.build)(self.body.as_str(), &BeatBuild { f0: midi_to_hz(cell.note.unwrap_or(BASS_NOTE)), len, accent: cell.accent.unwrap_or(1.0) }, out);
+        (s.build)(self.body, &BeatBuild { f0: midi_to_hz(cell.note.unwrap_or(BASS_NOTE)), len, accent: cell.accent.unwrap_or(1.0) }, out);
         let off = hit - s.latency;
         for g in out[start..].iter_mut() {
             g.t0 += off;
@@ -206,7 +206,7 @@ impl BeatPlayer {
 
     /// Set-up time a sound needs before its hit (s): when a pad press can sound at the earliest.
     /// `scratch` is cleared and used to build the sound (no allocation when it has room).
-    pub fn lead_in_with(id: &str, body: &str, scratch: &mut Vec<Gesture>) -> f64 {
+    pub fn lead_in_with(id: &str, body: BodyMix, scratch: &mut Vec<Gesture>) -> f64 {
         let Some(s) = beat_sound(id) else { return 0.0 };
         scratch.clear();
         (s.build)(body, &BeatBuild { f0: 100.0, len: 0.15, accent: 1.0 }, scratch);
@@ -218,7 +218,7 @@ impl BeatPlayer {
     }
 
     /// [`Self::lead_in_with`] on a fresh buffer (allocates; for the UI and tests).
-    pub fn lead_in(id: &str, body: &str) -> f64 {
+    pub fn lead_in(id: &str, body: BodyMix) -> f64 {
         Self::lead_in_with(id, body, &mut Vec::with_capacity(MAX_SOUND_GESTURES))
     }
 }

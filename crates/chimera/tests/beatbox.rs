@@ -55,12 +55,12 @@ fn format_and_parse_round_trip_every_preset() {
 fn every_sound_builds_gestures_that_start_before_and_end_after_its_hit() {
     for s in &BEAT_SOUNDS {
         for body in ["male", "female", "child"] {
-            let gs = s.build_vec(body, &BeatBuild { f0: 82.0, len: 0.15, accent: 1.0 });
+            let gs = s.build_vec(body.into(), &BeatBuild { f0: 82.0, len: 0.15, accent: 1.0 });
             assert!(!gs.is_empty());
             assert!(gs.iter().map(|g| g.t0 - g.ramp_in).fold(f64::INFINITY, f64::min) < 0.0);
             assert!(gs.iter().map(|g| g.t1 + g.ramp_out).fold(f64::NEG_INFINITY, f64::max) > 0.0);
             // everything a sound needs fits inside the sequencer's look-ahead
-            assert!(BeatPlayer::lead_in(s.id, body) < BeatPlayer::HORIZON, "{} {body}", s.id);
+            assert!(BeatPlayer::lead_in(s.id, body.into()) < BeatPlayer::HORIZON, "{} {body}", s.id);
         }
     }
 }

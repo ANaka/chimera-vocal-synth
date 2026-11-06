@@ -7,8 +7,8 @@
  * reports once; the main thread may build a new node, which restarts playback state.
  */
 import { writeGestures, writeSteps, fromUtf8, utf8, CONTROL_KEYS } from "../wasm/wire.ts";
-import type { ToWorklet, FromWorklet, BodyName, TelemetryMessage } from "./protocol.ts";
-import type { CreatureTelemetry } from "../wasm/types.ts";
+import type { ToWorklet, FromWorklet, TelemetryMessage } from "./protocol.ts";
+import type { BodyMix, CreatureTelemetry } from "../wasm/types.ts";
 
 // Minimal AudioWorkletGlobalScope typings
 declare const sampleRate: number;
@@ -21,7 +21,6 @@ declare class AudioWorkletProcessor {
 type Fn = (...a: number[]) => number;
 type Exports = { memory: WebAssembly.Memory } & Record<string, Fn>;
 
-const BODIES: BodyName[] = ["male", "female", "child"];
 const ARTIC_KEYS = CONTROL_KEYS.slice(0, 17);
 const SOURCE_KEYS = ["f0", "glide", "pressure", "breathiness", "tension", "fry", "roughness", "vibratoDepth", "vibratoRate", "drift", "voiced"];
 /** scalars at the head of the human telemetry block (crates/chimera-wasm/src/lib.rs) */
@@ -76,9 +75,13 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     return this.x.memory.buffer;
   }
 
+  private body(): BodyMix {
+    return { female: this.x.engine_body_female(this.h), child: this.x.engine_body_child(this.h) };
+  }
+
   private postReady(): void {
     const x = this.x, h = this.h;
-    this.post({ type: "ready", sampleRate, body: BODIES[x.engine_body(h)], nPh: x.engine_n_ph(h), nOr: x.engine_n_or(h), creature: this.creature?.id ?? "human" });
+    this.post({ type: "ready", sampleRate, body: this.body(), nPh: x.engine_n_ph(h), nOr: x.engine_n_or(h), creature: this.creature?.id ?? "human" });
   }
 
   /** A JSON call on this instance's engine (non-real-time: creature switches). */
@@ -103,7 +106,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     const x = this.x, h = this.h;
     switch (m.type) {
       case "body":
-        x.engine_set_body(h, Math.max(0, BODIES.indexOf(m.body)));
+        x.engine_set_body(h, m.body.female, m.body.child);
         this.postReady();
         break;
       case "artic": {
@@ -223,7 +226,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       type: "telemetry",
       t: { artic, phAreas, orAreas, phLen, orLen, pressureRms, flow, velumPort, glottalArea, glottalFlow, f0, voicing, pLung, outRms, noiseLevel, noiseNode, gate, clock, active },
       load: this.load,
-      body: BODIES[x.engine_body(h)],
+      body: this.body(),
       nPh,
       nOr,
       beatStep: x.engine_beat_step(h),

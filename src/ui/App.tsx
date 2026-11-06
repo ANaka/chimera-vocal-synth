@@ -19,8 +19,8 @@ import { SingRight, singInfo } from "./components/SingPanel.tsx";
 import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
-
-const BODY_NAME: Record<BodyName, string> = { male: "Adult male", female: "Adult female", child: "Child" };
+import { BodyPad } from "./components/BodyPad.tsx";
+import { bodyLabel, presetOf, PRESETS } from "./body.ts";
 
 function TopBar() {
   const started = useStore((s) => s.started);
@@ -56,16 +56,19 @@ function TopBar() {
         ]}
       />
       {mode !== "bestiary" && (
-        <Segmented<BodyName>
-          label="Body"
-          value={body}
-          onChange={setBody}
-          options={[
-            { value: "male", label: "Male" },
-            { value: "female", label: "Female" },
-            { value: "child", label: "Child" },
-          ]}
-        />
+        <div className="body-control">
+          <Segmented<BodyName>
+            label="Body"
+            value={presetOf(body)}
+            onChange={(b) => setBody(PRESETS[b])}
+            options={[
+              { value: "male", label: "Male" },
+              { value: "female", label: "Female" },
+              { value: "child", label: "Child" },
+            ]}
+          />
+          <BodyPad />
+        </div>
       )}
       <div className="topbar-right">
         <label className="volume">
@@ -150,7 +153,7 @@ function LeftScreen() {
       className="left"
       focus
       title={bestiary ? "Creature" : "Vocal tract"}
-      sub={bestiary ? "Airway / live" : `${BODY_NAME[body]} / midsagittal`}
+      sub={bestiary ? "Airway / live" : `${bodyLabel(body)} / midsagittal`}
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >

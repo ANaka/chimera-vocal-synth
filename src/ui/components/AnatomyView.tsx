@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnatomyRenderer, type HandleId, type Slot } from "../render/anatomy.ts";
 import { Glow } from "../render/vector.ts";
 import { engine } from "../../audio/AudioEngine.ts";
+import { sameBody } from "../body.ts";
 import { useStore } from "../store.ts";
 import { VoiceModel } from "../analysis.ts";
 import { useModel } from "../useModel.ts";
@@ -86,7 +87,7 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormant
       last = now;
       if (Math.min(2, window.devicePixelRatio || 1) !== dpr) fit();
       const st = useStore.getState();
-      const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+      const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
       const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
       const m = model.current;
       if (m && w > 0 && h > 0) {
@@ -117,7 +118,7 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormant
     const rect = canvasRef.current!.getBoundingClientRect();
     const p = r.toBody(e.clientX - rect.left, e.clientY - rect.top);
     const st = useStore.getState();
-    const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+    const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
     const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
     const f = m.frame(a);
     let best: HandleId | null = null;

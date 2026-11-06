@@ -5,6 +5,7 @@ import { useStore } from "../store.ts";
 import { roll, tickSinging } from "../singing.ts";
 import { V } from "../colors.ts";
 import { beam, beamPts, label, seg, type Pt } from "../render/vector.ts";
+import { nearestBody } from "../body.ts";
 
 /** pixels per second of voice time */
 const SPEED = 96;
@@ -48,7 +49,7 @@ export function PianoRoll() {
       lo = Math.min(lo, n.midi);
       hi = Math.max(hi, n.midi);
     }
-    const want = lo <= hi ? (lo + hi) / 2 : (KEY_CENTRE[body] ?? 60);
+    const want = lo <= hi ? (lo + hi) / 2 : KEY_CENTRE[nearestBody(body)];
     if (!Number.isFinite(s.centre)) s.centre = want;
     s.centre += (want - s.centre) * (1 - Math.exp(-dt / 0.6));
     const bottom = s.centre - SPAN / 2;

@@ -44,6 +44,15 @@ export interface HumanArtic {
   dorsum: number;
 }
 
+/**
+ * A body between the three calibrated ones (mirrors the engine's BodyMix): `female` from the adult
+ * male (0) to the adult female (1), `child` from adult (0) to child (1).
+ */
+export interface BodyMix {
+  female: number;
+  child: number;
+}
+
 export interface HumanBody {
   name: string;
   /** overall size scale (1 = adult male) */

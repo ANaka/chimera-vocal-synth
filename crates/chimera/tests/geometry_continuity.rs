@@ -122,7 +122,7 @@ fn no_area_jumps_anywhere_in_the_articulators_speech_ranges() {
     for (body_name, body) in BODIES {
         let mut areas = Areas::new(body);
         for vw in ["i", "ɑ", "u", "ə"] {
-            let v = vowel_artic(vw, body_name).unwrap();
+            let v = vowel_artic(vw, body_name.into()).unwrap();
             let tip = rest_tip(v.get(ArticKey::Jaw).unwrap_or(NEUTRAL.jaw), v.get(ArticKey::TbX).unwrap(), v.get(ArticKey::TbY).unwrap());
             let mut base = v.apply_to(&NEUTRAL);
             base.tt_x = tip.x;

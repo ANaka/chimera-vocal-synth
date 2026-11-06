@@ -29,8 +29,8 @@ type F = (...a: number[]) => number;
 function render(x: Exports, s: { body: string; fsOut: number; samples: number; ops: Op[] }): Float32Array {
   const fn = (name: string) => x[name] as F;
   const h = fn("engine_new")(s.fsOut);
-  const body = { male: 0, female: 1, child: 2 }[s.body] ?? 0;
-  if (body) fn("engine_set_body")(h, body);
+  const [female, child] = { male: [0, 0], female: [1, 0], child: [0, 1] }[s.body] ?? [0, 0];
+  if (female || child) fn("engine_set_body")(h, female, child);
   const out = new Float32Array(s.samples);
   const ops = [...s.ops].sort((a, b) => a.at - b.at);
   let i = 0, oi = 0;

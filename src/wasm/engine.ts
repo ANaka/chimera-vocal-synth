@@ -7,7 +7,7 @@
 import { call } from "./chimera.ts";
 import { CREATURE_VISUALS } from "../ui/creatureVisuals.ts";
 import type {
-  ArticKey, ArticSpec, BeatPreset, BeatSound, BeatStep, CreatureDef, CreatureTelemetry, DemoSong, Gesture, HumanArtic, HumanBody,
+  ArticKey, ArticSpec, BeatPreset, BodyMix, BeatSound, BeatStep, CreatureDef, CreatureTelemetry, DemoSong, Gesture, HumanArtic, HumanBody,
   HumanFrame, Phrase, Plan, Segment, SungNote, Syllable, VoiceSource, VowelRef,
 } from "./types.ts";
 
@@ -120,7 +120,7 @@ export function lyricsToSyllables(text: string): Syllable[] {
 // ------------------------------------------------------------------ planning
 
 export interface PlanOptions {
-  body: string;
+  body: BodyMix;
   /** voice-clock start time (s) */
   t0: number;
   /** speaking-rate multiplier (>1 = faster) */
@@ -142,11 +142,11 @@ export function planPhrases(phrases: { segments: Segment[]; intonation?: "statem
   return call("planPhrases", { phrases: phrases.map((p) => ({ segments: p.segments, intonation: p.intonation, pause: p.pause })), options });
 }
 
-export function planSong(notes: SungNote[], options: { body: string; bpm: number; t0: number; vibrato: number }): Plan {
+export function planSong(notes: SungNote[], options: { body: BodyMix; bpm: number; t0: number; vibrato: number }): Plan {
   return call("planSong", { notes, options });
 }
 
-export function planNoteOn(syl: Syllable, midi: number, options: { body: string; vibrato: number; tag: number; legatoFrom?: { syl: Syllable; midi: number } }): Gesture[] {
+export function planNoteOn(syl: Syllable, midi: number, options: { body: BodyMix; vibrato: number; tag: number; legatoFrom?: { syl: Syllable; midi: number } }): Gesture[] {
   return call("planNoteOn", { syl, midi, options });
 }
 
@@ -154,7 +154,7 @@ export function planMelisma(midi: number, options: { vibrato: number; tag: numbe
   return call("planMelisma", { midi, options });
 }
 
-export function planNoteOff(syl: Syllable, midi: number, body: string): Gesture[] {
+export function planNoteOff(syl: Syllable, midi: number, body: BodyMix): Gesture[] {
   return call("planNoteOff", { syl, midi, body });
 }
 
@@ -177,7 +177,7 @@ export function formatBeat(steps: readonly (BeatStep | null)[]): string {
 }
 
 /** A beatboxer's ready posture for this body. */
-export function beatReady(body: string): Partial<HumanArtic> {
+export function beatReady(body: BodyMix): Partial<HumanArtic> {
   return call("beatReady", { body });
 }
 
@@ -222,7 +222,7 @@ export interface AirwayModel {
   glottisPort: number;
 }
 
-export function airwayModel(body: string, sampleRate: number): AirwayModel {
+export function airwayModel(body: BodyMix, sampleRate: number): AirwayModel {
   return call("model", { body, sampleRate });
 }
 

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { usePhosphor } from "../usePhosphor.ts";
 import { engine } from "../../audio/AudioEngine.ts";
+import { sameBody } from "../body.ts";
 import { useStore } from "../store.ts";
 import { V } from "../colors.ts";
 import { beam, beamPts, label, ring, seg, type Pt } from "../render/vector.ts";
@@ -13,7 +14,7 @@ export function Stroboscope() {
   const phase = useRef(0);
   const ref = usePhosphor(({ ctx, w, h, dt }) => {
     const st = useStore.getState();
-    const tele = engine.latest && engine.latest.body === st.body ? engine.latest : null;
+    const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
     const area = tele?.t.glottalArea;
     const flow = tele?.t.glottalFlow;
     const n = area?.length ?? 0;

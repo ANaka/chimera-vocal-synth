@@ -16,7 +16,7 @@ fn engine_plays_the_beatbox_bar_like_the_typescript_worklet() {
     let reference = load_f32("beatbox-bar");
     let mut e = Engine::new(num(&a["fs"]));
     e.set_source(&SourcePatch::f0(num(&a["f0"])));
-    e.set_artic(&beat_ready("male"), None);
+    e.set_artic(&beat_ready("male".into()), None);
     e.set_beat_steps(&parse_beat(a["text"].as_str().unwrap()));
     e.set_beat_tempo(Some(num(&a["bpm"])), Some(num(&a["swing"])));
     e.set_beat_playing(true);
