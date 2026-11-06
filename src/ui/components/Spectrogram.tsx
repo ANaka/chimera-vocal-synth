@@ -19,14 +19,19 @@ const POINTS = 96;
  * hiding what is behind it.
  */
 export function Spectrogram() {
-  const st = useRef<{ slices: Float32Array[]; bins: Float32Array | null; acc: number }>({ slices: [], bins: null, acc: EVERY });
-  const ref = usePhosphor(({ ctx, w, h, dt }) => {
+  const st = useRef<{ slices: { t: number; v: Float32Array }[]; bins: Float32Array | null; last: number }>({ slices: [], bins: null, last: -Infinity });
+  const ref = usePhosphor(({ ctx, w, h, now }) => {
     const s = st.current;
     const an = engine.analyserFast;
     const started = useStore.getState().started;
-    s.acc += dt;
-    if (s.acc >= EVERY) {
-      s.acc %= EVERY;
+    // slices are timestamped, so a slow or hidden tab doesn't stretch "the last two seconds"
+    const t = now / 1000, span = SLICES * EVERY;
+    if (t - s.last > span) {
+      s.slices = [];
+      s.last = t - EVERY;
+    }
+    if (t - s.last >= EVERY) {
+      s.last = t;
       const slice = new Float32Array(POINTS);
       if (an && started) {
         const n = an.frequencyBinCount;
@@ -40,9 +45,9 @@ export function Spectrogram() {
           slice[i] = Math.max(0, Math.min(1, (db - DB_LO) / (DB_HI - DB_LO)));
         }
       }
-      s.slices.push(slice);
-      if (s.slices.length > SLICES) s.slices.shift();
+      s.slices.push({ t, v: slice });
     }
+    while (s.slices.length && t - s.slices[0].t > span) s.slices.shift();
     const left = 26, right = w - 70, base = h - 22;
     const depthX = Math.min(90, (right - left) * 0.18), depthY = Math.min(h * 0.42, 70);
     const frontW = right - left - depthX;
@@ -50,9 +55,10 @@ export function Spectrogram() {
     const n = s.slices.length;
     // back to front: fill black under each slice, then stroke it, so nearer slices hide farther ones
     for (let k = 0; k < n; k++) {
-      const age = n - 1 - k; // 0 = newest
-      const ox = left + (age / SLICES) * depthX, oy = base - (age / SLICES) * depthY;
-      const sl = s.slices[k];
+      const u = Math.min(1, (t - s.slices[k].t) / span); // 0 = now
+      const age = k === n - 1 ? 0 : u * SLICES;
+      const ox = left + u * depthX, oy = base - u * depthY;
+      const sl = s.slices[k].v;
       const p = new Path2D();
       p.moveTo(ox, oy);
       for (let i = 0; i < POINTS; i++) p.lineTo(ox + (i / (POINTS - 1)) * frontW, oy - Math.pow(sl[i], 1.4) * amp);

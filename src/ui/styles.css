@@ -196,14 +196,6 @@ button.primary.large {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* ---------- stage */
-.stage {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
-  gap: 10px;
-  min-height: 520px;
-}
-
 .viewport {
   position: relative;
   background: var(--black);
@@ -274,23 +266,6 @@ button.primary.large {
   font-size: 14px;
 }
 
-.instruments {
-  display: grid;
-  grid-template-rows: 1fr 1fr 1fr;
-  gap: 10px;
-}
-
-.instrument {
-  margin: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: var(--inset);
-  border-radius: var(--radius-m);
-  padding: 8px 10px 6px;
-  min-height: 150px;
-}
-
-.instrument figcaption,
 .panel h2 {
   font-size: 13px;
   font-weight: 550;
@@ -305,22 +280,10 @@ button.primary.large {
   display: block;
 }
 
-/* ---------- deck */
-.deck {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(260px, 1fr) minmax(260px, 1fr);
-  gap: 10px;
-}
-
 .panel {
   background: var(--inset);
   border-radius: var(--radius-m);
   padding: 10px 14px 12px;
-}
-
-.vowel-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .vowel-map {
@@ -332,21 +295,6 @@ button.primary.large {
   border-radius: var(--radius-s);
   cursor: crosshair;
   touch-action: none;
-}
-
-.voice-panel,
-.artic-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: 18px;
-  row-gap: 4px;
-  align-content: start;
-}
-
-.voice-panel h2,
-.artic-panel h2,
-.voice-panel .row {
-  grid-column: 1 / -1;
 }
 
 .row {
@@ -439,26 +387,6 @@ input[type="range"]::-moz-range-thumb {
   gap: 10px;
 }
 
-.speak-input {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.speak-input textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 72px;
-  background: var(--black);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 16px;
-  line-height: 1.4;
-}
-
 .examples {
   display: flex;
   flex-wrap: wrap;
@@ -502,13 +430,6 @@ button.ghost {
   color: var(--text-dim);
   font-size: 13px;
   font-stretch: 87%;
-}
-
-.chart-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
 }
 
 .chart-scroll {
@@ -562,12 +483,6 @@ button.ghost {
 .ipa-chart button.ipa:hover {
   background: var(--caliper);
   color: #1d1a10;
-}
-
-.score-panel {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .score-canvas {
@@ -652,12 +567,6 @@ button.ghost {
   line-height: 1.3;
 }
 
-.calls-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .calls {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -704,18 +613,6 @@ button.ghost {
   font-size: 14px;
 }
 
-.call-hint {
-  font-size: 12.5px;
-  font-stretch: 87%;
-  color: var(--text-dim);
-  line-height: 1.3;
-}
-
-.call:active .call-hint,
-.call.sustain.on .call-hint {
-  color: #3d3620;
-}
-
 .keys-mode {
   display: flex;
   flex-wrap: wrap;
@@ -727,17 +624,6 @@ button.ghost {
   margin-right: 2px;
 }
 
-.creature-params {
-  display: flex;
-  flex-direction: column;
-}
-
-.creature-role {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 550;
-}
-
 .creature-blurb {
   margin: 4px 0 10px;
   font-size: 13px;
@@ -745,43 +631,11 @@ button.ghost {
   max-width: 62ch;
 }
 
-.creature-sliders {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: 18px;
-  row-gap: 4px;
-}
-
 /* ---------- sing */
 .sing {
   display: grid;
   grid-template-columns: minmax(320px, 1.6fr) minmax(260px, 1fr);
   gap: 10px;
-}
-
-.lyrics-panel,
-.song-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lyrics-panel textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 52px;
-  background: var(--black);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 16px;
-  line-height: 1.4;
-}
-
-.song-panel h2 + .examples {
-  margin-bottom: 6px;
 }
 
 .syllables {
@@ -833,11 +687,6 @@ button.ghost {
   color: var(--caliper);
   font-size: 20px;
   line-height: 1;
-}
-
-.roll-panel {
-  grid-column: 1 / -1;
-  min-height: 0;
 }
 
 .roll-canvas {
@@ -900,12 +749,6 @@ button.midi.on .midi-status {
   gap: 10px;
 }
 
-.pads-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .pads {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
@@ -966,17 +809,6 @@ button.midi.on .midi-status {
   opacity: 0.7;
 }
 
-.pads-panel .dim {
-  margin: 2px 0 0;
-}
-
-.seq-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
 .transport {
   display: flex;
   align-items: center;
@@ -990,14 +822,6 @@ button.midi.on .midi-status {
 
 .transport .play.on {
   background: #ffd15c;
-}
-
-.transport-sliders {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 18px;
-  flex: 1;
-  min-width: 240px;
 }
 
 .seq-grid {
@@ -1128,13 +952,6 @@ button.midi.on .midi-status {
   }
 }
 
-/* ---------- keys */
-.keys-bar {
-  background: var(--inset);
-  border-radius: var(--radius-m);
-  padding: 8px;
-}
-
 .keys {
   position: relative;
   height: 74px;
@@ -1187,24 +1004,8 @@ button.midi.on .midi-status {
 
 /* ---------- responsive */
 @media (max-width: 1100px) {
-  .stage {
-    grid-template-columns: 1fr;
-  }
-  .instruments {
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: auto;
-  }
-  .deck {
-    grid-template-columns: 1fr 1fr;
-  }
-  .vowel-panel {
-    grid-column: 1 / -1;
-  }
   .bestiary {
     grid-template-columns: 1fr 1fr;
-  }
-  .creature-params {
-    grid-column: 1 / -1;
   }
   .beatbox {
     grid-template-columns: 1fr;
@@ -1213,7 +1014,7 @@ button.midi.on .midi-status {
 
 @media (max-width: 900px) {
   .speak,
-  .sing {
+.sing {
     grid-template-columns: 1fr;
   }
 }
@@ -1226,17 +1027,13 @@ button.midi.on .midi-status {
     padding: 8px;
     gap: 8px;
   }
-  .stage {
-    display: contents;
-  }
   .viewport {
     order: 1;
   }
-  .deck,
   .speak,
-  .sing,
-  .bestiary,
-  .beatbox {
+.sing,
+.bestiary,
+.beatbox {
     order: 2;
   }
   .sing {
@@ -1265,25 +1062,8 @@ button.midi.on .midi-status {
   .pad {
     min-height: 64px;
   }
-  .keys-bar {
-    order: 3;
-  }
-  .instruments {
-    order: 4;
-  }
   .tagline {
     display: none;
-  }
-  .instruments {
-    grid-template-columns: 1fr;
-  }
-  .deck {
-    grid-template-columns: 1fr;
-  }
-  .voice-panel,
-  .artic-panel,
-  .creature-sliders {
-    grid-template-columns: 1fr;
   }
   .bestiary {
     grid-template-columns: 1fr;
@@ -1298,7 +1078,7 @@ button.midi.on .midi-status {
     min-height: 0;
   }
   .anatomy,
-  .creature-canvas {
+.creature-canvas {
     position: relative;
     inset: auto;
     width: 100%;
@@ -1519,11 +1299,6 @@ button.ghost:hover,
 .s-vowels { grid-area: vowels; }
 .s-voice { grid-area: voice; }
 .s-keys { grid-area: keys; }
-
-/* modes not yet redrawn: their three instruments on the right, their deck below the wall */
-.right-legacy {
-  grid-template-rows: repeat(3, minmax(0, 1fr));
-}
 
 /* ---------- a screen */
 .screen {
@@ -1804,6 +1579,20 @@ button.ghost:hover,
   justify-content: center;
 }
 
+/* a screen holding encoders is as tall as they need (tabs, two-line labels, dial, value, unit) */
+.screen .screen-body:has(> .enc-pages) {
+  min-height: 176px;
+}
+
+.s-cparams .enc-dial {
+  width: 62px;
+  height: 62px;
+}
+
+.s-cparams .enc-value {
+  font-size: 24px;
+}
+
 /* ---------- keys */
 .s-keys .screen-body {
   padding: 8px 14px 12px;
@@ -1874,16 +1663,13 @@ button.midi.on .midi-status {
 }
 
 /* ---------- panels of modes not yet redrawn: framed, black, capital headings */
-.panel,
-.instrument,
-.keys-bar {
+.panel {
   background: #000;
   border: 1px solid var(--frame);
   border-radius: 0;
 }
 
-.panel h2,
-.instrument figcaption {
+.panel h2 {
   font-weight: 300;
   font-size: 12px;
   letter-spacing: 0.2em;
@@ -1969,20 +1755,11 @@ input[type="range"]::-moz-range-thumb {
   .s-voice .screen-body {
     min-height: 230px;
   }
-  .right-legacy {
-    grid-template-rows: none;
-  }
-  .right-legacy .screen-body {
-    min-height: 170px;
-  }
 }
 
 /* phones: the keys strip stacks under its MIDI button; flex: 1 from a zero basis collapsed it
    to its border (also true on main before the redesign), so it takes its fixed height instead */
 @media (max-width: 720px) {
-  .keys-bar .keys-row .keys {
-    flex: none;
-  }
   .beat-overlay {
     top: 10px;
     bottom: auto;
@@ -1992,6 +1769,10 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 640px) {
   .app {
     padding: 6px 8px 12px;
+  }
+  /* encoders go two by two here: two rows of them */
+  .screen .screen-body:has(> .enc-pages) {
+    min-height: 350px;
   }
   .right-play {
     grid-template-columns: minmax(0, 1fr);
@@ -2687,7 +2468,7 @@ input[type="range"]::-moz-range-thumb {
     min-height: 240px;
   }
   .s-pads .screen-body,
-  .s-transport .screen-body {
+.s-transport .screen-body {
     min-height: 300px;
   }
   .s-keys-compact .screen-body {

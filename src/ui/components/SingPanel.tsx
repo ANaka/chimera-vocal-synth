@@ -1,5 +1,5 @@
 import { useStore } from "../store.ts";
-import { useSing, playDemo, stopSinging, DEMO_SONGS } from "../singing.ts";
+import { useSing, playDemo, stopSinging, soundingSyllable, DEMO_SONGS } from "../singing.ts";
 import { Keys } from "./Keys.tsx";
 import { PianoRoll } from "./PianoRoll.tsx";
 import { SpectrumView } from "./SpectrumView.tsx";
@@ -11,11 +11,11 @@ import type { InfoFn } from "./AnatomyView.tsx";
 /** epilarynx narrowing for the singer's ring (measured: +3 to +12 dB at 2.4–3.6 kHz, adult male) */
 const RING = 0.85;
 
-/** the syllable being sung now: the demo's, or the one the held key sang */
+/** the syllable being sung now: the demo's, or the one the held key is singing */
 function syllableNow(): string | null {
   const s = useSing.getState();
   if (s.demo) return s.syllables[s.demoAt]?.text ?? null;
-  return useStore.getState().heldNotes.length ? (s.syllables[s.cursor - 1]?.text ?? null) : null;
+  return soundingSyllable();
 }
 
 /** Sing mode's lines over the face: the note, the syllable, the ring */

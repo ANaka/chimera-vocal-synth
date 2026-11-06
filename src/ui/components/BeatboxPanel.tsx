@@ -75,7 +75,19 @@ function Pads() {
   return (
     <div className="pads">
       {BEAT_SOUNDS.map((s, i) => (
-        <button key={s.id} className={`pad pad-${s.role}${lit === s.id ? " lit" : ""}`} onPointerDown={() => hit(s.id)} title={s.hint} aria-label={`${s.name}: ${s.hint}. Key ${(i + 1) % 10}`}>
+        <button
+          key={s.id}
+          className={`pad pad-${s.role}${lit === s.id ? " lit" : ""}`}
+          onPointerDown={() => hit(s.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              hit(s.id);
+            }
+          }}
+          title={s.hint}
+          aria-label={`${s.name}: ${s.hint}. Key ${(i + 1) % 10}`}
+        >
           <span className="pad-sym">{s.id}</span>
           <span className="pad-name">{s.name}</span>
           <span className="pad-air">{AIR[s.airstream]}</span>
