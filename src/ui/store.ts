@@ -26,6 +26,8 @@ export interface ViewOptions {
   particles: boolean;
   grid: boolean;
   calipers: boolean;
+  /** the face screen shows the head in 3D (turn it with the pointer; no handles) */
+  threeD: boolean;
 }
 
 interface State {
@@ -129,7 +131,7 @@ export const useStore = create<State>((set, get) => ({
   volume: 0.8,
   hold: false,
   heldNotes: [],
-  view: { pressure: true, particles: true, grid: false, calipers: true },
+  view: { pressure: true, particles: true, grid: false, calipers: true, threeD: false },
   mode: "play",
   setMode: (m) => {
     const prev = get().mode;
