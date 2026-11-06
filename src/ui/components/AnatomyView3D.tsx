@@ -89,6 +89,8 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     };
     controls.addEventListener("start", () => (tween.on = false));
     let posed: VoiceModel | null = null;
+    /** the head centre the camera was placed for (a new body moves the view with it) */
+    const posedTarget = new THREE.Vector3();
     const home = () => {
       const m = model.current;
       if (m) {
@@ -134,11 +136,11 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
             moveTo(p.home, p.target, 1.6);
           } else {
             // another body: keep the view, centred on the new head
-            const q = r.poses(posed);
-            off.copy(p.target).sub(q.target);
+            off.copy(p.target).sub(posedTarget);
             camera.position.add(off);
             controls.target.add(off);
           }
+          posedTarget.copy(p.target);
           posed = m;
         }
         stepTween(dt);

@@ -296,7 +296,7 @@ function buildRest(model: VoiceModel): Rest {
   const frame = model.frame(artic);
   const prof = buildProfile(model, frame, artic);
   const skin = [...prof.skinLower, ...prof.skinUpper];
-  const head = new Shape(skin, 0.05 * k, (y, F, Bk) => {
+  const head = new Shape(skin, 0.08 * k, (y, F, Bk) => {
     const Y = unBy(y);
     const plane = Y >= 3.4 && Y <= 16.1 ? interp(PLANE, Y) * k : Infinity;
     const Fs = Math.min(F, plane);
@@ -412,7 +412,7 @@ function buildRest(model: VoiceModel): Rest {
   });
 
   // ---- brain: rings and meridians over the 2D outline, the skull and its base stay on the midline
-  const brain = new Shape(prof.brain, 0.05 * k, (y, F, Bk) => ({ F, Bk, Fs: F, W: interp(BRAIN_WIDTH, unBy(y)) * k, xw: Bk + (F - Bk) * 0.48, E: 0, wf: 1, pf: 2.3 }));
+  const brain = new Shape(prof.brain, 0.08 * k, (y, F, Bk) => ({ F, Bk, Fs: F, W: interp(BRAIN_WIDTH, unBy(y)) * k, xw: Bk + (F - Bk) * 0.48, E: 0, wf: 1, pf: 2.3 }));
   group(fixed, V.blueMid, 0.85, 0.32, (L) => {
     for (let y = brain.y0 + 0.6 * k; y < brain.y1 - 0.15 * k; y += 1.5 * k) {
       const s = brain.at(y);
@@ -941,8 +941,8 @@ export class Anatomy3D {
     }
     // where the lips meet beyond the corners
     for (const s of [1, -1]) B.poly(row(true, () => 0, s * Wm, s * Wl, 6), V.pink, 1.0, { alpha: 0.6 });
-    // the opening
-    const open = ul.y - ll.y > 0.02 * k;
+    // the opening: are the lips apart in the engine's frame (lo is in the jaw's rest pose)
+    const open = f.upperLip[6].y - f.lowerLip[6].y > 0.02 * k;
     const n = 24;
     P.reset();
     for (let i = 0; i <= n; i++) P.p(...pt(true, 0, -Wm + (2 * Wm * i) / n));
