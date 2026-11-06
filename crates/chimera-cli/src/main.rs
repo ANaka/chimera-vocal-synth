@@ -18,7 +18,8 @@ usage: chimera <command> [args] [--float]
   render speech  <out> [\"ipa / ipa\"] [male|female|child]
   render text    <out> [\"English text.\"] [male|female|child]
   render song    [outdir] [male|female|child]
-  render notes   <in.json> <out> [male|female|child]   (melody file; midi <= 0 is a rest)
+  render notes   <in.json> <out> [male|female|child] [--artic tracks.json]
+                 (melody file; midi <= 0 is a rest; --artic also writes the articulators at 100 Hz)
   render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child] [out]

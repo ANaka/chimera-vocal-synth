@@ -3,6 +3,7 @@
 use crate::js::{fixed, num, pad_end, pad_start};
 use crate::{Ctx, FS, arg, body, peak, repo_path, wav_name};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
+use chimera::anatomy::human::ArticKey;
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
@@ -338,11 +339,40 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Articulator tracks are sampled at this rate (Hz): 480 samples at 48 kHz.
+const ARTIC_RATE: usize = 100;
+
+/// Render like `render_blocks`, and record the articulators at `ARTIC_RATE`: frame i is the state
+/// at i / ARTIC_RATE s. The voice runs sample by sample, so the sound is the same either way.
+fn render_tracked(v: &mut HumanVoice, out: &mut [f32]) -> Vec<Vec<f64>> {
+    let hop = FS as usize / ARTIC_RATE;
+    let frame = |v: &HumanVoice| ArticKey::ALL.iter().map(|k| js_round(v.artic.x.get(*k) * 1e4) / 1e4).collect();
+    let mut frames = vec![frame(v)];
+    for chunk in out.chunks_mut(hop) {
+        render_blocks(v, chunk);
+        frames.push(frame(v));
+    }
+    frames
+}
+
 /// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?}`.
 /// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
-/// melody into phrases planned separately on one voice. `render notes <in.json> <out> [body]`
+/// melody into phrases planned separately on one voice.
+/// `render notes <in.json> <out> [body] [--artic tracks.json]`: `--artic` also writes the
+/// articulators over time (`{"rate", "body", "keys", "frames"}`), to animate a face in sync.
 pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
-    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child]")?;
+    let mut artic_out: Option<String> = None;
+    let mut rest = Vec::new();
+    let mut it = a.iter();
+    while let Some(x) = it.next() {
+        if x == "--artic" {
+            artic_out = Some(it.next().ok_or("--artic needs a file")?.clone());
+        } else {
+            rest.push(x.clone());
+        }
+    }
+    let a = &rest[..];
+    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child] [--artic tracks.json]")?;
     let out_name = wav_name(arg(a, 1, "out/notes"));
     let body_name = arg(a, 2, "male");
     let b = body(body_name)?;
@@ -396,9 +426,20 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     flush(&mut phrase, start, &mut v, &mut end);
     let n = js_round(FS * (end + 0.4)) as usize;
     let mut out = vec![0f32; n];
-    render_blocks(&mut v, &mut out);
+    let frames = match &artic_out {
+        Some(_) => render_tracked(&mut v, &mut out),
+        None => {
+            render_blocks(&mut v, &mut out);
+            Vec::new()
+        }
+    };
     ctx.write_wav(&out_name, &out)?;
     println!("{out_name}: {} s, peak {}, {} notes", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), sounding);
+    if let Some(path) = &artic_out {
+        let j = serde_json::json!({"rate": ARTIC_RATE, "body": body_name, "keys": ArticKey::NAMES, "frames": frames});
+        std::fs::write(path, j.to_string()).map_err(|e| format!("{path}: {e}"))?;
+        println!("{path}: {} frames at {ARTIC_RATE} Hz", frames.len());
+    }
     Ok(())
 }
 
