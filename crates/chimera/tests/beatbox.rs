@@ -46,7 +46,7 @@ fn parses_symbols_rests_notes_accents_and_bar_lines() {
 fn format_and_parse_round_trip_every_preset() {
     for p in &BEAT_PRESETS {
         let steps = parse_beat(p.text);
-        assert_eq!(steps.len(), 16);
+        assert_eq!(steps.len() % 4, 0, "{}: whole beats", p.name);
         assert_eq!(parse_beat(&format_beat(&steps)), steps);
     }
 }

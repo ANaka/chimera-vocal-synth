@@ -48,4 +48,21 @@ pub static DEMO_SONGS: &[DemoSong] = &[
         ],
         octave: SongOctave { male: -1.0, female: 0.0, child: 0.0 },
     },
+    DemoSong {
+        // traditional, Harry Dacre 1892 (public domain); the first song a computer sang (1961)
+        name: "Daisy Bell",
+        bpm: 160.0,
+        lyrics: "Daisy, Daisy, give me your answer do. I'm half crazy, all for the love of you. It won't be a stylish marriage, I can't afford a carriage, but you'll look sweet upon the seat of a bicycle built for two.",
+        notes: &[
+            [72.0, 3.0], [69.0, 3.0], [65.0, 3.0], [60.0, 3.0],
+            [62.0, 1.0], [64.0, 1.0], [65.0, 1.0], [62.0, 2.0], [65.0, 1.0], [60.0, 6.0],
+            [67.0, 3.0], [72.0, 3.0], [69.0, 3.0], [65.0, 3.0],
+            [62.0, 1.0], [64.0, 1.0], [65.0, 1.0], [67.0, 2.0], [69.0, 1.0], [67.0, 5.0], [69.0, 1.0],
+            [70.0, 1.0], [69.0, 1.0], [67.0, 1.0], [72.0, 2.0], [69.0, 1.0], [67.0, 3.0],
+            [65.0, 2.0], [67.0, 1.0], [69.0, 2.0], [65.0, 1.0], [62.0, 2.0], [65.0, 1.0], [62.0, 3.0], [60.0, 3.0],
+            [60.0, 1.0], [65.0, 1.0], [69.0, 1.0], [67.0, 3.0], [60.0, 1.0], [65.0, 1.0], [69.0, 1.0], [67.0, 3.0],
+            [69.0, 1.0], [70.0, 1.0], [72.0, 1.0], [69.0, 2.0], [65.0, 1.0], [67.0, 2.0], [60.0, 1.0], [65.0, 6.0],
+        ],
+        octave: SongOctave { male: -1.0, female: 0.0, child: 0.0 },
+    },
 ];

@@ -385,7 +385,7 @@ pub struct BeatPreset {
     pub text: &'static str,
 }
 
-pub static BEAT_PRESETS: [BeatPreset; 7] = [
+pub static BEAT_PRESETS: [BeatPreset; 8] = [
     BeatPreset { name: "Boots and cats", bpm: 96.0, swing: 0.0, text: "B . t . | Pf . t . | B . t . | Pf . t ." },
     BeatPreset { name: "Four on the floor", bpm: 122.0, swing: 0.0, text: "B . t . | B . tss . | B . t . | B . tss ." },
     BeatPreset { name: "Breakbeat", bpm: 94.0, swing: 0.18, text: "B . t . | Pf . t B | . B t . | Pf . t t" },
@@ -393,4 +393,5 @@ pub static BEAT_PRESETS: [BeatPreset; 7] = [
     BeatPreset { name: "Inward snare", bpm: 100.0, swing: 0.0, text: "B . t . | ^K . t . | B B t . | ^K . t ." },
     BeatPreset { name: "Clicks and pops", bpm: 90.0, swing: 0.25, text: "B . ! . | P! . ! . | B ! . ! | P! . ! !" },
     BeatPreset { name: "Hum bass", bpm: 92.0, swing: 0.1, text: "B m . m:43 | Pf . m:45 . | B m:40 . m | Pf . t kch" },
+    BeatPreset { name: "Waltz", bpm: 160.0, swing: 0.0, text: "B . t . | Pf . t . | B t Pf . | B . t . | Pf . t B | t . Pf t" },
 ];
