@@ -10,12 +10,12 @@ import { VoiceControls, VoiceToggles } from "./components/VoiceControls.tsx";
 import { Keys } from "./components/Keys.tsx";
 import { Segmented, Toggle } from "./components/Controls.tsx";
 import { Screen } from "./components/Screen.tsx";
-import { SpeakRight, speechInfo, speechSlots } from "./components/SpeakPanel.tsx";
+import { SpeakRight, speechInfo, speechSlots, speechWords } from "./components/SpeakPanel.tsx";
 import { BestiaryRight } from "./components/BestiaryPanel.tsx";
 import { CreatureView } from "./components/CreatureView.tsx";
 import { creatureById } from "../wasm/engine.ts";
 import { BeatboxRight, BeatOverlay, beatInfo, beatSlots } from "./components/BeatboxPanel.tsx";
-import { SingRight, singInfo } from "./components/SingPanel.tsx";
+import { SingRight, singInfo, singWords } from "./components/SingPanel.tsx";
 import { playDemo, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
@@ -157,7 +157,7 @@ function LeftScreen() {
       label={bestiary ? "Live creature airway" : "Live vocal tract"}
       tools={<ViewToggles />}
     >
-      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} /> : mode === "sing" ? <AnatomyView info={singInfo} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
+      {bestiary ? <CreatureView /> : mode === "speak" ? <AnatomyView slots={speechSlots} info={speechInfo} overlay={speechWords} /> : mode === "sing" ? <AnatomyView info={singInfo} overlay={singWords} /> : mode === "beatbox" ? <AnatomyView slots={beatSlots} info={beatInfo} showFormants={false} /> : <AnatomyView />}
       {mode === "beatbox" && <BeatOverlay />}
       <StartPrompt />
     </Screen>

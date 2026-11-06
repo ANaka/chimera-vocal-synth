@@ -91,6 +91,24 @@ interface Sounding {
 
 let sounding: Sounding | null = null;
 
+/** How a syllable is written at the mouth: a hyphen when its word goes on. */
+const written = (s: Syllable) => s.text + (s.wordEnd ? "" : "-");
+
+/**
+ * The syllable being sung now, for the words at the mouth: the demo's note under the clock, or
+ * the held key's. A melisma keeps its syllable's key, so the word stays while the pitch moves.
+ */
+export function sungNow(): { key: unknown; text: string } | null {
+  const d = demoRun;
+  if (d) {
+    if (d.offset === null) return null;
+    const t = now() - d.offset;
+    const k = d.times.findIndex(([a, b]) => t >= a && t < b - 0.02);
+    return k < 0 ? null : { key: `${d.id}:${d.parent[k]}`, text: d.shown[k] };
+  }
+  return sounding ? { key: sounding, text: written(sounding.syl) } : null;
+}
+
 /** The syllable whose vowel is sounding from the keys now (null when no key sings). */
 export function soundingSyllable(): string | null {
   return sounding?.syl.text ?? null;
@@ -201,6 +219,9 @@ interface DemoRun {
   times: [number, number][];
   midi: number[];
   text: string[];
+  /** what the mouth shows per note, and the note whose syllable it is (a melisma's parent) */
+  shown: string[];
+  parent: number[];
   end: number;
   /** voice clock of plan time 0, once the worklet has it */
   offset: number | null;
@@ -244,7 +265,10 @@ export async function playDemo(name: string, body: BodyMix, ready?: () => Promis
     return [a, t];
   });
   const id = engine.schedule({ gestures: plan.gestures, segments: plan.segments, end: plan.end });
-  demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), end: plan.end, offset: null };
+  const parent: number[] = [];
+  notes.forEach((n, i) => parent.push(n.syl.melisma && i > 0 ? parent[i - 1] : i));
+  const shown = parent.map((p) => written(notes[p].syl));
+  demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), shown, parent, end: plan.end, offset: null };
   useSing.setState({ lyrics: song.lyrics, syllables: syl, cursor: 0, demo: song.name, demoAt: -1 });
 }
 

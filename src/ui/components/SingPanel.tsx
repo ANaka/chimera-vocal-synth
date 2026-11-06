@@ -1,5 +1,7 @@
 import { useStore } from "../store.ts";
-import { useSing, playDemo, stopSinging, soundingSyllable, DEMO_SONGS } from "../singing.ts";
+import { useSing, playDemo, stopSinging, soundingSyllable, sungNow, DEMO_SONGS } from "../singing.ts";
+import { mouthWords } from "../mouthWords.ts";
+import { V } from "../colors.ts";
 import { Keys } from "./Keys.tsx";
 import { PianoRoll } from "./PianoRoll.tsx";
 import { SpectrumView } from "./SpectrumView.tsx";
@@ -17,6 +19,9 @@ function syllableNow(): string | null {
   if (s.demo) return s.syllables[s.demoAt]?.text ?? null;
   return soundingSyllable();
 }
+
+/** the syllable being sung, at the mouth */
+export const singWords = mouthWords(sungNow, V.green);
 
 /** Sing mode's lines over the face: the note, the syllable, the ring */
 export const singInfo: InfoFn = (_m, _f, tele) => {

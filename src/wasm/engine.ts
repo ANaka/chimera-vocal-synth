@@ -141,6 +141,11 @@ export function planUtterance(segments: Segment[], options: PlanOptions): Plan {
   return call("planUtterance", { segments, options });
 }
 
+/** How many planned segments each segment becomes (a diphthong is planned as its two vowels). */
+export function plannedCounts(ipa: string[]): number[] {
+  return call("plannedCounts", { ipa });
+}
+
 export function planPhrases(phrases: { segments: Segment[]; intonation?: "statement" | "question" | "flat"; pause?: number }[], options: PlanOptions): Plan {
   return call("planPhrases", { phrases: phrases.map((p) => ({ segments: p.segments, intonation: p.intonation, pause: p.pause })), options });
 }

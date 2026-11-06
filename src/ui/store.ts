@@ -7,6 +7,7 @@ import { creatureById } from "../wasm/engine.ts";
 import type { ParamDef } from "../wasm/types.ts";
 import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../wasm/engine.ts";
 import { singNoteOn, singNoteOff, stopSinging, ensureDictionary } from "./singing.ts";
+import { stopSpeaking } from "./speech.ts";
 import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
 
 export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox";
@@ -137,7 +138,7 @@ export const useStore = create<State>((set, get) => ({
     // notes held across the switch would keep breathing into the other voice
     set({ mode: m, heldNotes: [] });
     // speech belongs to Speak: under a creature the human clock stops and it would resume later
-    if (prev === "speak" || m === "bestiary") engine.stopSpeech();
+    if (prev === "speak" || m === "bestiary") stopSpeaking();
     if ((prev === "bestiary") !== (m === "bestiary")) {
       // a sustain belongs to the voice it was started on
       set({ hold: false });
@@ -265,6 +266,8 @@ export const useStore = create<State>((set, get) => ({
     // the new voice starts without the old one's score: a sung note would hang
     if (get().mode === "sing") stopSinging();
     const f0 = defaultF0(b);
+    // nor does speech carry over (and the new voice's clock starts again from zero)
+    if (get().mode === "speak") stopSpeaking();
     set((s) => ({ body: b, source: { ...s.source, f0 } }));
     engine.setBody(b);
   },

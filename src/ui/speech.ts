@@ -5,6 +5,7 @@ import { tokenizeIpa } from "../wasm/engine.ts";
 import { planPhrases, type Plan, type Segment } from "../wasm/engine.ts";
 import { engine } from "../audio/AudioEngine.ts";
 import type { Gesture } from "../wasm/types.ts";
+import { wordSpans, type WordSpan } from "./words.ts";
 
 export const g2p = new EnglishG2P();
 
@@ -14,9 +15,13 @@ export interface SpokenPlan {
   offset: number | null;
   id: number;
   transcription: string;
+  /** each word's span in the plan */
+  words: WordSpan[];
 }
 
 let current: SpokenPlan | null = null;
+/** the plan a stop cut short: its words are no longer being said */
+let cutId = -1;
 const listeners = new Set<(p: SpokenPlan | null) => void>();
 engine.onPlanned((m) => {
   if (current && m.id === current.id) {
@@ -46,10 +51,10 @@ export function transcribe(phrases: { segments: Segment[]; intonation?: string }
   return phrases.map((p) => p.segments.map((s) => (s.stress === 1 ? "ˈ" : s.stress === 2 ? "ˌ" : "") + s.ipa + (s.wordEnd ? " " : "")).join("").trim() + (p.intonation === "question" ? "?" : "")).join(" | ");
 }
 
-export function speakPhrases(phrases: { segments: Segment[]; intonation?: "statement" | "question" | "flat"; pause?: number }[], o: { body: BodyMix; rate: number; f0: number }): SpokenPlan {
+export function speakPhrases(phrases: { segments: Segment[]; intonation?: "statement" | "question" | "flat"; pause?: number; words?: string[] }[], o: { body: BodyMix; rate: number; f0: number }): SpokenPlan {
   const plan = planPhrases(phrases, { body: o.body, t0: 0, rate: o.rate, f0: o.f0 });
   const id = engine.schedule({ gestures: plan.gestures.map((g: Gesture) => ({ ...g, targets: { ...g.targets } })), segments: plan.segments, end: plan.end });
-  current = { plan, offset: null, id, transcription: transcribe(phrases) };
+  current = { plan, offset: null, id, transcription: transcribe(phrases), words: wordSpans(phrases, plan) };
   for (const l of listeners) l(current);
   return current;
 }
@@ -72,4 +77,15 @@ export async function speakText(text: string, o: { ipa: boolean; body: BodyMix; 
 
 export function stopSpeaking(): void {
   engine.stopSpeech();
+  if (current) cutId = current.id;
+}
+
+/** The word being spoken now (null between words and once the speech is over or stopped). */
+export function spokenWordNow(): { key: string; text: string } | null {
+  const p = current;
+  const t = engine.voiceClock();
+  if (!p || p.offset === null || t === null || p.id === cutId) return null;
+  const pt = t - p.offset;
+  const i = p.words.findIndex((w) => pt >= w.t0 && pt < w.t1 + 0.05);
+  return i < 0 ? null : { key: `${p.id}:${i}`, text: p.words[i].text };
 }
