@@ -140,11 +140,13 @@ fn analysis_matches_typescript() {
         rep.peaks("findPeaks", label, &c["peaks"], &find_peaks(&nums(&c["freqs"]), &nums(&c["mag"]), num(&c["minFreq"])));
     }
 
-    // ---- signals
+    // ---- signals: the TypeScript engine's sustained male voice (voice-sustain-male.f32, from
+    // sample `offset`), frozen in its own file. This tests the analysis code on a fixed signal; the
+    // voice fixtures themselves are re-blessed whenever the sound changes.
     let vc = &g["voice"];
-    let voice: Vec<f64> = load_f32(&format!("voice-{}", vc["name"].as_str().unwrap())).iter().map(|&x| x as f64).collect();
-    let off = vc["offset"].as_u64().unwrap() as usize;
-    let voice_frame = &voice[off..off + vc["len"].as_u64().unwrap() as usize];
+    let voice_frame: Vec<f64> = load_f32("analysis-voice-frame").iter().map(|&x| x as f64).collect();
+    assert_eq!(voice_frame.len(), vc["len"].as_u64().unwrap() as usize);
+    let voice_frame = &voice_frame[..];
     let noise = nums(&g["lpc"]["noise"]);
 
     // ---- FFT, windows, spectra
