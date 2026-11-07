@@ -52,6 +52,11 @@ opens a new one, update this list and give the experiment's number.
      100–150 ms early. The cause is upstream: the breath arrives before the first articulation is
      in place. Next angle: start the breath ramp with the first segment's closure or constriction
      (`breath` gesture in `plan_utterance`), not 60 ms ahead of it, and leave the folds alone.
+   - Experiment 10 timed a sung phrase's breath to reach full drive as its first segment starts
+     (20 ms later than before): vowel-initial cost 1.49 → 0.97 (median −0.016 → +0.004 s, hers
+     +0.005), voiceless-initial 1.08 → 0.52 (−0.020 → +0.037 s, hers +0.018). The medians are
+     about right now; what is left is the mean gap, so a few phrases far off (the /s/, /f/, /h/
+     onsets voiced well before the note, and the phrase-initial stops that never phonate, lead 5).
 4. **Vibrato.** Costs: rate 0.67, share 0.62. The synth puts 35-cent vibrato on every long note
    at 5.5 Hz. She uses it on about two thirds of her long notes, at about 6.1 Hz
    (`vibrato_gesture` in `crates/chimera/src/phonetics/sing.rs`).
@@ -420,3 +425,40 @@ like, speech and bench OK) can now be retried as it was.
   she about two thirds. The largest costs are still H1−H2 (2.27), the onsets (1.49 and 1.08) and
   level 0–0.5 kHz (1.28). For H1−H2, try a wider F1 bandwidth or F1 that follows pitch (lead 1);
   for the onsets, time the breath ramp to the first segment (lead 3).
+
+### 10. A sung phrase's breath reaches full drive at its first segment (kept)
+
+- Hypothesis: every phrase's breath gesture ramped up over the 40 ms ending 20 ms before its first
+  segment, so the lung pressure crossed the phonation threshold early and a sung phrase voiced
+  ahead of its note: 16 ms early before a vowel (hers 5 ms late) and 20 ms early before a voiceless
+  onset (hers 18 ms late). A sung onset is planned (`plan_song` puts the first vowel on the beat),
+  so a singer times the breath to it: the pressure builds into the adducted folds, or behind the
+  first constriction, as the first segment starts. The two onset terms should move later and
+  nothing else should move much.
+- Change: `plan_utterance` in `crates/chimera/src/phonetics/planner.rs`: for a sung phrase
+  (`sung`, set only by `plan_song`), the breath gesture reaches full drive at the first segment
+  (`BREATH_SUNG_AT` = 0.06 s after the plan start, which is where the first segment starts)
+  instead of 0.04 s. Speech and live notes keep the old lead, so speech is untouched and live
+  notes get no added latency. Tried, against experiment 9:
+  - 0.05: 0.661 (−0.048 like for like); BETTER. Onsets −0.005 / +0.020 s, costs 1.18 / 0.77.
+  - 0.06: 0.623 (−0.085); BETTER. Kept: the breath peaks just as the first segment starts.
+  - 0.07: 0.647 (−0.063); BETTER. Onsets +0.015 / +0.006 s, costs 1.10 / 0.68.
+- Singer: training score 0.714 → 0.623 (−0.085 like for like, BETTER), held-out 0.978 → 0.791.
+  - Onset, vowel-initial cost 1.49 → 0.97 (synth median −0.016 → +0.004 s, hers +0.005); held-out
+    1.16 → 0.00.
+  - Onset, voiceless-initial 1.08 → 0.52 (−0.020 → +0.037 s, hers +0.018); held-out 1.14 → 0.05.
+  - Envelope correlation 0.810 → 0.814, note MCD 8.535 → 8.535 dB, pitch error 4.86 → 4.85 cents.
+    No other term moved by more than 0.01.
+- Speech: word error rate 39.4 → 39.4 % (OK; speech isn't `sung`).
+- Speed: the bench doesn't run the planner, so its render path is unchanged. The machine was
+  loaded (load average 30 on 16 cores, from other sessions): `os=2` read 34.0 % and 33.6 %, and the
+  previous commit read 33.1 % against this one's 33.2 % in back-to-back runs. `out/hill/best/bench.txt`
+  keeps the last quiet-machine figure (19.4 %).
+- Tests: after blessing twice (the first run fails `engine.rs`, as expected), `cargo test
+  --workspace` passes, `golden_planning` and `golden_analysis` included, and `bun test tests`
+  passes (18).
+- Commit: 3747f99.
+- Next: the largest cost by far is H1−H2 (2.27, a sixth of the score on its own), then level
+  0–0.5 kHz (1.28), the onsets' remaining mean gap (0.97 and 0.52) and the vibrato share (0.65).
+  For H1−H2, try a wider F1 bandwidth or F1 that follows pitch (lead 1). For the onsets, look at the
+  phrases still far off rather than the medians, which are now about right.
