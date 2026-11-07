@@ -10,7 +10,9 @@
  *   { "title": "…", "audio": "mix.mp3", "bpm": 103, "downbeat": 0,
  *     "voices": [{ "name": "Lower", "tele": "male.tele" }, { "name": "Upper", "tele": "female.tele" }] }
  *
- * `bpm` and `downbeat` (s, a bar's first beat) are optional: with them the heads nod on the beat.
+ * Optional: `bpm` and `downbeat` (s, a bar's first beat) nod the heads on the beat; a voice's
+ * `melody` (the melody file it was rendered from) writes its words at its mouth, and the show's
+ * `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary as it should read.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnatomyView3D, type HeadFeed } from "./AnatomyView3D.tsx";
@@ -21,18 +23,25 @@ import { getModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
 import { bodyLabel } from "../body.ts";
 import type { ViewFlags } from "../render/anatomy.ts";
+import { mouthWords } from "../mouthWords.ts";
+import { V } from "../colors.ts";
+import { g2p } from "../speech.ts";
+import { lyricsToSyllables } from "../../wasm/engine.ts";
+import { sungWords, wordAt, type Melody, type SungWords } from "../../show/words.ts";
+import type { OverlayFn } from "./AnatomyView.tsx";
 
 interface ShowFile {
   title: string;
   audio: string;
   bpm?: number;
   downbeat?: number;
-  voices: { name: string; tele: string }[];
+  spell?: Record<string, string>;
+  voices: { name: string; tele: string; melody?: string }[];
 }
 
 interface Loaded {
   show: ShowFile;
-  voices: { name: string; track: TeleTrack }[];
+  voices: { name: string; track: TeleTrack; words: SungWords | null }[];
 }
 
 /** the heads as the face screen shows them by default, less the measurement labels */
@@ -68,7 +77,19 @@ export function DuetPage(props: { id: string }) {
       const show = (await (await fetchOk(base + "show.json")).json()) as ShowFile;
       if (!show.voices?.length || !show.audio) throw new Error("show.json needs audio and voices");
       const [audio, ...teles] = await Promise.all([fetchOk(base + show.audio).then((r) => r.arrayBuffer()), ...show.voices.map((v) => fetchOk(base + v.tele).then((r) => r.arrayBuffer()))]);
-      const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]) }));
+      // the words: syllables as the CLI splits them (the pronouncing dictionary first, as it does)
+      const melodies = await Promise.all(show.voices.map((v) => (v.melody ? fetchOk(base + v.melody).then((r) => r.json() as Promise<Melody>) : null)));
+      if (melodies.some(Boolean)) await g2p.load().catch(() => {});
+      const words = melodies.map((m) => {
+        if (!m) return null;
+        try {
+          return sungWords(m, lyricsToSyllables(m.lyrics), show.spell);
+        } catch (e) {
+          console.warn("duet: no words for a voice:", e);
+          return null;
+        }
+      });
+      const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]), words: words[i] }));
       await transport.load(audio);
       if (live) setLoaded({ show, voices });
     })().catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
@@ -103,7 +124,7 @@ export function DuetPage(props: { id: string }) {
         <span className="duet-title">{title}</span>
       </header>
       <main className="duet-heads" style={{ "--voices": loaded?.voices.length ?? 2 } as React.CSSProperties}>
-        {loaded && transport ? loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />) : <p className="duet-msg">Loading the song…</p>}
+        {loaded && transport ? loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />) : <p className="duet-msg">Loading the song…</p>}
       </main>
       <footer className="duet-bar">
         <button className="primary large" disabled={!loaded} onClick={() => (st.playing ? transport?.pause() : transport?.play())}>
@@ -129,9 +150,12 @@ export function DuetPage(props: { id: string }) {
 }
 
 /** one voice's head; the last of several turns to face the others */
-function Head(props: { name: string; track: TeleTrack; show: ShowFile; transport: Transport; facing: 1 | -1 }) {
-  const { track, show, transport } = props;
+function Head(props: { name: string; track: TeleTrack; words: SungWords | null; show: ShowFile; transport: Transport; facing: 1 | -1 }) {
+  const { track, show, transport, words } = props;
   const feedRef = useRef<HeadFeed | null>(null);
+  // the syllable at the mouth, written on the side the face looks to
+  const overlayRef = useRef<OverlayFn | undefined>(undefined);
+  if (words && !overlayRef.current) overlayRef.current = mouthWords(() => wordAt(words, transport.time()), V.green, props.facing);
   if (!feedRef.current) {
     const model = getModel(track.body, track.sampleRate);
     const beatStep = (t: number) => {
@@ -156,7 +180,7 @@ function Head(props: { name: string; track: TeleTrack; show: ShowFile; transport
   }
   return (
     <Screen className="duet-head" focus title={props.name} sub={bodyLabel(track.body)} label={`${props.name} voice, ${bodyLabel(track.body)}, in 3D`}>
-      <AnatomyView3D feed={feedRef.current} readouts={false} />
+      <AnatomyView3D feed={feedRef.current} readouts={false} overlay={overlayRef.current} />
     </Screen>
   );
 }

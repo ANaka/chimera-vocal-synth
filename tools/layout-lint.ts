@@ -251,7 +251,7 @@ function makeDuet(dir: string): void {
     if (r.exitCode) throw new Error(`rendering the lint duet: ${r.stderr.toString()}`);
   }
   // a long title, to see it trimmed on a phone
-  const voices = [{ name: "Lower", tele: "low.tele" }, { name: "Upper", tele: "high.tele" }];
+  const voices = [{ name: "Lower", tele: "low.tele", melody: "low.json" }, { name: "Upper", tele: "high.tele", melody: "high.json" }];
   writeFileSync(`${dir}/show.json`, JSON.stringify({ title: "A duet with a title long enough to need trimming", audio: "low.wav", bpm: 120, voices }));
 }
 
@@ -316,6 +316,7 @@ async function main() {
       await page.waitForSelector(".duet-head canvas", { timeout: 15000 });
       await check("duet", 2000);
       await page.locator(".duet-bar button.primary").click();
+      // 1.2 s in: both heads singing, a word at each mouth
       await check("duet, playing", 1200);
     }
     if (!modes.length) {
