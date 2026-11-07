@@ -17,6 +17,7 @@ import { V, heat, pressureLevel } from "../colors.ts";
 import { beam, beamPts, chaikin, dot, handle, label, ring, seg, type Pt } from "./vector.ts";
 import { buildProfile, Gaze, jawFn, VIEW, type Profile } from "./profile.ts";
 import { drawReadouts, type Slot } from "./readouts.ts";
+import { Expression } from "./expression.ts";
 
 export type { Slot } from "./readouts.ts";
 
@@ -80,6 +81,62 @@ const ECHO_AGES = [0.09, 0.06, 0.03];
 /** top of the cranium in body cm (profile.ts's skin outline peaks at 22.9), with a little air */
 const CROWN = 23.4;
 
+const smoothstep = (a: number, b: number, x: number): number => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The side view's brow and eyelids (body cm): the brow rides up with the pitch and knits on low
+ * notes; the lids, two arcs over the front of the eyeball, meet when the eye blinks or closes on a
+ * long note, and open wide on a high one.
+ */
+export function eyeFeatures(c: Vec, k: number, e: Expression): { pts: Vec[]; w: number; alpha: number }[] {
+  const rx = 1.22 * k, ry = 1.08 * k;
+  const arc = (a0: number, a1: number): Vec[] => {
+    const o: Vec[] = [];
+    for (let i = 0; i <= 14; i++) {
+      const an = a0 + ((a1 - a0) * i) / 14;
+      o.push({ x: c.x + rx * Math.cos(an), y: c.y + ry * Math.sin(an) });
+    }
+    return o;
+  };
+  const deg = Math.PI / 180;
+  const wide = Math.max(0, e.brow);
+  // the upper lid comes down to meet the lower
+  const upEnd = 30 * deg + 14 * deg * wide, lo = -32 * deg;
+  const up = upEnd + (lo - upEnd) * e.lid;
+  const brow: Vec[] = [];
+  const raise = 0.42 * k * e.brow, knit = 0.3 * k * Math.max(0, -e.brow);
+  for (let i = 0; i <= 12; i++) {
+    const u = -1 + i / 6; // −1 back, +1 front
+    const front = (1 + u) / 2;
+    brow.push({ x: c.x + 0.1 * k + 0.9 * k * u, y: c.y + 1.4 * k + 0.2 * k * (1 - u * u) + raise - knit * front });
+  }
+  return [
+    { pts: arc(100 * deg, up), w: 1.15, alpha: 0.9 },
+    { pts: arc(-78 * deg, lo), w: 1.0, alpha: 0.75 },
+    { pts: brow, w: 1.4, alpha: 0.85 },
+  ];
+}
+
+/**
+ * Puffed cheeks in the side view: the face's outline above and below the lips swells forward (the
+ * air held in the mouth pushes the skin round the lips out). The lips' meeting edge, where their
+ * handle sits, stays put. Returns the map for body points, or null at rest.
+ */
+export function puffProfile(f: HumanFrame, k: number, puff: number): ((p: Vec) => Vec) | null {
+  if (Math.abs(puff) < 0.01) return null;
+  const L = { x: (f.upperLip[6].x + f.lowerLip[6].x) / 2, y: (f.upperLip[6].y + f.lowerLip[6].y) / 2 };
+  const out = 0.6 * k * puff;
+  return (p) => {
+    const dy = Math.abs(p.y - L.y) / (2.6 * k);
+    if (dy >= 1) return p;
+    const w = (1 - dy * dy) ** 2 * smoothstep(0.03, 0.45, dy) * smoothstep(L.x - 1.2 * k, L.x - 0.5 * k, p.x);
+    return w ? { x: p.x + out * w, y: p.y } : p;
+  };
+}
+
 export class AnatomyRenderer {
   private particles: Particle[] = [];
   private scale = 20;
@@ -96,6 +153,8 @@ export class AnatomyRenderer {
   private lastEcho = -1;
   /** where the eye looks */
   private gaze = new Gaze();
+  /** brows, lids and cheeks, from the voice (the view updates it) */
+  readonly face = new Expression();
 
   constructor() {
     for (let i = 0; i < 170; i++) this.particles.push({ s: Math.random() * 17, u: Math.random() * 2 - 1, life: Math.random(), px: NaN, py: NaN });
@@ -159,7 +218,8 @@ export class AnatomyRenderer {
     const g = this.gaze;
     g.update(this.clock, dt);
     const off = 0.85 * k * Math.cos(g.yaw);
-    const cp = Math.cos(g.pitch), sp = Math.sin(g.pitch);
+    const pitch = g.pitch + this.face.lookUp;
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const lc = { x: c.x + off * cp, y: c.y + off * sp };
     const rx = (0.18 + 0.2 * Math.abs(Math.sin(g.yaw))) * k, ry = 0.42 * k;
     const o: Vec[] = [];
@@ -192,7 +252,11 @@ export class AnatomyRenderer {
     line(G.brain, V.blueMid, 1.1, { close: true });
     line(G.sulcus, V.blueDim, 0.9);
     line(G.eye, V.blueMid, 1.1);
-    line(this.lens(G.eyeC, model.tract.scale, opts.dt), V.blueDim, 0.9);
+    const k = model.tract.scale;
+    const bulge = puffProfile(f, k, this.face.puff);
+    const puffed = (v: Vec[]) => (bulge ? v.map(bulge) : v);
+    line(this.lens(G.eyeC, k, opts.dt), V.blueDim, 0.9, { alpha: 1 - smoothstep(0.45, 0.9, this.face.lid) });
+    for (const l of eyeFeatures(G.eyeC, k, this.face)) line(l.pts, V.blue, l.w, { alpha: l.alpha });
     for (const v of G.vertebrae) line(v, V.blueDim, 1);
     line(G.cords[0], V.blueDim, 0.8, { alpha: 0.8 });
     line(G.cords[1], V.blueDim, 0.8, { alpha: 0.6 });
@@ -213,7 +277,7 @@ export class AnatomyRenderer {
     // afterglow: where the tongue, jaw and lips were a moment ago
     if (tele && this.clock - this.lastEcho >= 0.028) {
       this.lastEcho = this.clock;
-      this.echoes.push({ t: this.clock, tongue: f.tongue.slice(), jaw: G.jawLower, upperLip: chaikin(f.upperLip.map((p) => [p.x, p.y] as Pt)), lowerLip: chaikin(f.lowerLip.map((p) => [p.x, p.y] as Pt)) });
+      this.echoes.push({ t: this.clock, tongue: f.tongue.slice(), jaw: G.jawLower, upperLip: chaikin(puffed(f.upperLip).map((p) => [p.x, p.y] as Pt)), lowerLip: chaikin(puffed(f.lowerLip).map((p) => [p.x, p.y] as Pt)) });
       while (this.echoes.length && this.clock - this.echoes[0].t > 0.12) this.echoes.shift();
     }
     if (tele) {
@@ -230,8 +294,8 @@ export class AnatomyRenderer {
     }
 
     // skin, airway walls, teeth, folds
-    line(G.skinLower, V.blue, 1.7, { hot: true });
-    line(G.skinUpper, V.blue, 1.7, { hot: true });
+    line(puffed(G.skinLower), V.blue, 1.7, { hot: true });
+    line(puffed(G.skinUpper), V.blue, 1.7, { hot: true });
     line(G.outerWall, V.blue, 1.4, { hot: true });
     line(f.inner, V.blue, 1.3, { alpha: 0.9 });
     line(G.glottisWall, V.blue, 1.2, { alpha: 0.8 });
@@ -254,8 +318,8 @@ export class AnatomyRenderer {
     line(G.jawLower, V.red, 1.5, { hot: true });
     line(G.jawUpper, V.red, 1, { alpha: 0.45 });
     const soft = (v: Vec[], it: number) => chaikin(v.map((p) => this.P(p)), it);
-    beamPts(ctx, soft(f.upperLip, 2), V.pink, 1.5, { hot: true });
-    beamPts(ctx, soft(f.lowerLip, 2), V.pink, 1.5, { hot: true });
+    beamPts(ctx, soft(puffed(f.upperLip), 2), V.pink, 1.5, { hot: true });
+    beamPts(ctx, soft(puffed(f.lowerLip), 2), V.pink, 1.5, { hot: true });
     beamPts(ctx, soft(f.velum, 3), V.white, 1.25, { alpha: 0.92 });
 
     if (tele) this.drawTurbulence(ctx, model, f, tele);

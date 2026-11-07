@@ -89,11 +89,14 @@ export function AnatomyView(props: { slots?: SlotsFn; info?: InfoFn; showFormant
     let formants: number[] = [];
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
+      // the face's expression keeps real time (a held note lasts as long at a low frame rate)
+      const elapsed = Math.min(0.5, (now - last) / 1000);
       last = now;
       if (Math.min(2, window.devicePixelRatio || 1) !== dpr) fit();
       const st = useStore.getState();
       const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
       const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
+      r.face.update(tele, elapsed);
       const m = model.current;
       if (m && w > 0 && h > 0) {
         const f = m.frame(a);

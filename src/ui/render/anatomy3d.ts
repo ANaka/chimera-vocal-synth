@@ -26,6 +26,7 @@ import { chaikin, type Pt } from "./vector.ts";
 import { Beams, Poly } from "./beams3d.ts";
 import { bodyPoint, buildProfile, Gaze, jawAngle, wallX } from "./profile.ts";
 import { faceHandles, type FaceView, type ViewFlags } from "./anatomy.ts";
+import { Expression } from "./expression.ts";
 
 type Table = readonly (readonly [number, number])[];
 type V3 = [number, number, number];
@@ -195,10 +196,11 @@ interface Group {
   hot?: boolean;
 }
 
-/** a polyline whose points the jaw carries by weight w (the lower face's skin) */
+/** a polyline whose points the jaw carries by weight w (the lower face's skin), and the cheeks' puff by c */
 interface Skinned {
   a: Float32Array;
   w: Float32Array;
+  c: Float32Array;
 }
 
 /** everything that only depends on the body, in the rest pose (jaw closed) */
@@ -229,6 +231,28 @@ function jawWeight(k: number, ph: number, x: number, y: number): number {
   const xr = interp(RAMUS_BACK, Y);
   const wb = smooth(xr - 0.7, xr + 0.9, X); // and behind the ramus, the ear and the back of the neck
   return wv * wl * wb;
+}
+
+/** how far the cheeks push out at full puff (template cm): to the side, and a little forward */
+const PUFF_OUT = 1.7, PUFF_FWD = 0.55;
+
+/**
+ * How much of the cheeks' puff a point of the face's skin takes (rest pose, body cm): a mound
+ * behind the mouth's corners, over the buccinators, fading out before the lips, the nose and
+ * the jaw's lower border; the midline itself only comes forward.
+ */
+function cheekWeight(k: number, ph: number, x: number, y: number): number {
+  const X = x / k, Yb = y / k;
+  const Y = Yb >= 7 ? Yb : 7 - (7 - Yb) / ph;
+  const r2 = ((X - 5.2) / 2.3) ** 2 + ((Y - 8.3) / 2.4) ** 2;
+  return r2 < 1 ? (1 - r2) ** 2 : 0;
+}
+
+/** the cheeks' push at a point (rest pose): [dx, dz] for its weight c, side of the face z and the puff */
+function puffAt(k: number, c: number, z: number, puff: number): [number, number] {
+  if (c === 0 || puff === 0) return [0, 0];
+  const m = c * puff * k;
+  return [PUFF_FWD * m, Math.sign(z) * PUFF_OUT * m * smooth(0.4 * k, 2.6 * k, Math.abs(z))];
 }
 
 /** split a polyline (flat xyz) into the runs whose points are kept */
@@ -314,9 +338,12 @@ function buildRest(model: VoiceModel): Rest {
   const addShell = (pts: number[], keep: boolean[], closed: boolean) => {
     for (const run of keptRuns(pts, keep, closed)) {
       const n = run.length / 3;
-      const w = new Float32Array(n);
-      for (let i = 0; i < n; i++) w[i] = jawWeight(k, ph, run[3 * i], run[3 * i + 1]);
-      shell.push({ a: new Float32Array(run), w });
+      const w = new Float32Array(n), c = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        w[i] = jawWeight(k, ph, run[3 * i], run[3 * i + 1]);
+        c[i] = cheekWeight(k, ph, run[3 * i], run[3 * i + 1]);
+      }
+      shell.push({ a: new Float32Array(run), w, c });
     }
   };
   const half: number[] = [];
@@ -614,6 +641,12 @@ export class Anatomy3D {
   compact = false;
   private clock = 0;
   private readonly gaze = new Gaze();
+  /** brows, lids, cheeks and the head's nods, from the voice (the view updates it) */
+  readonly face = new Expression();
+  /** the camera in the head's own frame (the head nods and sways under it) */
+  private readonly eye = new THREE.Vector3();
+  private readonly turn = new THREE.Quaternion();
+  private readonly euler = new THREE.Euler();
   private strobe = 0;
   private readonly tmp = new Poly();
   private readonly particles: Particle[] = [];
@@ -673,7 +706,7 @@ export class Anatomy3D {
 
   /** body point → CSS px on the canvas */
   project(x: number, y: number, z: number): [number, number] {
-    const v = this.v3.set(x, y, z).project(this.camera);
+    const v = this.v3.set(x, y, z).applyMatrix4(this.beams.group.matrixWorld).project(this.camera);
     return [((v.x + 1) / 2) * this.w, ((1 - v.y) / 2) * this.h];
   }
 
@@ -701,6 +734,8 @@ export class Anatomy3D {
     this.clock += dt;
     const rest = this.restFor(model);
     const k = model.tract.scale;
+    const face = this.face;
+    this.headPose(rest, k);
     const phi = jawAngle(model, a.jaw);
     const C = rest.condyle;
     const B = this.beams;
@@ -723,7 +758,7 @@ export class Anatomy3D {
     // The midsagittal section is the 2D view's drawing: full on from the side, but seen edge-on (from
     // the front, back or above) its lines pile into one bright bar down the middle, so it fades as
     // the head turns and the 3D shapes take over; the articulators' outlines fade less.
-    const toCam = this.v3.copy(this.camera.position).sub(rest.center).normalize();
+    const toCam = this.v3.copy(this.eye).sub(rest.center).normalize();
     const side = smooth(0.25, 0.8, Math.abs(toCam.z));
     const cut = 0.22 + 0.78 * side, artCut = 0.45 + 0.55 * side;
     const line = (pts: Vec[], color: string, w: number, o: { alpha?: number; hot?: boolean; close?: boolean } = {}, fade = cut) => B.line(flat(pts), pts.length, color, w, { ...o, alpha: (o.alpha ?? 1) * fade });
@@ -745,8 +780,10 @@ export class Anatomy3D {
     for (const sk of rest.shell) {
       const P = this.tmp.reset();
       for (let i = 0; i < sk.w.length; i++) {
-        const [x, y] = rot(sk.a[3 * i], sk.a[3 * i + 1], phi * sk.w[i]);
-        P.p(x, y, sk.a[3 * i + 2]);
+        const z = sk.a[3 * i + 2];
+        const [dx, dz] = puffAt(k, sk.c[i], z, face.puff);
+        const [x, y] = rot(sk.a[3 * i] + dx, sk.a[3 * i + 1], phi * sk.w[i]);
+        P.p(x, y, z + dz);
       }
       B.poly(P, V.blueDim, 0.85, { alpha: 0.42 });
     }
@@ -826,19 +863,39 @@ export class Anatomy3D {
     return best;
   }
 
+  /**
+   * The head nods (chin up on high notes, down on the beat) and sways (on a long note, and with
+   * the vibrato) about the top of the neck. Everything is drawn in the head's frame, so this
+   * turns the beams' group; the camera's position in that frame is kept for what faces it.
+   */
+  private headPose(rest: Rest, k: number): void {
+    const g = this.beams.group;
+    const pivot = this.v3.set(-2.4 * k, rest.head.y0 + 0.42 * (rest.condyle.y - rest.head.y0), 0);
+    this.turn.setFromEuler(this.euler.set(this.face.tilt, 0, this.face.nod));
+    g.quaternion.copy(this.turn);
+    g.position.copy(pivot).sub(pivot.applyQuaternion(this.turn));
+    g.updateMatrixWorld(true);
+    this.eye.copy(this.camera.position);
+    g.worldToLocal(this.eye);
+  }
+
   // ------------------------------------------------------------------ eyes
   private eyes(rest: Rest, dt: number): void {
-    const g = this.gaze;
+    const g = this.gaze, e = this.face;
     g.update(this.clock, dt);
     const r = rest.eyeR;
     // where they look: forward, turned by the gaze (yaw towards +z, pitch up)
-    const d: V3 = [Math.cos(g.pitch) * Math.cos(g.yaw), Math.sin(g.pitch), Math.cos(g.pitch) * Math.sin(g.yaw)];
+    const pitch = g.pitch + 1.3 * e.lookUp;
+    const d: V3 = [Math.cos(pitch) * Math.cos(g.yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(g.yaw)];
     const basis = (n: V3): [V3, V3] => {
       const up: V3 = Math.abs(n[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
       const u = norm3(cross(up, n));
       return [u, cross(n, u)];
     };
-    const cam = this.camera.position;
+    const cam = this.eye;
+    // the iris shows less as the lids close
+    const seen = 1 - smooth(0.4, 0.9, e.lid);
+    const wide = Math.max(0, e.brow);
     for (const c of rest.eyes) {
       // a sphere's outline is the circle facing the camera
       const toCam = norm3([cam.x - c[0], cam.y - c[1], cam.z - c[2]]);
@@ -850,24 +907,31 @@ export class Anatomy3D {
       L.ellipse(ic, scale3(iu, r * 0.5), scale3(iv, r * 0.5), 24);
       const pc: V3 = [c[0] + d[0] * r * 0.97, c[1] + d[1] * r * 0.97, c[2] + d[2] * r * 0.97];
       L.ellipse(pc, scale3(iu, r * 0.2), scale3(iv, r * 0.2), 14);
-      // the lids: an almond over the front of the eyeball, inner corner towards the nose
+      // the lids: an almond over the front of the eyeball, inner corner towards the nose; the
+      // upper one opens wide on a high note and comes down onto the lower one to shut
       const out = Math.sign(c[2]);
-      const lid = (open: number) => {
+      const lidAt = (open: number, sv: number, sgn: number) => open * (1 - sv * sv) + 0.06 * sv * out * sgn;
+      const lid = (upper: boolean) => {
         for (let i = 0; i <= 16; i++) {
-          const sv = -1 + i / 8, al = out * sv * 0.95, be = open * (1 - sv * sv) + 0.06 * sv * out * Math.sign(open);
+          const sv = -1 + i / 8, al = out * sv * 0.95;
+          const lo = lidAt(-0.36, sv, -1);
+          const be = upper ? lidAt(0.5 + 0.2 * wide, sv, 1) * (1 - e.lid) + (lo + 0.03) * e.lid : lo;
           L.p(c[0] + 1.04 * r * Math.cos(be) * Math.cos(al), c[1] + 1.04 * r * Math.sin(be), c[2] + 1.04 * r * Math.cos(be) * Math.sin(al));
         }
         L.end();
       };
-      lid(0.5);
-      lid(-0.36);
-      // the brow above it
+      lid(true);
+      lid(false);
+      // the brow above it: up with the pitch, knit (inner end down) on a low note, and on a long
+      // high note with the eyes shut, the inner end up (the singer feeling it)
+      const lift = 0.3 * e.brow, knit = 0.28 * Math.max(0, -e.brow), feel = 0.22 * e.lid * wide;
       for (let i = 0; i <= 12; i++) {
-        const sv = -1 + i / 6, al = out * (0.15 + sv * 0.62), be = 0.82 + 0.12 * (1 - sv * sv) - 0.06 * sv;
+        const sv = -1 + i / 6, al = out * (0.15 + sv * 0.62), inner = (1 - sv) / 2;
+        const be = 0.82 + 0.12 * (1 - sv * sv) - 0.06 * sv + lift + (feel - knit) * inner;
         L.p(c[0] + 1.32 * r * Math.cos(be) * Math.cos(al), c[1] + 1.32 * r * Math.sin(be), c[2] + 1.32 * r * Math.cos(be) * Math.sin(al));
       }
       L.end();
-      const style = [[V.blueMid, 1.0, 0.35], [V.blue, 1.0, 0.9], [V.blue, 1.0, 0.7], [V.blue, 1.25, 0.95], [V.blue, 1.05, 0.75], [V.blueMid, 1.3, 0.8]] as const;
+      const style = [[V.blueMid, 1.0, 0.35], [V.blue, 1.0, 0.9 * seen], [V.blue, 1.0, 0.7 * seen], [V.blue, 1.25, 0.95], [V.blue, 1.05, 0.75], [V.blueMid, 1.3, 0.8]] as const;
       L.lines.forEach((l, i) => this.beams.line(l, l.length / 3, style[i][0], style[i][1], { alpha: style[i][2] }));
     }
   }
@@ -910,8 +974,10 @@ export class Anatomy3D {
       const x = base(y, z) + bulge * g;
       const natural = upper ? 0.5 * (1 - sz) * (1 - t) : 0.5 * (1 + sz) + 0.5 * (1 - sz) * t;
       const w = natural + (jawWeight(k, ph, x, y) - natural) * smooth(Wm, Wl, Math.abs(z));
-      const [rx, ry] = w ? rotXY(x, y, C, phi * w) : [x, y];
-      return [rx, ry, z];
+      // the cheeks' puff, as the shell beside the patch takes it
+      const [dx, dz] = puffAt(k, cheekWeight(k, ph, x, y), z, this.face.puff);
+      const [rx, ry] = w ? rotXY(x + dx, y, C, phi * w) : [x + dx, y];
+      return [rx, ry, z + dz];
     };
     const row = (upper: boolean, t: (z: number) => number, z0: number, z1: number, n: number): Poly => {
       P.reset();
@@ -1022,7 +1088,7 @@ export class Anatomy3D {
       R.b[j] = s.d > 0.01 ? Math.min(3.5 * k, (2 * s.area) / (Math.PI * s.d)) : 0;
     }
     const P = this.tmp;
-    const cam = this.camera.position;
+    const cam = this.eye;
     for (let j = 0; j < R.n; j += 2) {
       P.reset();
       for (let i = 0; i <= 24; i++) {
@@ -1257,6 +1323,8 @@ export class Anatomy3D {
       let maxA = 0.02;
       for (let i = 0; i < area.length; i++) maxA = Math.max(maxA, area[i]);
       open = Math.min(0.45 * k, (area[Math.floor(this.strobe * area.length) % area.length] / (1.3 * k)) * 2.2);
+      // the scope's samples can be missing for a moment (lips held shut, the voice stopped)
+      if (!Number.isFinite(open)) open = 0;
     }
     const F = new Lines();
     for (const s of [1, -1]) {
