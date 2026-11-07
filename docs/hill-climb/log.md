@@ -156,6 +156,16 @@ opens a new one, update this list and give the experiment's number.
    −6.8 dB). Other front-to-back clusters after a vowel (/pk/, /bd/, /tk/) still reach 3–6x;
    see experiment 16's "Next".
 
+9. **How a spoken utterance begins, and a click on every /f/ and /v/.** Experiment 18. Speech's
+   breath lead (full drive 20 ms before the first segment) is not what loses the first word:
+   timed like a sung phrase's it moves the first vowel's voicing 20 ms later and no first-word
+   error changes. What it found instead is a geometry click on every /f/ and /v/ (−15 dB at a
+   phrase start, −10 dB mid-word, louder than the vowels) from two steps in the labiodental
+   geometry (`anatomy/human.rs`). The fix removes it and keeps the held /f/ within 1 dB, but
+   Whisper's total doesn't move (36.09 → 37.09 %). The patch is in experiment 18. Like the pop,
+   it is an artifact for the ear, not the word error rate: it needs its own keep rule (or a
+   check like `consonant_artifacts.rs`) from the owner.
+
 ## Experiments
 
 ### 1. A trained singer's jitter, not a clinical one (kept)
@@ -1104,3 +1114,82 @@ voice's sung consonants.
     (its tip place and the frication's spectrum) as a separate lead.
   - The tip-travel closure lead is real (30 ms of spread from /i/ to /ɑ/) but moves sung
     consonants, so it's for after the owner's note-MCD decision.
+
+### 18. Utterance onsets: speech's breath lead, then a click on every /f/ and /v/ (reverted)
+
+- Hypothesis (the suggested lead): the first word goes wrong more often than chance in both
+  voices ("Four hours" → "Before I was …", "A cold" → "The coated", "A large" → "Your large",
+  "Her round" → "Roundtable"). Speech's breath still reaches full drive 20 ms before the first
+  segment (experiment 10 moved only sung phrases), so the adducted folds may voice before the
+  first segment is in place.
+- What the renders showed (male and female, first 300 ms, with the planned segments; the
+  speech judge's renders start their plan at 0.05 s, first segment at 0.11):
+  - "A cold": the /ə/ voices from 0.08 s, 30 ms before its planned start. "Her round": [h] from
+    0.06 to 0.21 s, then a voiced /ɝ/ of 80 ms that runs straight into the /ɹ/ of "round".
+  - "Four hours" (both voices): a burst at 0.100 s, peaking at −15 dB (the vowel is −16), with
+    its energy below 1 kHz, 10 ms before the /f/. It isn't voicing: the breath change below
+    moved the voicing but not this burst. It is a click from the geometry. In "ɑfɑ" the same
+    click peaks at −10 dB mid-word. Every /f/ and /v/ has it; /s ʃ θ h p/ onsets don't.
+  - Its cause, from a per-millisecond probe of the tract (`HumanVoice::telemetry` and the
+    frame's grid), is two discontinuities in the labiodental geometry (`anatomy/human.rs`):
+    1. The lip-contact cap (`ap_eff`) switched off at labiodental 0.5 in one step. Below it,
+       /f/'s lip aperture target (0.05) caps the front gaps, so on the way in the lips form a
+       near-bilabial constriction (0.75 cm² at a phrase start), and at 0.5 it opens at once:
+       a [b]-like release.
+    2. The last front vertical ray stops meeting the lower lip once the lip tucks behind it
+       (labiodental ≈ 0.53). `measure` then falls back to a floor 3.5 cm down: that sample's
+       gap jumped 1.6 → 3.5 cm, its midpoint dropped 1 cm and the oral tract got 0.9 cm longer
+       in one control step (7.36 → 8.28 cm).
+- Change, tried in order (speech judge only; training lines read):
+  - **Speech's breath timed like a sung phrase's** (`plan_phrases` reaching full drive at the
+    first segment, live notes unchanged): 36.09 → 39.40 % (WORSE). No first-word error
+    changed. Male "chicken leg" 1 → 5 and a few one-word shuffles. Reverted before the next
+    try.
+  - **The click, fixed with a flat or lip-face floor**: the cap hands over continuously
+    (`ap + 0.3k·s/(1−s)`, `s` = smoothstep(0, 0.5, lab)), and a vertical in front of the
+    lower lip's edge takes the lip's outer face (the outline's tangent, 0.3 : −0.4) as its
+    floor. The click is gone, but a held /f/ now ends in a 0.47 cm² lip slit instead of the old
+    10 cm² opening, and comes out ~5 dB quieter. 36.09 → 38.74 % (NO CLEAR CHANGE): male
+    "Four hours" right ("for our steady work history", 7 → 5) and male "served", but "fine" →
+    "hind", "fixes" → "hits" and "fed" → "head" (the weaker /f/ is lost).
+  - **Floor slopes between the two** (probe only, male fɑ / ɑfɑ, onset peak and held /f/ in
+    dB; original −15.2 / −10.4 and −36.2 / −33.4): slope 4 → −41 / −30 and −47 / −45;
+    12 → −36 / −29 and −42 / −38; 20 → −31 / −24 and −39 / −37; 40 → −24 / −17 and −38 / −35.
+    A steeper floor buys back the held /f/ only by bringing back the click.
+  - **The floor opens with the tuck instead** (kept as the patch below): the lip-face floor
+    blends to the old depth over labiodental 0.7 → 1, so a held /f/ keeps its open front. Probe:
+    onset peak −37.0 / −29.9 dB (was −15.2 / −10.4), held /f/ −37.2 / −33.9 (was −36.2 /
+    −33.4). Opening from 0.3 or 0.5 left part of the click (−20 and −27 dB at a phrase start).
+    In the judge's "Four hours" (male) the burst at 0.09–0.10 s fell from −25 to −42 dB.
+    Speech 36.09 → 37.09 % (NO CLEAR CHANGE). "Four hours" is still heard "Before I was …"
+    (male), so that extra syllable wasn't the click. Moved: female "rice … served" (3 → 4),
+    "juice" (2 → 3), "Four hours" (6 → 7), male "sell" right (3 → 2), "paints the sweet stone"
+    (4 → 5).
+- Speech: training 36.09 → 37.09 % at the last value (NO CLEAR CHANGE); held-out 45.67 →
+  45.67 % (not used).
+  - My first run's `tail` printed the held-out transcripts along with the training ones. I
+    didn't use them for any choice; every later run printed training lines only.
+- Singer, bench, tests: not run, since the deciding verdict failed at every value.
+- Verdict: reverted. The speech is not BETTER: the breath retiming is WORSE, and the click fix
+  removes a real artifact but doesn't move Whisper's total.
+- Commit: none (log only). The patch, against 41e3777 (`crates/chimera/src/anatomy/human.rs`):
+  - constants: `LAB_HANDOVER = 0.5`, `LAB_GAP = 0.3`, `LAB_FRONT_OPENS = 0.7`;
+  - in the lip contact: `let lab_open = smoothstep(0.0, LAB_HANDOVER, lab); let ap_eff = if
+    lab_open >= 1.0 { f64::INFINITY } else { ap + LAB_GAP * k * lab_open / (1.0 - lab_open) };`
+    in place of `if lab > 0.5 { f64::INFINITY } else { ap }`;
+  - in the front verticals' loop, `if let Some(mut m) = measure(...)`, then
+    `if x > ll_edge.x { let face = js_min(ll_edge.y - (x - ll_edge.x) * 4.0 / 3.0, m.outer.y);
+    let y_in = lerp(face, m.outer.y - 3.5 * k, smoothstep(LAB_FRONT_OPENS, 1.0, lab));
+    m.inner = v(x, y_in); m.d = m.outer.y - y_in; }` before `grid.push(sample(m, 3))`.
+- Next:
+  - The /f/ click is an artifact for the ear: a burst at about vowel level on every /f/ and
+    /v/, and in the songs too ("f" and "v" lyrics). Whisper doesn't penalise it, so like the
+    pop it needs its own keep rule from the owner: a test (the onset peak of "fɑ" and "ɑfɑ"
+    against the held /f/), with the singer guard and speech not WORSE. The patch above is
+    ready for that. It moves the geometry snapshots; the held /f/ is within 1 dB, so no
+    recalibration should be needed.
+  - The first-word errors aren't the breath. "A" → "The"/"Your" didn't move when its voicing
+    moved 20 ms later. Whisper may just prefer a determiner it knows for a short initial /ə/.
+    "Her round" → "Roundtable" is an 80 ms /ɝ/ running into /ɹaʊ/ with no boundary between
+    them: a lead for the /ɝ/ + /ɹ/ sequence, not the onset.
+  - Don't retry the speech breath lead on its own.
