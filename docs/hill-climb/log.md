@@ -279,3 +279,20 @@ opens a new one, update this list and give the experiment's number.
   note: aspiration, then 50 ms at −55 dB where the vowel should be). Then retry this change at
   r = 0.05: it is worth about −0.14, the largest single gain so far. H1−H2 and the low band rose
   a little with it, as more of the short notes' vowels are now measured.
+
+### Judge change after experiment 6: like for like, note by note
+
+Experiments 1, 3, 5 and 6 were blocked or held back by the per-song coverage guard. It flipped
+on notes the synth barely voices (0–12 %), where one stray voiced frame decides whether a note
+has an onset, H1−H2 or pitch reading. Per-note voicing has no gap to put a threshold in.
+
+The verdict now recomputes each song's value of each term for both runs, over the notes on
+which both runs give it. `score.json` keeps every note for this. A note that stops or starts
+being measured leaves both runs alike. Not voicing a note still costs, through the voiced share.
+The coverage counts are gone, and the score itself is unchanged: 0.889 at the current best,
+and a rerun is NO CLEAR CHANGE.
+
+Checked on experiment 5's change (vibrato 5.5 → 6.0 Hz): BETTER, −0.043 like for like. It
+was not kept: that is for an experiment to do. Experiments 5 and 6 are worth retrying as they
+were.
+
