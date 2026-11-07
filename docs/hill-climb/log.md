@@ -478,3 +478,34 @@ The review found no engine defect and called all six changes plausible. Three th
   sharpens again, to 0.95 at full tension. Every judged render is byte-identical, so no score
   moves. A test (`tests/voice_source.rs`) keeps the closure rising with tension all the way.
 
+
+### Listening result (2026-11-07): the pilot's answer is yes
+
+Blind A/B, singer first, every clip at the same loudness (5 song excerpts, 4 sentences):
+**now 7, before 0, can't tell 2** (en006a and harvard-male-07). Every held-out excerpt went to
+"now". So the score's direction matches the user's ears.
+
+What they heard, in their words, and what the renders show:
+
+- **"Mostly a brightness change; the darker one sounds better as a default."** "Now" is the darker
+  one. Its spectral centroid is about 150 Hz lower in every song clip (White Christmas
+  1110 → 943 Hz; hers is 807), and 2–8 kHz is 3–8 dB down. The user wants a control for it.
+- **The gains feel incremental.** The user is more interested in pronunciation, which the singer
+  score doesn't measure.
+- **"Sheet" heard as "feet".** In a fresh render of "sheet" the /ʃ/ is 23 dB below its vowel, the
+  same as /f/ in "feet". Whisper hears "feet" in both voices too, and "fire" for "sharp"
+  (female). Every word with ch or j fails in Whisper as well: juice → "roost", chair →
+  "coloring", chain → "pin", birch → "bird", chopped → "hopped", chicken dropped.
+- **J sounds very muted.** The /dʒ/ of "juice" is about 25 dB below its vowel, and mostly
+  low-frequency voicing.
+- **A huge pop on the p of "sharp".** The /p/ release peaks 7 dB above the loudest point of the
+  vowel, and its energy is all below 4 kHz: a pressure thump, not a burst.
+- **A tinny noise at syllable ends (after "truck").** It is a 750 Hz buzz, with lines at exact
+  multiples of 750 Hz about 25 Hz wide. 750 Hz is the control rate: 48 kHz ÷ 64, one update
+  every 64 samples. The /k/ release of "truck" is mostly this buzz, and it is in the decay after
+  every word checked (sheet, feet, juice, pushes). Steady fricatives are clean noise.
+- **"Pu" of "pushes" inaudible.** The stressed /ʊ/ lasts about 40 ms; the unstressed "-es"
+  gets about 100 ms. The text front end marks the stress correctly (pˈʊʃəz).
+
+Whisper's mistakes match the user's in four of the five speech complaints, which supports
+using it as the pronunciation judge.
