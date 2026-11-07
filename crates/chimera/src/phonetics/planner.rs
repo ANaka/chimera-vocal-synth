@@ -18,6 +18,9 @@ use std::sync::OnceLock;
 /// label of the end-of-breath-group abduction (a live note can drop it when the next one starts)
 pub const EXHALE_LABEL: &str = "exhale";
 
+/// when a sung phrase's breath reaches full drive, after the plan start (its first segment starts at 0.06)
+const BREATH_SUNG_AT: f64 = 0.06;
+
 const VOWEL_KEYS: [ArticKey; 9] = [ArticKey::TbX, ArticKey::TbY, ArticKey::Jaw, ArticKey::LipAp, ArticKey::LipProt, ArticKey::LipWidth, ArticKey::Root, ArticKey::Larynx, ArticKey::TtCurl];
 
 /// One calibrated vowel of `vowelTargets.generated.json`.
@@ -311,8 +314,12 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
     }
     let open_end = o.open_end == Some(true);
     let sung = o.sung == Some(true);
-    // ---- breath: on through the utterance
-    gestures.push(Gesture::new(o.t0 + 0.04, end, 0.04, if open_end { 0.07 } else { 0.05 }, 1.0, one(ControlKey::BREATH, 1.0)).label("breath"));
+    // ---- breath: on through the utterance. A sung phrase's onset is planned (its first vowel
+    // lands on the beat), so a singer times the breath to it: the pressure reaches full drive as
+    // the first segment starts, and builds into adducted folds or behind the first constriction
+    // rather than voicing ahead of the note. Speech and live notes keep their 20 ms lead.
+    let breath_at = if sung { BREATH_SUNG_AT } else { 0.04 };
+    gestures.push(Gesture::new(o.t0 + breath_at, end, 0.04, if open_end { 0.07 } else { 0.05 }, 1.0, one(ControlKey::BREATH, 1.0)).label("breath"));
     // ---- end of the breath group: the folds part as the breath stops, so a final obstruent is
     // released into silence instead of into an added vowel ("cat-uh"). After a vowel or sonorant
     // they part once the pressure has fallen, so the voice fades out instead of ending in an [h].
