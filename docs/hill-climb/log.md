@@ -121,6 +121,22 @@ opens a new one, update this list and give the experiment's number.
      the male's: about 5 dB from her glottal source (vowels too loud for her fold size), about
      5 dB from the body scale.
 
+7. **Stressed vowels in running speech (target 2).** The planned durations are not what
+   crushes them. Experiment 14 printed `plan_phrases`' segments: the stressed /ʊ/ of "pushes" is
+   planned at 121 ms, "eats" /i/ 93, "sweet" /i/ 110, "paints" /eɪ/ 158, "steady" /ɛ/ 123,
+   "reads" /i/ 119, in line with Klatt's rules for connected speech. The loss is in how
+   the gestures realise the plan:
+   - after an aspirated stop, about 50 ms of the vowel is aspiration (the "pu" of "pushes" voices
+     from 0.90 s, planned 0.847);
+   - before a voiceless fricative, the abduction is complete 15 ms before the fricative's onset,
+     so voicing stops 30–35 ms early;
+   - before a stop, the closure lands about 17 ms early ("eats", "sweet"), and the vowel's
+     energy falls over the 30 ms before it.
+   Experiment 14 retimed the fricative abduction later: WORSE, since the fricative onsets get
+   weaker. Leave that timing alone. What's left to try: lengthen the stressed vowel in the plan
+   itself (the aspiration allowance is 20 ms against a 50 ms VOT), or the stop-closure lead (it
+   moves every stop and the sung consonants, so watch the singer's timing guard).
+
 ## Experiments
 
 ### 1. A trained singer's jitter, not a clinical one (kept)
@@ -799,3 +815,53 @@ experiment 11's change.
     Re² ∝ ΔP·A), which lifts narrow jets and small bodies more than wide ones.
   - "Chicken leg" and "some bright doors" got worse with louder /tʃ/ and /s/: check the /tʃ/
     release, which may now mask the /k/ after it.
+
+### 14. A voiceless fricative's glottal opening ends voicing at its onset, not 35 ms before (reverted)
+
+- Hypothesis: target 2 (stressed vowels too short). Printing the planned segments
+  (`plan_phrases`, as `render text` plans them) showed the duration rules are not the cause:
+  - Stressed vowels are planned at Klatt-like values in connected speech: the /ʊ/ of "pushes"
+    121 ms (against 66 ms for the "-es"), "eats" /i/ 93, "sweet" /i/ 110, "paints" /eɪ/ 158,
+    "steady" /ɛ/ 123, "reads" /i/ 119.
+  - The loss is in the realisation. In the male "pushes" the /ʊ/ is planned 0.847–0.968 s but
+    voices only from 0.90 to 0.93 s. The /p/'s aspiration takes the first 50 ms, and voicing
+    stops 35 ms before the /ʃ/.
+  - The voiceless-fricative abduction gesture (`plan_utterance`, `Gesture::new(t0 − 0.015, …,
+    ramp 0.03)`) starts opening the folds 45 ms before the fricative and is fully open 15 ms
+    before it.
+  - The same costs every /ə/ of "the" before s, ʃ, θ or f: it is planned at 68 ms and keeps
+    about half.
+  - The fix tried: after a voiced segment, the folds open late in it and are fully apart early
+    in the frication (Löfqvist & Yoshioka 1980), so voicing ends near the fricative's onset.
+    After a pause or a voiceless segment they are already apart, so that timing stays.
+- Change: `crates/chimera/src/phonetics/planner.rs`. After a vowel or a voiced consonant, the
+  "voiceless" abduction gesture starts at `t0 + lag` instead of `t0 − 0.015`. Values tried:
+  - lag +10 ms: the /ʊ/ of "pushes" voices 0.90–0.955 s (55 ms, up from 30), and frication
+    starts at 0.96 s (planned 0.968). Speech **WORSE**: 36.09 → 42.05 %.
+    - "Rice is often served" (male, 1 → 6: "Her eyes is often turned").
+    - "chicken leg" (male 1 → 5, female 2 → 4).
+    - "faced us" (both voices).
+    - Male "sheet" → "feet" again.
+    - Only "chopped" (male) moved right.
+  - lag 0 ms (fully open at the onset): NO CLEAR CHANGE, 36.09 → 38.08 %.
+    - Moved wrong: "the thin road" (female 2 → 5, "the fin rolled"), "chicken leg" (male 1 → 3),
+      "quiet fish" (male), "faced us" (female).
+    - Moved right: "birch canoe" (male 6 → 5), "rice … bowls" (female 3 → 2).
+  - The trend runs one way: the later the folds open, the worse the result (−15 ms, the current
+    value: 36.09 %; 0: 38.08; +10: 42.05). The voicing carried into the fricative onsets makes
+    s, ʃ, θ and f weaker, or heard as voiced.
+- Speech: training 36.09 → 38.08 % (lag 0) and 42.05 % (lag +10). The held-out rate also
+  changed, but it isn't used.
+- Singer, bench, tests: not run. The deciding verdict failed at both values.
+- Verdict: reverted. The speech is not BETTER at either value.
+- Commit: none (log only).
+- Next: see lead 7.
+  - Don't retime the fricative abduction: the early opening helps the fricative more than the
+    vowel loses.
+  - What is still open on stressed-vowel length:
+    - The aspiration allowance: a stressed vowel after a voiceless stop gets 20 ms back for a VOT
+      of about 50 ms. Klatt's rule adds 25 ms, but his aspiration is shorter.
+    - The stop-closure lead: closures land about 17 ms early.
+    - Lengthening the stressed vowels in the plan directly. None of these opens the fricative's
+      onset.
+
