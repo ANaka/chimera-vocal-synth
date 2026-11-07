@@ -298,7 +298,10 @@ impl HumanVoice {
         self.base_closure = 0.0;
         g.chink = (0.004 + 0.03 * s.breathiness) * k2;
         g.open_quotient = 0.78 - 0.36 * s.tension;
-        g.closure_sharpness = 0.25 + 0.7 * s.tension;
+        // The folds close along their length and depth over a return phase, not all at once, so
+        // a sung or spoken voice closes softly (0.22 at tension 0.55): an abrupt closure put
+        // 3-8 dB too much energy above 2 kHz. A tenser voice still closes more sharply.
+        g.closure_sharpness = 0.4 * s.tension;
         g.skew = 0.56 + 0.16 * s.tension;
         g.fry = s.fry;
         // Jitter of a healthy, trained voice at the default roughness (0.1): about 0.45 %, well
