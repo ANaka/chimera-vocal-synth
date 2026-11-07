@@ -1167,8 +1167,9 @@ body {
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  align-content: start;
+  /* the wall fills the window under the top bar, and grows (the page scrolls) when a short
+     window can't fit what the screens hold, rather than squeezing them over each other */
+  grid-template-rows: auto minmax(min-content, 1fr);
   min-height: 100vh;
   gap: 8px;
   padding: 6px 16px 16px;
@@ -1342,19 +1343,22 @@ button.ghost:hover,
   display: grid;
   grid-template-columns: minmax(0, 700fr) minmax(0, 696fr);
   gap: 12px;
-  height: max(760px, calc(100vh - 70px));
+  min-height: 560px;
 }
 
+/* Each mode's screens sit in rows. A row of controls (encoders, pads, text) is "auto": as tall as
+   they are. A row of canvases is minmax(min-content, share): they split what is left by share,
+   never shorter than their header and minimum body. (Giving control rows a share too made a short
+   window inflate every row in proportion to the tallest one's content.) */
 .right {
   display: grid;
   gap: 12px;
-  min-height: 0;
   min-width: 0;
 }
 
 .right-play {
   grid-template-columns: minmax(0, 284fr) minmax(0, 58fr) minmax(0, 342fr);
-  grid-template-rows: minmax(0, 200fr) minmax(0, 200fr) minmax(0, 224fr) minmax(0, 172fr);
+  grid-template-rows: minmax(min-content, 200fr) minmax(min-content, 200fr) auto minmax(min-content, 172fr);
   grid-template-areas: "tube tube folds" "spec spec spec" "vowels voice voice" "keys keys keys";
 }
 
@@ -1423,8 +1427,21 @@ button.ghost:hover,
 
 .screen-body {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   min-height: 110px;
+}
+
+/* Only canvases (and scrollers) are laid over the body with position: absolute; anything made of
+   DOM elements sits in flow and fills the body, so the screen grows to fit it. Absolutely
+   positioned DOM content has no height of its own and ran over its neighbours when squeezed. */
+.screen-body > .enc-pages,
+.screen-body > .say,
+.screen-body > .lyrics,
+.screen-body > .pads,
+.screen-body > .transport {
+  flex: 1 1 auto;
 }
 
 .screen-body > canvas,
@@ -1511,8 +1528,6 @@ button.ghost:hover,
 
 /* ---------- encoders (OP-1 style) */
 .enc-pages {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
   padding: 2px 10px 10px;
@@ -1554,7 +1569,6 @@ button.ghost:hover,
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: center;
-  min-height: 0;
 }
 
 .enc-row.cols-2 {
@@ -1587,8 +1601,8 @@ button.ghost:hover,
 
 .enc-dial {
   position: relative;
-  width: 76px;
-  height: 76px;
+  width: min(76px, 100%);
+  aspect-ratio: 1;
   touch-action: pan-y;
   cursor: ns-resize;
 }
@@ -1644,14 +1658,8 @@ button.ghost:hover,
   justify-content: center;
 }
 
-/* a screen holding encoders is as tall as they need (tabs, two-line labels, dial, value, unit) */
-.screen .screen-body:has(> .enc-pages) {
-  min-height: 176px;
-}
-
 .s-cparams .enc-dial {
-  width: 62px;
-  height: 62px;
+  width: min(62px, 100%);
 }
 
 .s-cparams .enc-value {
@@ -1799,6 +1807,13 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 4px rgba(79, 182, 242, 0.5);
 }
 
+/* the tagline gives way so the top bar stays one row on a laptop screen */
+@media (max-width: 1419px) {
+  .tagline {
+    display: none;
+  }
+}
+
 /* ---------- narrow screens: one column, the face first */
 @media (max-width: 1100px) {
   .wall {
@@ -1817,9 +1832,6 @@ input[type="range"]::-moz-range-thumb {
   .right-play .screen-body {
     min-height: 190px;
   }
-  .s-voice .screen-body {
-    min-height: 230px;
-  }
 }
 
 /* phones: the keys strip stacks under its MIDI button; flex: 1 from a zero basis collapsed it
@@ -1835,10 +1847,6 @@ input[type="range"]::-moz-range-thumb {
   .app {
     padding: 6px 8px 12px;
   }
-  /* encoders go two by two here: two rows of them */
-  .screen .screen-body:has(> .enc-pages) {
-    min-height: 350px;
-  }
   .right-play {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "tube" "folds" "spec" "vowels" "voice" "keys";
@@ -1850,15 +1858,12 @@ input[type="range"]::-moz-range-thumb {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     row-gap: 10px;
   }
-  .s-voice .screen-body {
-    min-height: 380px;
-  }
 }
 
 /* ---------- Speak */
 .right-speak {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 192fr) minmax(0, 236fr) minmax(0, 214fr) minmax(0, 190fr);
+  grid-template-rows: auto minmax(min-content, 236fr) auto minmax(min-content, 190fr);
   grid-template-areas: "say say" "score score" "chart chart" "tube folds";
 }
 
@@ -1867,8 +1872,6 @@ input[type="range"]::-moz-range-thumb {
 .s-chart { grid-area: chart; }
 
 .say {
-  position: absolute;
-  inset: 0;
   padding: 6px 14px 10px;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -1969,15 +1972,10 @@ input[type="range"]::-moz-range-thumb {
   padding: 0 8px;
 }
 
-.s-chart .screen-body {
-  overflow: auto;
-}
-
+/* the chart is as tall as its table; it scrolls sideways when the screen is narrower than it */
 .s-chart .chart-scroll {
-  position: absolute;
-  inset: 0;
   padding: 2px 12px 8px;
-  overflow: auto;
+  overflow-x: auto;
 }
 
 .ipa-chart {
@@ -2084,12 +2082,16 @@ input[type="range"]::-moz-range-thumb {
   .say-actions {
     flex-direction: row;
   }
+  /* room to wrap here, rather than cut the transcription short */
+  .say .transcription {
+    white-space: normal;
+  }
 }
 
 /* ---------- Sing */
 .right-sing {
   grid-template-columns: minmax(0, 342fr) minmax(0, 342fr);
-  grid-template-rows: minmax(0, 320fr) minmax(0, 134fr) minmax(0, 206fr) minmax(0, 172fr);
+  grid-template-rows: minmax(min-content, 320fr) auto auto minmax(min-content, 172fr);
   grid-template-areas: "roll roll" "lyrics lyrics" "spec voice" "keys keys";
 }
 
@@ -2112,8 +2114,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .lyrics {
-  position: absolute;
-  inset: 0;
   padding: 6px 14px 10px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2225,7 +2225,7 @@ input[type="range"]::-moz-range-thumb {
 /* ---------- Beatbox */
 .right-beatbox {
   grid-template-columns: minmax(0, 392fr) minmax(0, 292fr);
-  grid-template-rows: minmax(0, 236fr) minmax(0, 176fr) minmax(0, 318fr) minmax(0, 102fr);
+  grid-template-rows: minmax(min-content, 236fr) minmax(min-content, 176fr) auto auto;
   grid-template-areas: "seq seq" "wf wf" "pads transport" "keys keys";
 }
 
@@ -2328,12 +2328,10 @@ input[type="range"]::-moz-range-thumb {
 
 /* pads: framed, the symbol large */
 .s-pads .pads {
-  position: absolute;
-  inset: 0;
   padding: 6px 14px 12px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
   gap: 6px;
 }
 
@@ -2400,11 +2398,9 @@ input[type="range"]::-moz-range-thumb {
 
 /* transport */
 .s-transport .transport {
-  position: absolute;
-  inset: 0;
   padding: 4px 14px 10px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(min-content, 1fr) auto auto;
   gap: 8px;
   margin: 0;
 }
@@ -2424,13 +2420,16 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .transport-encoders {
-  position: relative;
-  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+}
+
+.transport-encoders > .enc-pages {
+  flex: 1 1 auto;
 }
 
 .s-transport .enc-dial {
-  width: 60px;
-  height: 60px;
+  width: min(60px, 100%);
 }
 
 .s-transport .enc-value {
@@ -2554,7 +2553,7 @@ input[type="range"]::-moz-range-thumb {
 /* ---------- Bestiary */
 .right-bestiary {
   grid-template-columns: minmax(0, 342fr) minmax(0, 342fr);
-  grid-template-rows: minmax(0, 196fr) minmax(0, 196fr) minmax(0, 232fr) minmax(0, 120fr) minmax(0, 88fr);
+  grid-template-rows: minmax(min-content, 196fr) minmax(min-content, 196fr) auto minmax(min-content, 150fr) auto;
   grid-template-areas: "gallery gallery" "wf wf" "calls cparams" "airway airway" "keys keys";
 }
 
@@ -2563,6 +2562,12 @@ input[type="range"]::-moz-range-thumb {
 .s-cparams { grid-area: cparams; }
 .s-airway { grid-area: airway; }
 
+/* the airway's share is small; a lower floor keeps its row from stretching the others in a short window */
+.s-airway .screen-body {
+  min-height: 80px;
+}
+
+/* the gallery is drawings that scale with the screen, laid over its body like a canvas */
 .s-gallery .specimens {
   position: absolute;
   inset: 0;
@@ -2706,6 +2711,15 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1.5;
   letter-spacing: 0.04em;
   color: var(--blue-dim);
+}
+
+.cparams-role {
+  margin: 2px 14px 0;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue-mid);
 }
 
 .s-cparams .enc-label {

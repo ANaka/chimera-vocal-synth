@@ -127,6 +127,43 @@ export function label(ctx: CanvasRenderingContext2D, text: string, x: number, y:
   ctx.restore();
 }
 
+/** Width of a label as label() would draw it (same font and letter spacing). */
+export function labelWidth(ctx: CanvasRenderingContext2D, text: string, o: LabelOpts = {}): number {
+  const size = o.size ?? 11;
+  ctx.save();
+  ctx.font = hfont(size, o.weight);
+  if (hasLetterSpacing) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${((o.ls ?? 0.14) * size).toFixed(2)}px`;
+  const wd = ctx.measureText(text).width;
+  ctx.restore();
+  return wd;
+}
+
+/** Words of a label broken into lines no wider than maxW. */
+export function wrapLabel(ctx: CanvasRenderingContext2D, text: string, maxW: number, o: LabelOpts = {}): string[] {
+  const lines: string[] = [];
+  for (const word of text.split(/\s+/)) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && labelWidth(ctx, `${last} ${word}`, o) <= maxW) lines[lines.length - 1] = `${last} ${word}`;
+    else lines.push(word);
+  }
+  return lines;
+}
+
+/** line height of labelBlock() */
+export const blockLineH = (size = 11) => size * 1.6;
+
+/**
+ * A message wrapped to maxW with its lines centred on y (placeholders like "start audio to see
+ * them vibrate"), so it never runs off a narrow screen.
+ */
+export function labelBlock(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, o: LabelOpts = {}): void {
+  const size = o.size ?? 11;
+  const lines = wrapLabel(ctx, text, maxW, o);
+  const lh = blockLineH(size);
+  const y0 = y - ((lines.length - 1) * lh) / 2 + size * 0.35;
+  lines.forEach((line, i) => label(ctx, line, x, y0 + i * lh, o));
+}
+
 /** Chaikin corner cutting (closed shapes), for soft tissue the engine gives as coarse polygons */
 export function chaikin(p: Pt[], it = 2): Pt[] {
   let q = p.length > 1 && p[0][0] === p[p.length - 1][0] && p[0][1] === p[p.length - 1][1] ? p.slice(0, -1) : p.slice();

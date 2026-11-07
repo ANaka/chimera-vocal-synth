@@ -77,6 +77,9 @@ interface Echo {
 
 const ECHO_AGES = [0.09, 0.06, 0.03];
 
+/** top of the cranium in body cm (profile.ts's skin outline peaks at 22.9), with a little air */
+const CROWN = 23.4;
+
 export class AnatomyRenderer {
   private particles: Particle[] = [];
   private scale = 20;
@@ -102,14 +105,19 @@ export class AnatomyRenderer {
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
-    // the readouts need room beside the head; a narrow screen moves them above and below it
-    this.compact = w < 560 || w / h < 0.95;
+    // the readouts need room beside the head; a narrow screen (a phone) moves them above and below it.
+    // A tall desktop screen keeps them beside it: the head is then fitted to the width and centred,
+    // leaving room above and below, where the compact rows ran over the skull.
+    this.compact = w < 560;
     const padX = 12, padT = this.compact ? 62 : 8, padB = this.compact ? 92 : 8;
-    this.scale = Math.max(1, Math.min((w - 2 * padX) / (VIEW.x1 - VIEW.x0), (h - padT - padB) / (VIEW.y1 - VIEW.y0)));
+    // VIEW crops the top of the skull at the canvas edge; with readout rows above the head, the
+    // whole crown must fit under them, or the cut-off part draws over the readouts
+    const y1 = this.compact ? CROWN : VIEW.y1;
+    this.scale = Math.max(1, Math.min((w - 2 * padX) / (VIEW.x1 - VIEW.x0), (h - padT - padB) / (y1 - VIEW.y0)));
     // left-aligned when there is room to spare, so the readouts get the space in front of the face
     const spare = w - 2 * padX - (VIEW.x1 - VIEW.x0) * this.scale;
-    this.ox = padX + Math.min(spare / 2, Math.max(0, spare - 220)) - VIEW.x0 * this.scale;
-    this.oy = padT + Math.max(0, (h - padT - padB - (VIEW.y1 - VIEW.y0) * this.scale) / 2) + VIEW.y1 * this.scale;
+    this.ox = padX + (this.compact ? spare / 2 : Math.min(spare / 2, Math.max(0, spare - 220))) - VIEW.x0 * this.scale;
+    this.oy = padT + Math.max(0, (h - padT - padB - (y1 - VIEW.y0) * this.scale) / 2) + y1 * this.scale;
     for (const p of this.particles) p.px = NaN;
   }
 

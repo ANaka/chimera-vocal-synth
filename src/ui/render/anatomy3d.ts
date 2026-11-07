@@ -641,7 +641,7 @@ export class Anatomy3D {
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
-    this.compact = w < 560 || w / h < 0.95;
+    this.compact = w < 560;
     this.camera.aspect = w / h;
     // on a wide screen the head sits left of centre, leaving the right for the readouts
     if (this.compact) this.camera.clearViewOffset();

@@ -233,7 +233,7 @@ export function BeatOverlay() {
   if (!playing || !cell) return null;
   const s = BEAT_SOUNDS.find((x) => x.id === cell.id);
   return (
-    <div className="beat-overlay" aria-hidden="true" key={now}>
+    <div className="beat-overlay" data-layout="overlay" aria-hidden="true" key={now}>
       <span className="beat-sym">{cell.id}</span>
       <span className="beat-name">{s?.name}</span>
       {s && <span className="beat-air">{AIR[s.airstream]}</span>}
