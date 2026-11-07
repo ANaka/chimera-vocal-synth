@@ -116,10 +116,12 @@ convention with real timing errors. Pitch is not scored either: the synth sings 
 deviations from it can't be predicted from the score.
 
 **The verdict.** `--against <earlier score.json>` compares the training scores of two runs over
-the same songs and body. It compares like for like: each term's cost is recomputed for both runs
-over the songs both runs measure, from the per-song values in `score.json`. A song that stops
-being measured, for example because its vibrato no longer reads as vibrato, can't take its gap
-out of the comparison.
+the same songs and body. It compares like for like, note by note. `score.json` keeps every note's
+measures on both voices, and the verdict recomputes each song's value of each term for both runs
+over the notes on which both runs give that term. A measure that stops being measurable on a
+note leaves both runs alike, so it can neither help nor hurt. That covers a stray voiced frame
+that comes or goes in a note the synth barely voices, and a vibrato that no longer reads as
+vibrato. Not voicing a note still costs, through the voiced share, which every note has.
 
 - **Better:** the like-for-like score falls by at least 0.01 (in thousandths), no term's cost
   rises by more than 0.25, and every guard holds.
@@ -128,14 +130,7 @@ out of the comparison.
   - no more dropped gestures
   - note MCD up by no more than 0.1 dB
   - envelope correlation down by no more than 0.01
-  - the synth's pitch error up by no more than 2 cents
-  - no song measured on fewer notes. For each song, `score.json` counts the notes compared and
-    the notes on which the synth gives each measure: band levels, H1−H2, voicing, onsets,
-    aperiodicity and pitch, and the notes long enough to look for vibrato. A song's value is a
-    median over its notes, and a measure that stops being measurable on a note would otherwise
-    drop that note, maybe a bad one, from the median. Vibrato depth and rate are not counted:
-    they exist only on notes with vibrato, giving fewer notes vibrato can be right, and the share
-    term scores how many have it.
+  - the synth's pitch error up by no more than 2 cents, over the notes both runs pitch
   - a guard that had a value and has none now breaks too.
 - **Worse:** any guard or term breaks, or the score rises by 0.01 or more.
 - **No clear change:** anything else.
