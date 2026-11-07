@@ -124,8 +124,11 @@ pub fn plan_song(notes: &[SungNote], o: &SongOptions) -> Plan {
         let mut codas: Vec<Vec<Segment>> = (i..=j)
             .map(|k| if k < j && melisma(&notes[k + 1].syl) { Vec::new() } else { consonants_at(&last_of_chain(notes, k).coda, o.body, 0.8, hz_of(k)) })
             .collect();
-        // the phrase's last vowel leaves a short breath before the next phrase
-        let last_end = times[j] + notes[j].beats * beat - js_min(0.12, 0.3 * notes[j].beats * beat);
+        // the phrase's last vowel leaves a short breath before the next phrase. The call's last
+        // phrase is followed by a rest (callers split phrases at rests), so the breath comes from
+        // the rest: hold that note to its end, less the breath's release.
+        let reserve = if j == notes.len() - 1 { 0.05 } else { 0.12 };
+        let last_end = times[j] + notes[j].beats * beat - js_min(reserve, 0.3 * notes[j].beats * beat);
         for k in i..=j {
             let (span, next) = if k < j { (times[k + 1] - times[k], &mut onsets[k + 1 - i][..]) } else { (last_end - times[k], &mut [][..]) };
             fit([&mut codas[k - i][..], next], span);
