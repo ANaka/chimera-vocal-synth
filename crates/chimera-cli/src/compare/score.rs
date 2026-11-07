@@ -403,6 +403,21 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>, f64), 
         &|a, b| b < a - CORR_SLACK,
         "envelope correlation down",
     );
+    // the pitch error's rise is judged like for like below; here only its loss
+    guard("synthPitchAbsCents", &|_, _| false, "pitch error");
+    let empty = vec![];
+    let (to, tn) = (
+        o["terms"].as_array().unwrap_or(&empty),
+        n["terms"].as_array().unwrap_or(&empty),
+    );
+    if to.len() != N_TERMS
+        || tn.len() != N_TERMS
+        || to.iter().zip(tn).any(|(a, b)| a["name"] != b["name"])
+    {
+        return Err(
+            "the earlier score has other terms; rescore the baseline with this build".into(),
+        );
+    }
     // like for like, note by note
     let mut gaps: Vec<(Vec<f64>, Vec<f64>)> = vec![(Vec::new(), Vec::new()); N_TERMS];
     let (mut pitch_o, mut pitch_n) = (Vec::new(), Vec::new());
@@ -440,8 +455,19 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>, f64), 
     if pn > po + PITCH_SLACK {
         why.push(format!("pitch error up (cents): {po:.2} → {pn:.2}"));
     }
+    // every term the earlier score counted keeps its weight: a term with no notes in common
+    // changes by nothing, rather than leaving the denominator and magnifying the rest; a term
+    // that has no value at all any more breaks
     let (mut change, mut weight) = (0.0, 0.0);
     for (k, (name, w)) in TERMS.iter().enumerate() {
+        if !num(&to[k]["cost"]).is_finite() {
+            continue;
+        }
+        weight += w;
+        if !num(&tn[k]["cost"]).is_finite() {
+            why.push(format!("{name}: no value any more"));
+            continue;
+        }
         let unit = num(&old["units"][k]);
         let (co, cn) = (term_cost(&gaps[k].0, unit), term_cost(&gaps[k].1, unit));
         if co.is_finite() && cn.is_finite() {
@@ -449,7 +475,6 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>, f64), 
                 why.push(format!("{name} cost up: {co:.3} → {cn:.3}"));
             }
             change += w * (cn - co);
-            weight += w;
         }
     }
     if weight == 0.0 {
@@ -666,6 +691,16 @@ mod tests {
         let (v, why, _) = verdict(&base, &one_worse).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why.iter().any(|w| w.contains("H1-H2")), "{why:?}");
+        // the synth with no pitch at all: worse, though like for like there is nothing to compare
+        let unpitched = scored(6.0, |s| {
+            s.synth.iter_mut().for_each(|r| r[CENTS] = f64::NAN)
+        });
+        let (v, why, _) = verdict(&base, &unpitched).unwrap();
+        assert_eq!(v, Verdict::Worse);
+        assert!(
+            why.iter().any(|w| w.contains("pitch error: no value")),
+            "{why:?}"
+        );
         // the synth further off the score: worse
         let off_key = scored(6.0, |s| s.synth.iter_mut().for_each(|r| r[CENTS] += 10.0));
         let (v, why, _) = verdict(&base, &off_key).unwrap();
@@ -720,6 +755,42 @@ mod tests {
         let (v, _, change) = verdict(&base, &gone).unwrap();
         assert_eq!(v, Verdict::Same);
         assert_eq!(change, 0.0);
+    }
+
+    #[test]
+    fn a_term_with_nothing_in_common_keeps_its_weight() {
+        // the synth's vibrato moves from notes 0–4 to notes 5–9, so depth and rate have no note
+        // in common; the bands improve. The change is the bands' gain over the earlier score's
+        // whole weight (vibrato share counts nowhere: her share is 1 in every song, no spread).
+        let mk = |moved: bool, bands: f64| {
+            scored(8.0, move |s| {
+                for (i, r) in s.synth.iter_mut().enumerate() {
+                    if (i < 5) == moved {
+                        (r[DEPTH], r[RATE]) = (f64::NAN, f64::NAN);
+                    }
+                    for b in &mut r[0..5] {
+                        *b += bands - 8.0;
+                    }
+                }
+            })
+        };
+        let (base, moved) = (mk(false, 8.0), mk(true, 6.0));
+        let unit = 1.4826 * 2.5;
+        let gain = 0.2 * 5.0 * ((6.0 / unit - 1.0) - (8.0 / unit - 1.0));
+        let (_, _, change) = verdict(&base, &moved).unwrap();
+        assert!((change - gain / (6.0 - 1.0 / 3.0)).abs() < 1e-9, "{change}");
+        // and a term that loses every value breaks
+        let gone = scored(8.0, |s| {
+            s.synth
+                .iter_mut()
+                .for_each(|r| (r[DEPTH], r[RATE]) = (f64::NAN, f64::NAN))
+        });
+        let (v, why, _) = verdict(&base, &gone).unwrap();
+        assert_eq!(v, Verdict::Worse);
+        assert!(
+            why.iter().any(|w| w.contains("vibrato depth: no value")),
+            "{why:?}"
+        );
     }
 
     #[test]

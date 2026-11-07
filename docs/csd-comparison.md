@@ -132,6 +132,9 @@ vibrato. Not voicing a note still costs, through the voiced share, which every n
   - envelope correlation down by no more than 0.01
   - the synth's pitch error up by no more than 2 cents, over the notes both runs pitch
   - a guard that had a value and has none now breaks too.
+- **Terms:** a term the earlier score counted keeps its weight in the comparison, so a term
+  with no note in common changes by nothing rather than leaving the denominator and magnifying
+  the rest. A term that has no value at all any more breaks.
 - **Worse:** any guard or term breaks, or the score rises by 0.01 or more.
 - **No clear change:** anything else.
 
