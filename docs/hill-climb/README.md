@@ -147,12 +147,9 @@ speech judged against the batch's baseline and required to be not WORSE):
       `golden_planning` blesses, so its first run can fail. The beat notation's expectations
       are not blessed. Other geometry tests (`geometry_continuity`, `airway`) are real checks,
       not snapshots: if one fails, fix the cause as part of the change.
-   2. Then run `cargo test --workspace --no-fail-fast` and `bun run wasm && bun test tests`.
-      Every test must pass, with one exception. If your change alters the airway's linear
-      acoustics on purpose (wall or radiation losses, tract geometry), the airway checks in
-      `golden_analysis` ("human |H|" and the ones after it) compare against TypeScript-era
-      transfer functions and will fail. Say so in the log; the batch PR regenerates them. Every
-      other check in it must pass.
+   2. Then run `cargo test --workspace --no-fail-fast` and `bun run test`. Every test must
+      pass. (The human airway's transfer functions in `golden_analysis` bless with the rest;
+      its other cases, the analysis code's own, don't, and must pass as they are.)
    3. Restore the fixtures with `git checkout -- crates/chimera/tests/golden`. They are
       blessed once per batch, when the batch goes to a PR, so the history doesn't carry a copy
       of them for every experiment. Until then the golden tests fail on this branch, which is

@@ -30,8 +30,9 @@ and the CLI) under a React UI. See the README.
   `chimera::math`, no allocation while rendering, output independent of block size. `cargo test`
   enforces each.
 - **Any change to the sound or the plans fails the golden tests, by design.** Re-bless with
-  `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast`, run twice. Only human-voice audio and
-  plans re-bless; see `crates/chimera/tests/golden/README.md` for the rest.
+  `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast`, run twice. Human-voice audio, plans
+  (including the beat sounds' gestures and the beat player), the tract geometry and the human
+  airway's transfer functions re-bless; see `crates/chimera/tests/golden/README.md` for the rest.
 - **`*.generated.json` tables are regenerated (`chimera calibrate`, `tools/gen-*`), never edited.**
   Vowel calibration isn't bit-reproducible, so rerun it only when the formants should move.
 - **`src/wasm/chimera.wasm` is a gitignored build product.** After a Rust change, `bun test tests`
