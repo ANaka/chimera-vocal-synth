@@ -46,6 +46,12 @@ opens a new one, update this list and give the experiment's number.
      into the fricative or comes before it.
    - Look at how a phrase starts: the 60 ms lead in `plan_song`, and the glottal abduction of a
      voiceless onset.
+   - Experiment 4 held the folds open from the in-breath to the first voiced segment: WORSE. With
+     the glottis open, the breath (which reaches full pressure 20 ms before the first segment)
+     blows a loud [h] before the vowel or the onset consonant, and the detector reads it as voicing
+     100–150 ms early. The cause is upstream: the breath arrives before the first articulation is
+     in place. Next angle: start the breath ramp with the first segment's closure or constriction
+     (`breath` gesture in `plan_utterance`), not 60 ms ahead of it, and leave the folds alone.
 4. **Vibrato.** Costs: rate 0.67, share 0.62. The synth puts 35-cent vibrato on every long note
    at 5.5 Hz. She uses it on about two thirds of her long notes, at about 6.1 Hz
    (`vibrato_gesture` in `crates/chimera/src/phonetics/sing.rs`).
@@ -156,3 +162,34 @@ opens a new one, update this list and give the experiment's number.
 - Next: a larger chink doesn't flatten H1−H2's swing with pitch, and it costs notes the synth
   barely voices. Try a wider F1 bandwidth or F1 that follows pitch (lead 1). Lead 5 is worth
   a run of its own: those barely voiced short notes before a stop make every guard noisy.
+
+### 4. The folds stay apart from the in-breath until the first voiced segment (reverted)
+
+- Hypothesis: a phrase starts with the folds adducted (abduction 0) while the breath gesture
+  ramps the pressure up from 60 ms before the first segment. So the voice starts as soon as the
+  pressure crosses threshold: 15–20 ms before a vowel-initial note (hers +5 ms), and as a voiced
+  blip before a voiceless onset (/s/, /f/, /h/ voiced 100–130 ms early). A real breath group
+  starts from the open glottis of the in-breath, and the folds close only into the first voiced
+  sound. Holding them open until then should move both onset terms later and leave the rest
+  alone.
+- Change: `plan_utterance` in `crates/chimera/src/phonetics/planner.rs`: an "inhale" abduction
+  gesture (0.3, strength 6, like the voiceless one) from 50 ms before the plan start to 30 ms
+  before the first voiced segment, ramping out over 30 ms. Tried, against experiment 3:
+  - on every phrase: 1.378; WORSE. Vowel-initial onset −0.015 → −0.040 s, voiceless-initial
+    −0.024 → −0.095 s, voiced share 0.260 → 0.634 cost, aperiodicity 0.90 → 2.50, 28 song
+    measures on fewer notes. In the render (en001a at 2.40 s) the vowel now voices on time, but
+    a 54 dB [h] (the vowel is 78 dB) runs for 55 ms before it: full breath through an open
+    glottis. YIN counts that as the voice starting.
+  - only on phrases that open on a voiceless consonant: 1.134; WORSE. Vowel-initial unchanged,
+    voiceless-initial still −0.095 s: the breath blows through the open glottis before the
+    onset's oral closure is made, an [h] before /k/, /t/, /p/. The gesture also reached back into
+    the previous phrase when the gap was short (en002a "dh_eo" at 9.41 s, 135 ms before
+    "p_l_ei_n_z": voiced 1.0 → 0.0), which cost voiced share and aperiodicity.
+- Singer: training score 0.889 → 1.378 / 1.134 (not kept); held-out 1.018 → 1.314 (first try).
+- Speech: not measured (the singer verdict was WORSE).
+- Verdict: WORSE on both tries: onset terms rose instead of falling, voiced share and
+  aperiodicity rose, songs measured on fewer notes.
+- Next: don't open the glottis at the phrase start while the breath leads the articulation.
+  The breath's 60 ms lead over the first segment is the real fault. Time the breath ramp to the
+  first segment's oral closure (or, for a vowel, end it at the vowel's start), so that pressure
+  builds behind a closure or into adducted folds, not into the open air (lead 3).
