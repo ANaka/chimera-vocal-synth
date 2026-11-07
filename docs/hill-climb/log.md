@@ -113,6 +113,13 @@ opens a new one, update this list and give the experiment's number.
      Speech 40.73 → 36.09 %. "Sheet" is now heard in the male voice. Still failing: the female
      "sheet", chair, chain, birch and chopped. Next: the /ʃ/'s level (teeth source gain, or
      `w_dist` near 2.5 cm), then α = 1.2.
+   - Experiment 13 found `w_dist` is not the cause (both bodies' /ʃ/ get full weight), and that
+     in both voices /ʃ/ is no louder than /f/, where real sibilants are about 10 dB louder.
+     Doubling the teeth (obstacle) source makes the female "sheet" heard right, but the louder
+     sibilants in the songs push note MCD 0.008 dB past its guard, and the speech total doesn't
+     move (36.09 → 36.75 %). The female's fricatives are about 10 dB lower re her vowel than
+     the male's: about 5 dB from her glottal source (vowels too loud for her fold size), about
+     5 dB from the body scale.
 
 ## Experiments
 
@@ -708,3 +715,87 @@ experiment 11's change.
   - Then α = 1.2, which moved /ʃ/ further in experiment 11.
   - The affricates (chair, chain, chopped, birch) still fail: their /ʃ/ release is presumably as
     weak.
+
+### 13. The teeth (obstacle) source makes sibilants louder than /f/ (reverted)
+
+- Hypothesis: the female /ʃ/ of "sheet" is 22 dB below its vowel, and Whisper hears "feet". A
+  probe of `update_noise` and of the levels (frication 0.12–0.22 s against vowel 0.25–0.31 s, by
+  RMS) found:
+  - **`w_dist` is not the cause.** The female /ʃ/'s jet sits 2.49 body-cm behind the teeth and
+    the male's 2.6. Both get full weight (`w_dist` 1.00 and 0.99–1.00), and so does `w_jet`.
+    Moving the teeth injection point by −2 to +1 sections changes the level by less than 1 dB.
+  - **In both voices /ʃ/ is no louder than /f/.** Male: /ʃ/ −11.5, /f/ −12.4, /s/ −9.3 dB re
+    the vowel. Female: −22.2, −23.1 and −20.2. In real speech the sibilants are about 10 dB
+    more intense than /f/ and /θ/ (Behrens & Blumstein 1988; Jongman et al. 2000), because the
+    jet hits the incisors (an obstacle source, Shadle 1985). The obstacle source adds only
+    9–10 dB over the jet source alone, in both voices (teeth source off: male −20.7, female
+    −32.1).
+  - **Why the female is about 10 dB worse than the male, relative to her vowel.** The female
+    voice's output gain (0.55, `HumanVoice::new`) explains most of the 8 dB her frication is
+    below the male's in absolute terms. It is a level match, so it doesn't change the
+    fricative-to-vowel ratio. The ratio's gap splits about evenly:
+    - The source: the female voice rendered in the male body gives /ʃ/ −17.1 dB. Her vowels
+      come out 5.4 dB louder than the male voice's in the same body. Her glottal pulse is
+      0.17·k² cm² (0.81 of the male's) at twice the f0. Real female peak flow is about 0.64 of
+      the male's (Holmberg et al. 1988), with folds about 0.67 of his length (Hirano), so her
+      vowels are too loud.
+    - The body: the scale alone (0.9, other female body parameters set to the male's) puts the
+      female frication 8 dB lower in absolute terms. After the 5.2 dB output gain, about 3 dB of
+      that is the turbulence source itself. The source scales with Re² ∝ v²A, and the series
+      pressure source's flow scales with A. Her vowel rises about 2 dB.
+  - The cheapest step that separates /ʃ/ from /f/ is the obstacle source's gain. It raises every
+    sibilant (and tongue-tip releases) in both voices and leaves /f/ alone, since /f/'s jet is
+    at the lips (`w_dist` 0).
+- Change: `NoiseGains.teeth` 3.0e-6 → 6.0e-6 in `crates/chimera/src/voice/human_airway.rs`.
+  Values tried, by level re the vowel:
+  - 6e-6: /ʃ/ male −5.8, female −16.4 dB (6–7 dB above /f/); /s/ male −3.4, female −14.4.
+    Female "chair": the /tʃ/ peaks about 20 dB below the vowel.
+  - 9e-6: /ʃ/ −2.3 and −12.9 dB, /s/ male +0.1 dB, as loud as the vowel. Too loud. Not judged.
+  - The judges ran on 6e-6.
+- Speech: word error rate 36.09 → 36.75 % (training, NO CLEAR CHANGE), 45.67 → 44.67 %
+  (held-out).
+  - Moved right:
+    - **"Glue the sheet" (female, 1 → 0: "feet" → "sheet")**
+    - "chopped" (male, 3 → 1)
+    - "pushes" (male, 3 → 0)
+    - "thrown" (female, 1 → 0)
+    - "faced us" (male, 7 → 5)
+    - "rice … served" (female, 3 → 1)
+    - "the quiet fish" (female, 3 → 2)
+  - Moved wrong:
+    - "chicken leg" (male 1 → 5, female 2 → 4)
+    - "some bright doors sell" (male, 3 → 6)
+    - birch, "depth of a well", "late song", "sharp tree" and "loud milk", each by one word
+  - Chair, chain and the female juice still fail.
+- Singer: training 0.582 → 0.601 (+0.019 like for like), but **WORSE**: note MCD 8.536 →
+  8.644 dB, over its 8.636 guard. The best run's 8.628 left 0.008 dB of headroom. The songs'
+  sibilants are louder: level 4–8 kHz gap/spread 1.52 → 1.63, 2–4 kHz 0.96 → 1.00. Every
+  other guard holds (0 notes off time, 0 dropped gestures, envelope correlation 0.811, pitch
+  error 4.85 cents). Held-out 0.810 → 0.827.
+- Speed: `os=2` read 27.8 and 28.3 % at load average 15–16. Back to back on the same loaded
+  machine: 24.3 % without the change, 24.2 % with it. The change is a constant, so the speed
+  is unchanged.
+- Tests: fixtures blessed twice, then `cargo test --workspace`.
+  - Everything passes except `golden_analysis` at "male neutral" (9 %). It is the same failure
+    experiment 12 logged: that change altered the tract geometry, which the README's airway
+    exception covers. This change doesn't cause it.
+  - `bun run wasm && bun test tests`: 30 pass.
+  - Fixtures restored.
+- Verdict: reverted. The speech isn't BETTER (+0.66 points), and the singer breaks the note-MCD
+  guard.
+- Commit: none (log only).
+- Next:
+  - The sibilant level is still the right target. The female "sheet" is heard as soon as /ʃ/
+    stands 6 dB above /f/. But a flat gain also makes the songs' sibilants louder, and note MCD
+    has no headroom left (8.628 against 8.636).
+  - Take the female's 10 dB first. Her vowels are about 5 dB too loud for her folds: the glottal
+    pulse area scales with k² (0.81), where real female folds are about 0.67 of the male's
+    length and her peak flow about 0.64 of his. A fold-length body parameter for the pulse
+    amplitude, with the output gain re-levelled, would lift every female consonant against
+    her vowels without touching the male. It does change her source, so watch H1−H2 and MCD in
+    the singer.
+  - If the gain is retried, try a smaller step (4–4.5e-6) together with something that buys back
+    note MCD. Or tie the obstacle source to Stevens' scaling (source ∝ ΔP^1.5·A^0.5 rather than
+    Re² ∝ ΔP·A), which lifts narrow jets and small bodies more than wide ones.
+  - "Chicken leg" and "some bright doors" got worse with louder /tʃ/ and /s/: check the /tʃ/
+    release, which may now mask the /k/ after it.
