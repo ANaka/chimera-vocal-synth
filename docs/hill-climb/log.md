@@ -120,6 +120,14 @@ opens a new one, update this list and give the experiment's number.
      move (36.09 → 36.75 %). The female's fricatives are about 10 dB lower re her vowel than
      the male's: about 5 dB from her glottal source (vowels too loud for her fold size), about
      5 dB from the body scale.
+   - Experiment 15 fixed the affricates' timing in the renders: a voiceless affricate's /ʃ/
+     constriction now held until the folds close, so the 50 ms [h] after a 35–40 ms frication
+     became 70–80 ms of /ʃ/ at the /ʃ/'s own level. "Chain" (male) was heard right, "chicken"
+     (female) too once the vowel after /tʃ/ got the stop's aspiration allowance, but the total
+     didn't move (36.09 → 37.09 %): the male "chicken" lost its short /ɪ/, and the female /tʃ/,
+     though well formed, is still about 20 dB below her vowel. The affricates are now limited by
+     the same thing as /ʃ/: the female fricative level. The patch is logged in experiment 15, so
+     it can be retried with a fix for that level.
 
 7. **Stressed vowels in running speech (target 2).** The planned durations are not what
    crushes them. Experiment 14 printed `plan_phrases`' segments: the stressed /ʊ/ of "pushes" is
@@ -865,3 +873,65 @@ experiment 11's change.
     - Lengthening the stressed vowels in the plan directly. None of these opens the fricative's
       onset.
 
+### 15. An affricate's frication lasts until the folds close, with no [h] after it (reverted)
+
+- Hypothesis: the affricates fail in Whisper ("chain" → "king"/"pin", "birch" → "bird",
+  "chair" → "coloring"/"scheduling", "juice" → "dose", "chicken" dropped). Renders of "chain",
+  "chair", "birch", "juice" and /ˈɑtʃɑ/ in both voices showed why for /tʃ/:
+  - The planner splits the affricate's span at 55 %: a postalveolar closure, then the /ʃ/
+    constriction to the span's end. In /ˈɑtʃɑ/ the span is 67 ms (Klatt's 70/50 ms), so the
+    closure gives about 20 ms of silence and the frication starts at about 0.29 s.
+  - The /ʃ/ gesture is built with the affricate's own definition, a closing one, so
+    `oral_gestures_into` takes a contact release's 20 ms latency lead off its end. The
+    constriction lets go about 20 ms before the span ends.
+  - The folds, meanwhile, get a voiceless stop's aspiration gesture: wide (0.36) until 20 ms past
+    the span's end, then a 45 ms ramp. So the release is followed by only 35–40 ms of /ʃ/
+    frication (0.29–0.33 s, peak 2.2–2.3 kHz, as loud as the /ʃ/ of /ˈɑʃɑ/), then about 50 ms
+    of [h] (0.33–0.38 s, energy below 1 kHz) before voicing. The same in the female "chain"
+    (frication 0.13–0.18 s, then [h] to 0.23). Heard as a stop and an [h]: "king", "pin".
+  - In a real /tʃ/ the frication is the voice onset time: the glottis is open behind a held
+    postalveolar constriction, and voicing starts as the frication ends, with no aspiration
+    after it.
+- Change: `crates/chimera/src/phonetics/planner.rs`. A voiceless affricate's /ʃ/ gesture is
+  held to the end of the aspiration gesture's hold (`t1 + 0.4·VOT`), with the 20 ms latency lead
+  added back, since a fricative constriction lets go at once. A voiced affricate's is held to
+  `t1`. The VOT and the aspiration test became two small helpers shared with the stops. The vowel
+  onset (voicing) doesn't move; the [h] becomes frication. Values tried:
+  - **A**, held to `t1 + 0.4·VOT` (lead compensated): /ˈɑtʃɑ/ male frication 0.29–0.36 s at
+    −29 to −31 dB, then about 10 ms to the vowel; female "chain" 0.13–0.21 s, a clean /ʃ/
+    spectrum (2–4 kHz on top), at about −37 dB against the vowel's −17. Speech 36.09 → 37.75 %
+    (NO CLEAR CHANGE). Right: "the black chain" (male), "chopped" (male, 3 → 1). Wrong: "chicken
+    leg" (male 1 → 5, female 2 → 5, "These taste like a rare dish"), "juice" (female 2 → 3).
+    The stressed /ɪ/ of "chicken" kept about 20 ms of voicing before; with the constriction
+    held into its onset it lost it.
+  - **A + the aspiration allowance for affricates** (`durations.rs`: a stressed vowel after a
+    voiceless affricate gets the 20 ms that one after a voiceless stop gets, since the same
+    abduction gesture eats its onset): speech 36.09 → **37.09 %** (training, NO CLEAR CHANGE),
+    45.67 → 48.33 % (held-out). Right: "chain" (male 4 → 3), "chicken leg" (female 2 → 1). Wrong:
+    "chicken leg" (male 1 → 5), "juice" (female 2 → 3, "roaster"). Chair, the female chain
+    ("fin"), birch and the male chopped are as before.
+  - **B**, held to `t1 + 0.4·VOT` without compensating the lead (checked by frames only): the
+    [h] comes back (/ˈɑtʃɑ/ 0.34–0.38 s), and voicing in "chicken" starts no earlier. Voicing
+    onset follows the folds, not the tongue. Not judged.
+  - "Juice": the /dʒ/ barely changes under either. Its frication (0.10–0.14 s) is about 25 dB
+    below the vowel with a flat spectrum. It is quiet, not mistimed.
+- Speech: training 36.09 → 37.09 % (A + allowance) and 37.75 % (A). Held-out not used.
+- Singer, bench, tests: not run. The deciding verdict failed at both values.
+- Verdict: reverted. The speech is not BETTER at either value.
+- Commit: none (log only). The patch (A + allowance), for a retry:
+  - `planner.rs`, `Manner::Affricate`: `let open = if def.voicing == Voicing::Voiceless { 0.4 *
+    stop_vot(next_vowel, prev_seg, rate) } else { 0.0 };` and the release gesture
+    `add_oral(&rel.targets, split + 0.008, t1 + open + 0.02, 1.4, def.ipa)`. Here `stop_vot` is
+    the stops' `if aspirated { 0.05 / rate } else { 0.012 }` with
+    `aspirated = next_vowel && !prev.is_some_and(|p| p.ipa == "s")`.
+  - `durations.rs`: the +20 ms test becomes `matches!(pv.manner, Some(Manner::Stop |
+    Manner::Affricate)) && pv.voiced != Some(true)`.
+- Next:
+  - The /tʃ/ now has the right shape in the renders, and Whisper hears it in some places (the
+    male "chain"). What holds it back is level: the female /tʃ/'s frication sits about 20 dB
+    below her vowel, like her /ʃ/ (lead 6, experiment 13). Retry this patch on top of a fix for
+    the female fricative level (the glottal pulse amplitude by fold length), not on its own.
+  - The male "chicken" is a short-vowel problem (lead 7): its stressed /ɪ/ voices for only about
+    20 ms between the affricate's VOT and the /k/ closure's lead.
+  - /dʒ/ is a separate fault: it is quiet, and it has no abduction at all, where a voiced
+    fricative gets 0.035. Look at its release's glottal setting and level, not its timing.
