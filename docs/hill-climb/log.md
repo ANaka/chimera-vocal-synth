@@ -128,6 +128,15 @@ opens a new one, update this list and give the experiment's number.
      though well formed, is still about 20 dB below her vowel. The affricates are now limited by
      the same thing as /ʃ/: the female fricative level. The patch is logged in experiment 15, so
      it can be retried with a fix for that level.
+   - Experiment 20 found why /ʃ/ is 2–3 dB below /s/: not the teeth source's level or weights
+     (its Re² term is about 1 dB higher for /ʃ/, and `w_jet` and `w_dist` are 1 except for one
+     case), but its spectrum. The source is white to 5 kHz, and the radiation's +6 dB/octave
+     favours /s/'s higher peak. The one weight case is the female /ʃ/ before /ɑ/: `w_dist` 0.78,
+     because the jet's distance was measured from the channel's narrowest section rather than its
+     exit. Fixing that lifts it 2.4 dB but misses "sheet" (already at full weight), and speech
+     reads NO CLEAR CHANGE. Next angle: a teeth-source band that follows the jet's v/D (see its
+     "Next"). It also found the judge is chaotic: renders 50–100 dB below the signal apart flip
+     Whisper's words, so about ±2 points of any small change's total is noise.
 
 7. **Stressed vowels in running speech (target 2).** The planned durations are not what
    crushes them. Experiment 14 printed `plan_phrases`' segments: the stressed /ʊ/ of "pushes" is
@@ -1250,3 +1259,69 @@ keep rule for target 3 now covers any artifact with such a test.
     to 3–6x (experiment 16's "Next"); they have no target test yet.
   - The first-word errors and the /ɝ/ + /ɹ/ of "Her round" remain open (experiment 18's
     "Next").
+
+### 20. The obstacle source's jet distance runs from the channel's exit: the female /ʃ/ before /ɑ/ (reverted)
+
+- Hypothesis (the suggested lead: /ʃ/ is 2–4 dB quieter than /s/, where real /ʃ/ is the louder).
+  A probe of `update_noise` during /ˈɑsɑ/ and /ˈɑʃɑ/ (0.30–0.36 s) found:
+  - **The source is not weaker for /ʃ/.** Its constriction is wider (male 0.20 cm² against 0.09,
+    female 0.17 against 0.07) and carries more flow (male 460 cm³/s against 280), so the teeth
+    source's Re² term is about 1 dB *higher* for /ʃ/ than for /s/. `w_jet` is 1.00 for both in
+    both voices.
+  - **The female /ʃ/ before /ɑ/ loses 2 dB to `w_dist`.** Her postalveolar channel spans two
+    sections (0.17, 0.19 cm²), and the narrowest is the back one, 3.02 body-cm behind the teeth,
+    in the far fade (2.6–4.0): `w_dist` 0.78. The jet leaves from the front section, 2.4 body-cm
+    behind. The male's narrowest section is the front one (`w_dist` 1.00), as are both /s/'s.
+  - **The rest is the transfer.** With only the teeth source on, it makes all of the fricative's
+    level (−27.9 dB male /s/ against −27.8 with every source on), and from the same source level the
+    radiated /ʃ/ is 2.8 dB weaker than /s/ (male) and 2.1 dB weaker (female). A rough budget: the
+    radiation's +6 dB/octave favours /s/'s 4.5–5 kHz peak over /ʃ/'s 2.3–2.9 kHz by about 6 dB,
+    and the teeth source's 5 kHz two-pole low-pass takes back about 4.5 dB of that; the last dB
+    or so is the resonances.
+- Change: `crates/chimera/src/voice/human_airway.rs`, `update_noise`. The teeth source's
+  distance to the teeth runs from the most anterior section of the channel still within a factor
+  of the minimum area, not from the narrowest section. Values tried:
+  - **A**, both fades from the exit, sections under 2× the minimum: female /ˈɑʃɑ/ −40.0 →
+    −37.6 dBFS (+2.4 dB), /s/ and the male unchanged. But it also moves a dental /ð θ/'s
+    reference onto the teeth (their channel of 0.17–0.22 cm² runs up to the incisors' edge), so
+    the near fade turns off their obstacle noise: every "the" changes, and the female "the thin
+    road" became "the fin rolled". Speech 37.09 → 39.07 % (training, NO CLEAR CHANGE), held-out
+    45.67 → 43.0 %.
+  - **B**, only the far fade from the exit (the jet's travel), the near (dental) fade on the
+    narrowest section as before, sections under 1.5×: same /ˈɑʃɑ/ gain, dentals unchanged.
+    Speech 37.09 → **39.07 %** (training, NO CLEAR CHANGE), held-out 45.67 → 45.33 %. The patch
+    is in `out/e20/variant-b.patch` (gitignored).
+  - In the sentence that matters, it does nothing: the female "sheet" /ʃ/ (before /i/, tongue
+    fronted) sits 2.47 body-cm behind the teeth and already had full weight, as experiment 13
+    found. It is still heard as "feet". The fix reaches only /ʃ/ next to a back vowel.
+- Speech (B), the training sentences that moved: male "chicken leg" (1 → 3, "quick lick"),
+  "rice … round bowls" (1 → 3, "a round bowl"), "thin road" (2 → 3), "bright doors sell" (2 → 3);
+  female "thrown" (1 → 0), "large size" (1 → 2), "green chair … late song" (2 → 3, "red song");
+  male "fast window" (5 → 4). None of them is a female postalveolar.
+  - **Most of these moves are Whisper's chaos, not the sound.** Diffing the judge's renders
+    against the best run's, frame by frame: the male "rice" differs by at most −72 dB (about 50 dB
+    below the signal) and the male "fast window" by −108 dB (a few 16-bit steps), and Whisper still
+    changed its words ("bowls" → "a round bowl", "first" → "fast"). Whisper itself is
+    deterministic (the same file gives the same text twice). So a change that touches the noise
+    sources anywhere can swing the training total by about ±2 points with no audible cause. The
+    BETTER threshold (1.5 points) is inside that noise for any small change.
+  - The judge's printed output listed the held-out transcripts, and my first `tail` of it showed
+    them. I didn't use them; the sentence comparison above is filtered on `set == "train"`.
+- Singer, bench, tests: not run. The deciding verdict failed at both values.
+- Verdict: reverted. The speech is not BETTER at either value, and the change misses the female
+  "sheet".
+- Commit: none (log only).
+- Next:
+  - Don't retry the jet-exit distance on its own: it is right, but it only reaches /ʃ/ before
+    back vowels. Fold it into whatever next lifts /ʃ/, as a part of the same physical change.
+  - The /ʃ/-below-/s/ gap is in the teeth source's spectrum against the radiation, not in its
+    level or weights. The source is white from 1.2 to 5 kHz in pressure, and the radiation tilts
+    the output toward /s/. A real obstacle source's spectrum peaks near a Strouhal frequency of
+    the jet, f ≈ St·v/D, and falls above it. With the probe's numbers, v/D is about 2.1 times as
+    high for /s/ (31 m/s through 3.4 mm) as for /ʃ/ (22 m/s through 5.1 mm). A teeth source whose
+    band follows the jet's v/D, with its power held to the same total (a lower peak concentrates
+    the same power in a narrower band), would lift /ʃ/ at 2–3 kHz and leave /s/'s band about where
+    it is now. It touches every sibilant, so watch note MCD (0.022 dB of room). Its power scaling
+    needs a citation (Stevens 1998, ch. 8; Shadle 1985) before it's coded.
+  - Given the ±2-point chaos, a lift aimed at the female "sheet" should be checked on that
+    sentence's /ʃ/ level before spending a judge run, and its verdict read as noisy.
