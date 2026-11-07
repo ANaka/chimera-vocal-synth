@@ -1367,3 +1367,17 @@ Three findings, all fixed in one commit:
 
 After the fixes: speech 36.75 % training, 44.33 % held-out; singer 0.587, held-out 0.811, note
 MCD 8.614 dB. `out/hill/best` holds this run, and the listening page was rebuilt from it.
+
+### Batch review, round 2
+
+- **Fixed, confirmed:** the cluster delay keeps every gesture ordered and inside its stop for
+  durations of 10 ms and up (velars included), and the speech judge prints training transcripts only.
+- **Still open, not new:** with the lips protruded and narrowed, the first front ray (behind the
+  lower lip's edge, outside the new ramp) switches to a higher crossing of the lip's curve as the
+  lip tucks: 0.41 cm² at lab ≈ 0.86 (NEUTRAL, jaw 0.3, lipAp 0.05, lipProt 0.2, lipWidth 0.5). Main
+  has the same jump (0.30 cm²); this batch made it larger. It is kept as the ignored test
+  `geometry_continuity::no_area_jumps_as_a_protruded_lower_lip_tucks` (jumps up to 0.48 cm²) and
+  is lead 10 for the next batch: the lip-curve crossing that rays behind the edge pick.
+- **Declined:** a stop shorter than 10 ms still holds its closure past its end (the minimum hold
+  in `oral_gestures_into`). It predates this batch, and no planner produces one (the sung floor is
+  12 ms).

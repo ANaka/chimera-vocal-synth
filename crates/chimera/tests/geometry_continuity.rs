@@ -269,3 +269,42 @@ fn no_area_jumps_as_the_lower_lip_tucks_for_f() {
     }
     assert_eq!(jumps, Vec::<String>::new());
 }
+
+#[test]
+#[ignore = "known, not yet fixed: run with --ignored. Found by the batch-2 review; already on main (0.30 cm²)"]
+fn no_area_jumps_as_a_protruded_lower_lip_tucks() {
+    // With the lips protruded and narrowed, the first front ray (behind the lower lip's edge, so
+    // not under the handover ramp) switches to a higher crossing of the lower lip's curve as the
+    // lip tucks: NEUTRAL, jaw 0.3, lipAp 0.05, lipProt 0.2, lipWidth 0.5, lab ≈ 0.8612 jumps the
+    // male area 0.41 cm² (0.30 cm² before hill-climb batch 2).
+    let mut jumps: Vec<String> = Vec::new();
+    let n = 400;
+    for (body_name, body) in BODIES {
+        let mut areas = Areas::new(body);
+        for lip_prot in [0.2, 0.6] {
+            for lip_w in [0.5, 1.0] {
+                let mut base = NEUTRAL;
+                base.jaw = 0.3;
+                base.lip_ap = 0.05;
+                base.lip_prot = lip_prot;
+                base.set(ArticKey::LipWidth, lip_w);
+                let key = ArticKey::Labiodental;
+                let mut prev = areas.at(&with(&base, key, 0.0));
+                for i in 1..=n {
+                    let cur = areas.at(&with(&base, key, i as f64 / n as f64));
+                    let step = max_diff(&cur, &prev);
+                    prev = cur;
+                    if step <= 0.05 {
+                        continue;
+                    }
+                    let mut f = |u: f64| areas.at(&with(&base, key, u));
+                    let j = jump_size(&mut f, (i - 1) as f64 / n as f64, i as f64 / n as f64, 0.05);
+                    if j > 0.05 {
+                        jumps.push(format!("{body_name} lipProt={lip_prot} lipWidth={lip_w} labiodental={:.4}: {j:.2} cm²", i as f64 / n as f64));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(jumps, Vec::<String>::new());
+}
