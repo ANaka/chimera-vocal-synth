@@ -639,10 +639,15 @@ export class Anatomy3D {
   private h = 1;
   /** a narrow screen: readouts above and below the head (as the 2D view) */
   compact = false;
+  /** no readouts beside the head: keep it in the middle of a wide screen too */
+  centred = false;
+  /** which way the turned home view shows the face: 1 to the right, −1 to the left (a duet's
+   *  second head, so the two sing towards each other) */
+  facing: 1 | -1 = 1;
   private clock = 0;
   private readonly gaze = new Gaze();
   /** brows, lids, cheeks and the head's nods, from the voice (the view updates it) */
-  readonly face = new Expression();
+  face = new Expression();
   /** the camera in the head's own frame (the head nods and sways under it) */
   private readonly eye = new THREE.Vector3();
   private readonly turn = new THREE.Quaternion();
@@ -671,13 +676,23 @@ export class Anatomy3D {
     this.beams.dispose();
   }
 
+  /** forget the motion so far (a replay jumped): the face's springs and held-note time, the
+   *  outline echoes, the airflow's particle trails and the vocal folds' strobe phase */
+  resetMotion(): void {
+    this.face = new Expression();
+    this.echoes = [];
+    this.lastEcho = -1;
+    this.strobe = 0;
+    for (const p of this.particles) p.px = NaN;
+  }
+
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
     this.compact = w < 560;
     this.camera.aspect = w / h;
     // on a wide screen the head sits left of centre, leaving the right for the readouts
-    if (this.compact) this.camera.clearViewOffset();
+    if (this.compact || this.centred) this.camera.clearViewOffset();
     else this.camera.setViewOffset(w, h, 0.1 * w, 0, w, h);
     this.camera.updateProjectionMatrix();
     this.beams.setResolution(w, h);
@@ -691,11 +706,12 @@ export class Anatomy3D {
     // fit the head's height (and its width in a narrow screen) at a male's size, so bodies compare
     const d = 1.1 * Math.max(15.2 / half, 11 / (half * Math.max(0.3, this.camera.aspect)));
     const target = r.center.clone();
-    const az = 0.62, el = 0.2;
+    // facing left: the same three-quarter view from the head's other side
+    const az = this.facing > 0 ? 0.62 : Math.PI - 0.62, el = 0.2;
     return {
       target,
       home: target.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(d)),
-      side: target.clone().add(new THREE.Vector3(0, 0, d)),
+      side: target.clone().add(new THREE.Vector3(0, 0, this.facing * d)),
     };
   }
 

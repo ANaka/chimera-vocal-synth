@@ -18,10 +18,32 @@ import { VoiceModel } from "../analysis.ts";
 import { useModel } from "../useModel.ts";
 import { V } from "../colors.ts";
 import { articulatorSlots, tractInfo, type InfoFn, type OverlayFn, type SlotsFn } from "./AnatomyView.tsx";
+import type { ViewFlags } from "../render/anatomy.ts";
+import type { HumanArtic } from "../../wasm/engine.ts";
+import type { TelemetryMessage } from "../../worklet/protocol.ts";
+
+/**
+ * A head driven by something other than the live engine (the duet page's recordings): its own
+ * body's model and view flags, and each frame's telemetry. `tele` null holds the head in `artic`
+ * with the voice at rest; a new `epoch` (a seek) drops the face's and the airflow's history.
+ */
+export interface HeadFeed {
+  model: VoiceModel;
+  view: ViewFlags;
+  frame(): { tele: TelemetryMessage | null; artic: HumanArtic; epoch: number };
+  /** cap on the device pixel ratio (two heads on a phone draw half the pixels at 1.5) */
+  maxDpr?: number;
+  /** which way the head turns to show its face (see Anatomy3D.facing) */
+  facing?: 1 | -1;
+}
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
-export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showFormants?: boolean; overlay?: OverlayFn }) {
+export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showFormants?: boolean; overlay?: OverlayFn; feed?: HeadFeed; readouts?: boolean }) {
+  const feedRef = useRef<HeadFeed | undefined>(props.feed);
+  feedRef.current = props.feed;
+  const readoutsRef = useRef(props.readouts ?? true);
+  readoutsRef.current = props.readouts ?? true;
   const overlayRef = useRef<OverlayFn | undefined>(props.overlay);
   overlayRef.current = props.overlay;
   const formantsRef = useRef(props.showFormants ?? true);
@@ -51,6 +73,8 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     gl.outputColorSpace = THREE.LinearSRGBColorSpace;
     gl.setClearColor(0x000000, 1);
     const r = new Anatomy3D();
+    r.centred = !readoutsRef.current;
+    r.facing = feedRef.current?.facing ?? 1;
     const glow = new Glow();
     const camera = r.camera;
     const controls = new OrbitControls(camera, canvas);
@@ -92,7 +116,7 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     /** the head centre the camera was placed for (a new body moves the view with it) */
     const posedTarget = new THREE.Vector3();
     const home = () => {
-      const m = model.current;
+      const m = feedRef.current?.model ?? model.current;
       if (m) {
         const p = r.poses(m);
         moveTo(p.home, p.target, 0.9);
@@ -101,9 +125,13 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     canvas.addEventListener("dblclick", home);
 
     let w = 0, h = 0, dpr = 1;
+    const maxDpr = () => Math.min(feedRef.current?.maxDpr ?? 2, window.devicePixelRatio || 1);
+    /** a fed head (no settings of its own to keep) goes back to its framing when its pane changes shape */
+    let refit = false;
     const fit = () => {
       const b = wrap.getBoundingClientRect();
-      dpr = Math.min(2, window.devicePixelRatio || 1);
+      dpr = maxDpr();
+      refit = !!feedRef.current && (b.width !== w || b.height !== h);
       w = b.width;
       h = b.height;
       canvas.width = Math.max(1, Math.round(w * dpr));
@@ -118,17 +146,31 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     let last = performance.now();
     let fTick = 0;
     let formants: number[] = [];
+    let epoch = -1;
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       // the face's expression keeps real time (a held note lasts as long at a low frame rate)
       const elapsed = Math.min(0.5, (now - last) / 1000);
       last = now;
-      if (Math.min(2, window.devicePixelRatio || 1) !== dpr) fit();
+      if (maxDpr() !== dpr) fit();
       const st = useStore.getState();
-      const tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
-      const a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
+      const feed = feedRef.current;
+      let tele: TelemetryMessage | null, a: HumanArtic;
+      if (feed) {
+        const fr = feed.frame();
+        if (fr.epoch !== epoch) {
+          epoch = fr.epoch;
+          r.resetMotion();
+        }
+        tele = fr.tele;
+        a = tele ? VoiceModel.articFromArray(tele.t.artic) : fr.artic;
+      } else {
+        tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;
+        a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
+      }
+      const view = feed ? feed.view : st.view;
       r.face.update(tele, elapsed);
-      const m = model.current;
+      const m = feed ? feed.model : model.current;
       if (m && w > 0 && h > 0) {
         if (posed !== m) {
           const p = r.poses(m);
@@ -145,12 +187,17 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
           }
           posedTarget.copy(p.target);
           posed = m;
+        } else if (refit) {
+          const p = r.poses(m);
+          moveTo(p.home, p.target, 0.4);
         }
+        refit = false;
         stepTween(dt);
         controls.update(dt);
         const f = m.frame(a);
-        if (++fTick % 4 === 0 || formants.length === 0) formants = m.transfer(a).formants;
-        r.update(m, f, a, tele, st.view, dt);
+        const readouts = readoutsRef.current;
+        if (readouts && (++fTick % 4 === 0 || formants.length === 0)) formants = m.transfer(a).formants;
+        r.update(m, f, a, tele, view, dt);
         gl.render(r.scene, camera);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalCompositeOperation = "source-over";
@@ -162,9 +209,11 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
           const [cx, cy] = r.project(r.caliper.x, r.caliper.y, r.caliper.z);
           label(ctx, r.caliper.area <= 0.0005 ? "CLOSED" : `${r.caliper.area.toFixed(2)} CM²`, cx + 10, cy - 6, { size: 11, color: V.white, ls: 0.12 });
         }
-        const info = infoRef.current(m, f, tele).map((s) => s.toUpperCase());
-        const slots = slotsRef.current(m, a, f, formants, tele);
-        drawReadouts(ctx, { w, h, compact: r.compact, slotX: w - Math.min(340, w * 0.42), slotY: h - Math.min(236, h * 0.3) }, formantsRef.current ? formants : [], info, slots);
+        if (readouts) {
+          const info = infoRef.current(m, f, tele).map((s) => s.toUpperCase());
+          const slots = slotsRef.current(m, a, f, formants, tele);
+          drawReadouts(ctx, { w, h, compact: r.compact, slotX: w - Math.min(340, w * 0.42), slotY: h - Math.min(236, h * 0.3) }, formantsRef.current ? formants : [], info, slots);
+        }
         overlayRef.current?.(ctx, r.faceView(m, f, a), m, f, a, { w, h, dt });
         glow.apply(canvas, ctx, dpr);
       }

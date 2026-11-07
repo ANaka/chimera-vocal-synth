@@ -376,3 +376,55 @@ fn render_notes_artic_tracks_follow_the_sound_without_changing_it() {
     let open = (105..125).map(ap).fold(f64::MIN, f64::max);
     assert!(closed < 0.1 && open > 0.5, "lipAp closed {closed}, open {open}");
 }
+
+#[test]
+fn render_notes_tele_records_the_live_telemetry_without_changing_the_sound() {
+    let melody = tmp("tele-melody.json");
+    std::fs::write(
+        &melody,
+        r#"{"bpm": 120, "t0": 0, "lyrics": "Take my hand", "notes": [[0, 1], [67, 1], [63, 0.5], [60, 1.5]]}"#,
+    )
+    .unwrap();
+    let (plain, tracked, tele, tracks) = (tmp("tele-plain"), tmp("tele-tracked"), tmp("voice.tele"), tmp("tele-artic.json"));
+    chimera(&["render", "notes", &melody, &plain, "female"]);
+    // both recordings at once: each keeps its own cadence
+    let stdout = chimera(&["render", "notes", &melody, &tracked, "female", "--tele", &tele, "--artic", &tracks]);
+    let a = std::fs::read(format!("{plain}.wav")).unwrap();
+    let b = std::fs::read(format!("{tracked}.wav")).unwrap();
+    assert!(a == b, "--tele changed the sound");
+    let samples = (a.len() - 44) / 2;
+    let artic: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&tracks).unwrap()).unwrap();
+    assert_eq!(artic["frames"].as_array().unwrap().len(), 1 + samples.div_ceil(480));
+
+    let t = std::fs::read(&tele).unwrap();
+    assert_eq!(&t[..4], b"CHTL");
+    let u = |i: usize| u32::from_le_bytes(t[4 + 4 * i..8 + 4 * i].try_into().unwrap()) as usize;
+    let f = |o: usize| f32::from_le_bytes(t[o..o + 4].try_into().unwrap());
+    let (version, rate, hop, frames, len, n_artic, n_ph, n_or, n_scope) = (u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8));
+    assert_eq!((version, rate, hop, n_artic, n_scope), (1, 48000, 768, 17, 32));
+    assert_eq!((f(40), f(44)), (1.0, 0.0), "body mix: female");
+    // the female airway at 48 kHz, two times oversampled
+    assert_eq!((n_ph, n_or), (15, 16));
+    assert_eq!(len, 11 + n_artic + 3 * (n_ph + n_or) + 2 * n_scope);
+    // frame 0 before any sound, then one per whole hop
+    assert_eq!(frames, 1 + samples / hop, "{stdout}");
+    assert_eq!(t.len(), 48 + 4 * frames * len);
+    let at = |i: usize, k: usize| f(48 + 4 * (i * len + k));
+    // the clock (field 10) is the frame's time
+    for i in [0, 1, frames / 2, frames - 1] {
+        assert!((at(i, 10) as f64 - (i * hop) as f64 / 48000.0).abs() < 1e-4, "frame {i} clock {}", at(i, 10));
+    }
+    // silent before the first note (a beat's rest: it starts at 0.5 s), then "Take" voiced on
+    // G4 (392 Hz): frames 38-53 are 0.61-0.85 s
+    let out_rms = |i: usize| at(i, 6);
+    assert!((1..20).all(|i| out_rms(i) < 1e-4), "noise before the first note");
+    let sung = 38..54;
+    assert!(sung.clone().all(|i| out_rms(i) > 1e-2 && at(i, 4) > 0.5), "not voiced while singing");
+    let f0 = sung.map(|i| at(i, 3)).sum::<f32>() / 16.0;
+    assert!((f0 - 392.0).abs() < 12.0, "f0 {f0}");
+    // the articulators agree with --artic's (lipAp at 1.0 s: artic frame 100, tele frame 62.5)
+    let keys: Vec<&str> = artic["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap()).collect();
+    let lip = keys.iter().position(|k| *k == "lipAp").unwrap();
+    let a_lip = artic["frames"][96][lip].as_f64().unwrap(); // 0.96 s = 60 tele hops
+    assert!((at(60, 11 + lip) as f64 - a_lip).abs() < 1e-3, "lipAp {} vs {a_lip}", at(60, 11 + lip));
+}

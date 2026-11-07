@@ -1,8 +1,8 @@
 /**
  * Layout lint: a smoke test of the layout. Loads every mode at phone, tablet and desktop sizes in
  * headless Chromium, before and after audio starts, then some alternate states (every encoder page,
- * every creature, the 3D face, a phrase being spoken), and fails on mistakes screenshot reviews
- * kept missing:
+ * every creature, the 3D face, a phrase being spoken) and the duet page (`?show=`, with a short
+ * duet it renders first), and fails on mistakes screenshot reviews kept missing:
  *
  *  - overlap     two pieces of text or controls drawn over each other (DOM text, buttons, inputs,
  *                dials, and text drawn on canvases, which the page reports by wrapping fillText)
@@ -24,12 +24,13 @@
  *  - label(..., { moving: true }) on canvas text in flight (a word flying off the lips)
  *  Text truncated with an ellipsis or a line clamp is reported as a warning, not an error.
  *
- * Usage: bun tools/layout-lint.ts [--url http://...] [--out out/layout] [--only 1440x900] [--mode play]
+ * Usage: bun tools/layout-lint.ts [--url http://...] [--out out/layout] [--only 1440x900] [--mode play|duet]
  * Without --url it starts its own Vite dev server (build the wasm first: bun run wasm).
  * Screenshots of every failing view are saved under --out.
  */
 import { chromium } from "playwright-core";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -238,6 +239,22 @@ function hookCanvasText() {
   };
 }
 
+/** A two-voice show for the duet page, rendered by the CLI now (shows are never kept in git). The
+ *  lint serves it at shows/lint-duet/ itself, so it needs no files under public/. */
+function makeDuet(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  const melody = (notes: number[][]) => JSON.stringify({ bpm: 120, t0: 0, lyrics: "la la la la", notes });
+  writeFileSync(`${dir}/low.json`, melody([[0, 1], [55, 1], [57, 1], [59, 1], [60, 2]]));
+  writeFileSync(`${dir}/high.json`, melody([[0, 1], [64, 1], [65, 1], [67, 1], [67, 2]]));
+  for (const [v, body] of [["low", "male"], ["high", "female"]]) {
+    const r = Bun.spawnSync(["cargo", "run", "--quiet", "--release", "-p", "chimera-cli", "--", "render", "notes", `${dir}/${v}.json`, `${dir}/${v}`, body, "--tele", `${dir}/${v}.tele`]);
+    if (r.exitCode) throw new Error(`rendering the lint duet: ${r.stderr.toString()}`);
+  }
+  // a long title, to see it trimmed on a phone
+  const voices = [{ name: "Lower", tele: "low.tele", melody: "low.json" }, { name: "Upper", tele: "high.tele", melody: "high.json" }];
+  writeFileSync(`${dir}/show.json`, JSON.stringify({ title: "A duet with a title long enough to need trimming", audio: "low.wav", bpm: 120, voices }));
+}
+
 async function main() {
   const out = arg("out") ?? "out/layout";
   rmSync(out, { recursive: true, force: true });
@@ -254,7 +271,10 @@ async function main() {
   const only = arg("only");
   const onlyMode = arg("mode");
   const viewports = only ? VIEWPORTS.filter((v) => `${v.w}x${v.h}` === only).concat(VIEWPORTS.some((v) => `${v.w}x${v.h}` === only) ? [] : [{ w: +only.split("x")[0], h: +only.split("x")[1] }]) : VIEWPORTS;
-  const modes = onlyMode ? [onlyMode] : MODES;
+  const duet = !onlyMode || onlyMode === "duet";
+  const modes = onlyMode ? (onlyMode === "duet" ? [] : [onlyMode]) : MODES;
+  const duetDir = `${out}/duet-show`;
+  if (duet) makeDuet(duetDir);
 
   // WebGL through SwiftShader, for the 3D face
   const browser = await chromium.launch({ headless: true, args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
@@ -289,6 +309,20 @@ async function main() {
       }
       if (await tabs.count()) await tabs.first().click();
     };
+    if (duet) {
+      // the duet page: two 3D heads, loaded and then playing
+      await page.route("**/shows/lint-duet/*", (route) => route.fulfill({ path: `${duetDir}/${basename(new URL(route.request().url()).pathname)}` }));
+      await page.goto(new URL("?show=lint-duet", url).href, { waitUntil: "networkidle" });
+      await page.waitForSelector(".duet-head canvas", { timeout: 15000 });
+      await check("duet", 2000);
+      await page.locator(".duet-bar button.primary").click();
+      // 1.2 s in: both heads singing, a word at each mouth
+      await check("duet, playing", 1200);
+    }
+    if (!modes.length) {
+      await page.close();
+      continue;
+    }
     await page.goto(url, { waitUntil: "networkidle" });
     for (const m of modes) {
       await mode(m);
