@@ -515,6 +515,10 @@ pub struct AreaLaw {
     pub pharynx: (f64, f64),
     pub oral: (f64, f64),
     pub front: (f64, f64),
+    /// oral rays in front of the raised tongue tip: the space under the alveolar ridge lies inside
+    /// the anterior dental arch and above the sublingual floor, far narrower than the mid-oral
+    /// cavity between the molars that `oral` describes
+    pub ahead: (f64, f64),
 }
 
 /// Flat polyline views of a measured ray.
@@ -644,7 +648,7 @@ impl HumanVocalTract {
             contact_body: 1.0,
             contact_tip_n: v(0.0, -1.0),
             contact_body_n: v(0.0, -1.0),
-            area_law: AreaLaw { pharynx: (2.0, 1.4), oral: (2.6, 1.4), front: (2.0, 1.4) },
+            area_law: AreaLaw { pharynx: (2.0, 1.4), oral: (2.6, 1.4), front: (2.0, 1.4), ahead: (1.6, 1.4) },
         };
         let p = |x: f64, y: f64| t.p(x, y);
         // posterior pharyngeal wall, bottom → top (curving forward into nasopharynx roof)
@@ -1098,8 +1102,12 @@ impl HumanVocalTract {
                     continue;
                 }
                 let mut dc = tongue_gap(g.outer.x, g.outer.y);
-                // the gap changes no faster than the distance moved along the roof
-                if dc - half <= 0.6 * k {
+                // the gap changes no faster than the distance moved, so a neighbour within `half`
+                // along the roof can be closer only by `half`, plus how far off the roof this ray
+                // ends: rays ending on the velopharyngeal port window, just behind the uvula's tip,
+                // are still faded in by `on_roof`, and a bound without that distance switched the
+                // search on with a neighbour already well inside the contact range (an area jump)
+                if dc - half - pr.dist <= 0.6 * k {
                     for fr in [-1.0, -0.5, 0.5, 1.0] {
                         let q = point_along(roof, cum, clamp(pr.s + fr * half, 0.0, roof_len));
                         dc = js_min(dc, tongue_gap(q.x, q.y));
@@ -1138,12 +1146,14 @@ impl HumanVocalTract {
         let (a_p, b_p) = self.area_law.pharynx;
         let (a_o, b_o) = self.area_law.oral;
         let (a_f, b_f) = self.area_law.front;
+        let (a_h, b_h) = self.area_law.ahead;
         let teeth_x = self.palate[self.palate.len() - 1].x;
         for g in grid.iter_mut() {
             if g.region == 1 {
                 g.area = a_p * pow(g.d, b_p);
             } else if g.region == 2 {
-                g.area = a_o * pow(g.d, b_o);
+                let ahead = smoothstep(0.0, 0.4 * k, g.mid.x - tip.x);
+                g.area = lerp(a_o * pow(g.d, b_o), a_h * pow(g.d, b_h), ahead);
             } else {
                 // behind the incisors: dental arch; in front: elliptical lip slit of width lipW
                 let u = clamp((g.mid.x - teeth_x) / (0.45 * k), 0.0, 1.0);
