@@ -72,7 +72,6 @@ fn fading_sounds_do_not_buzz_at_the_control_rate() {
 }
 
 #[test]
-#[ignore = "target for the pronunciation batch: run with --ignored to measure it"]
 fn the_p_of_sharp_does_not_pop() {
     // "sharp tree": the lips close for /p/, then the tongue seals for /t/ while still moving and
     // squeezes the air shut in between to about 11x the lungs' pressure (88 cmH2O, male voice).
