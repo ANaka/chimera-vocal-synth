@@ -1351,3 +1351,20 @@ keep rule for target 3 now covers any artifact with such a test.
   training sentences to make the speech judge steadier.
 - Listening page (shared with the owner directly; before = the baseline, now = the
   best run; four training and four held-out sentences, two songs).
+
+### Batch review (Codex), and what changed after it
+
+Three findings, all fixed in one commit:
+- **An area jump late in the lip tuck** (experiment 19's floor in front of the lower lip blended
+  toward its open depth before a ray reached the lip's edge): up to 1.27 cm² at lab 0.75–0.94.
+  The opening now grows from the edge over 0.1 cm. `geometry_continuity` sweeps the tuck from
+  /f/-like postures, which the vowel sweeps never reached. A held /f/ is 1.5–2.8 dB quieter.
+- **Experiment 16's delay overran short sung stops** (a /t/ closure 23 ms into the next vowel at
+  a quarter beat, 180 bpm). It is capped at the stop's length less 30 ms; `sing_fast` has the
+  reproduction.
+- **The speech judge printed held-out transcripts**, which experiments 18–20 then saw (they say
+  so in their entries). It prints training ones only.
+
+After the fixes: speech 36.75 % training, 44.33 % held-out; singer 0.587, held-out 0.811, note
+MCD 8.614 dB. `out/hill/best` holds this run. The listening page still plays experiment 19's
+renders: the fixes change held /f/ by 1.5–2.8 dB and short sung clusters, nothing else on it.
