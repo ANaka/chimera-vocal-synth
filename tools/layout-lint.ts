@@ -6,6 +6,7 @@
  *
  *  - overlap     two pieces of text or controls drawn over each other (DOM text, buttons, inputs,
  *                dials, and text drawn on canvases, which the page reports by wrapping fillText)
+ *  - overflow    text wider than its own box, running into whatever is beside it
  *  - clipped     content cut off by an overflow: hidden box (a panel too short for what it holds)
  *  - spill       content that runs outside its screen's frame
  *  - screens     two screens, or a screen and the top bar, overlapping
@@ -115,7 +116,15 @@ function inspect(): Problem[] {
     if (size < 8) problems.push({ kind: "small-text", detail: `${nameOf(el, text)} is ${size}px` });
     const range = document.createRange();
     range.selectNodeContents(n);
-    for (const b of range.getClientRects()) consider(el, rect(b), nameOf(el, text), {}, true);
+    const own = rect(el.getBoundingClientRect());
+    const cs = getComputedStyle(el);
+    for (const b of range.getClientRects()) {
+      const r = rect(b);
+      consider(el, r, nameOf(el, text), {}, true);
+      // text wider than its own box (a table heading over its neighbour's) where nothing clips it
+      if (cs.display !== "inline" && cs.overflowX === "visible" && (own.x0 - r.x0 > TOL || r.x1 - own.x1 > TOL))
+        problems.push({ kind: "overflow", detail: `${nameOf(el, text)} ${fmt(r)} is wider than its box ${fmt(own)}` });
+    }
   }
   // controls and drawings without text of their own
   for (const el of document.querySelectorAll("button, input, textarea, select, svg, img")) {
