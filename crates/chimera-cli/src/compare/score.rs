@@ -15,9 +15,11 @@
 //!
 //! `--against <score.json>` compares the training score with an earlier run's. A change is
 //! better when the score falls by at least `MARGIN`, no term's cost rises by more than
-//! `TERM_SLACK`, and no guard breaks. A guard also breaks when a value goes missing: a measure the
-//! synth gave on a song's note before and doesn't now would otherwise leave the score quietly,
-//! and could take a bad note with it.
+//! `TERM_SLACK`, and no guard breaks. The verdict compares like for like: each term's cost is
+//! recomputed for both runs over the songs both runs measure, so a song that stops being
+//! measured (say, its vibrato no longer reads as vibrato) can't take its gap out of the
+//! comparison. Within a song, a measure that the synth gave on a note before and doesn't now
+//! breaks a guard, since it would otherwise leave the song's median quietly.
 
 use super::{mean, median};
 use serde_json::{Value, json};
@@ -141,6 +143,26 @@ fn r4(x: f64) -> Value {
     }
 }
 
+/// A term's cost from its per-song gaps |synth − singer|: the mean gap in units, less one unit.
+/// NaN with too few songs or no unit (`f64::max` would turn that into a cost of 0).
+fn term_cost(gaps: &[f64], unit: f64) -> f64 {
+    let z = if gaps.len() >= MIN_GAP_SONGS {
+        mean(gaps) / unit
+    } else {
+        f64::NAN
+    };
+    if z.is_finite() {
+        (z - 1.0).max(0.0)
+    } else {
+        f64::NAN
+    }
+}
+
+/// A number, or null when it isn't finite (full precision: the verdict recomputes from these).
+fn fin(x: f64) -> Value {
+    if x.is_finite() { json!(x) } else { Value::Null }
+}
+
 /// Score and guards of a set of songs, with the spreads of the training songs.
 fn score_set(songs: &[&SongScore], spread: &[f64; N_TERMS]) -> Value {
     let mut terms = Vec::new();
@@ -151,18 +173,14 @@ fn score_set(songs: &[&SongScore], spread: &[f64; N_TERMS]) -> Value {
             .map(|s| s.pairs[k])
             .filter(|(h, s)| h.is_finite() && s.is_finite())
             .collect();
-        let gap = if pairs.len() >= MIN_GAP_SONGS {
-            mean(&pairs.iter().map(|(h, s)| (s - h).abs()).collect::<Vec<_>>())
+        let gaps: Vec<f64> = pairs.iter().map(|(h, s)| (s - h).abs()).collect();
+        let gap = if gaps.len() >= MIN_GAP_SONGS {
+            mean(&gaps)
         } else {
             f64::NAN
         };
         let z = gap / spread[k];
-        // f64::max would turn a missing z into a cost of 0
-        let excess = if z.is_finite() {
-            (z - 1.0).max(0.0)
-        } else {
-            f64::NAN
-        };
+        let excess = term_cost(&gaps, spread[k]);
         if excess.is_finite() {
             cost += w * excess;
             weight += w;
@@ -182,6 +200,7 @@ fn score_set(songs: &[&SongScore], spread: &[f64; N_TERMS]) -> Value {
         "score": r3(if weight > 0.0 { cost / weight } else { f64::NAN }),
         "terms": terms,
         "coverage": songs.iter().map(|s| (s.id.clone(), json!(s.coverage))).collect::<serde_json::Map<_, _>>(),
+        "pairs": songs.iter().map(|s| (s.id.clone(), json!(s.pairs.iter().map(|(h, y)| json!([fin(*h), fin(*y)])).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>(),
         "guards": {
             "notes": total(&|s| s.notes as u64),
             "notesMisaligned": total(&|s| s.misaligned as u64),
@@ -204,16 +223,35 @@ fn num(v: &Value) -> f64 {
     v.as_f64().unwrap_or(f64::NAN)
 }
 
-/// The training score of `new` against `old` (both as written to `score.json`): the verdict and,
-/// when worse, why.
-pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>), String> {
+/// The verdict on a change in score (like for like) once the guards are checked: the change is
+/// taken in the thousandths `score.json` gives, so 1.001 → 0.991 is a fall of exactly 0.010.
+fn decide(change: f64, mut why: Vec<String>) -> (Verdict, Vec<String>) {
+    let milli = |x: f64| (x * 1000.0).round() as i64;
+    let (d, margin) = (milli(change), milli(MARGIN));
+    if !why.is_empty() {
+        (Verdict::Worse, why)
+    } else if d <= -margin {
+        (Verdict::Better, why)
+    } else if d >= margin {
+        why.push(format!("score up by {:.3}", change));
+        (Verdict::Worse, why)
+    } else {
+        (Verdict::Same, why)
+    }
+}
+
+/// The training score of `new` against `old` (both as written to `score.json`): the verdict,
+/// why when worse, and the change in score over the songs both runs measure.
+pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>, f64), String> {
     let (o, n) = (&old["train"], &new["train"]);
     if o["songs"] != n["songs"] || old["body"] != new["body"] {
         return Err("the earlier score covers other songs or another body; score both runs with the same --songs and --body".into());
     }
-    let (so, sn) = (num(&o["score"]), num(&n["score"]));
-    if !so.is_finite() || !sn.is_finite() {
-        return Err("one of the two runs has no training score".into());
+    if old["units"] != new["units"] {
+        return Err(
+            "the singer's spreads differ between the runs; rescore the baseline with this build"
+                .into(),
+        );
     }
     let mut why = Vec::new();
     // (old, new) of a guard; a guard that had a value and lost it breaks
@@ -275,32 +313,52 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>), Strin
         o["terms"].as_array().unwrap_or(&empty),
         n["terms"].as_array().unwrap_or(&empty),
     );
-    if to.len() != tn.len() || to.iter().zip(tn).any(|(a, b)| a["name"] != b["name"]) {
+    if to.len() != N_TERMS
+        || tn.len() != N_TERMS
+        || to.iter().zip(tn).any(|(a, b)| a["name"] != b["name"])
+    {
         return Err(
             "the earlier score has other terms; rescore the baseline with this build".into(),
         );
     }
-    for (a, b) in to.iter().zip(tn) {
-        let (ca, cb) = (num(&a["cost"]), num(&b["cost"]));
-        let name = b["name"].as_str().unwrap_or("?");
-        if ca.is_finite() && !cb.is_finite() {
+    // each term's cost in both runs over the songs both measure
+    let songs: Vec<&str> = o["songs"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    let pair = |run: &Value, song: &str, k: usize| {
+        let p = &run["pairs"][song][k];
+        (num(&p[0]), num(&p[1]))
+    };
+    let (mut change, mut weight) = (0.0, 0.0);
+    for (k, (name, w)) in TERMS.iter().enumerate() {
+        let unit = num(&old["units"][k]);
+        let (mut go, mut gn) = (Vec::new(), Vec::new());
+        for song in &songs {
+            let ((ho, so), (hn, sn)) = (pair(o, song, k), pair(n, song, k));
+            if [ho, so, hn, sn].iter().all(|v| v.is_finite()) {
+                go.push((so - ho).abs());
+                gn.push((sn - hn).abs());
+            }
+        }
+        let (co, cn) = (term_cost(&go, unit), term_cost(&gn, unit));
+        if num(&to[k]["cost"]).is_finite() && !num(&tn[k]["cost"]).is_finite() {
             why.push(format!("{name} has no value any more"));
-        } else if cb > ca + TERM_SLACK {
-            why.push(format!("{name} cost up: {ca} → {cb}"));
+        } else if co.is_finite() && cn.is_finite() {
+            if cn > co + TERM_SLACK {
+                why.push(format!("{name} cost up: {co:.3} → {cn:.3}"));
+            }
+            change += w * (cn - co);
+            weight += w;
         }
     }
-    // scores are written to thousandths; compare those exactly
-    let milli = |x: f64| (x * 1000.0).round() as i64;
-    let (d, margin) = (milli(sn) - milli(so), milli(MARGIN));
-    Ok(if !why.is_empty() {
-        (Verdict::Worse, why)
-    } else if d <= -margin {
-        (Verdict::Better, why)
-    } else if d >= margin {
-        (Verdict::Worse, vec![format!("score up: {so} → {sn}")])
-    } else {
-        (Verdict::Same, why)
-    })
+    if weight == 0.0 {
+        return Err("no term is measured in both runs".into());
+    }
+    let (v, why) = decide(change / weight, why);
+    Ok((v, why, change / weight))
 }
 
 /// `score.json` and the report's score section for these songs, with the verdict against an
@@ -320,7 +378,11 @@ pub fn report(
         return Ok((json!({ "body": body, "train": null }), md.to_string(), None));
     }
     let spread = spreads(&train);
-    let mut out = json!({ "body": body, "train": score_set(&train, &spread) });
+    let mut out = json!({
+        "body": body,
+        "units": spread.iter().map(|u| fin(*u)).collect::<Vec<_>>(),
+        "train": score_set(&train, &spread),
+    });
     if !held.is_empty() {
         out["heldout"] = score_set(&held, &spread);
     }
@@ -370,14 +432,14 @@ pub fn report(
             &std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?,
         )
         .map_err(|e| format!("{path}: {e}"))?;
-        let (v, why) = verdict(&old, &out)?;
+        let (v, why, change) = verdict(&old, &out)?;
         let word = match v {
             Verdict::Better => "BETTER",
             Verdict::Worse => "WORSE",
             Verdict::Same => "NO CLEAR CHANGE",
         };
         let text = format!(
-            "Verdict against {path}: {word} (training score {} → {}){}",
+            "Verdict against {path}: {word} (training score {} → {}, {change:+.3} like for like){}",
             fmt(&old["train"]["score"], 3),
             fmt(&t["score"], 3),
             if why.is_empty() {
@@ -387,7 +449,8 @@ pub fn report(
             }
         );
         md += &format!("{text}\n\n");
-        out["verdict"] = json!({ "against": path, "result": word, "reasons": why });
+        out["verdict"] =
+            json!({ "against": path, "result": word, "change": r3(change), "reasons": why });
         line = Some(text);
     }
     Ok((out, md, line))
@@ -430,39 +493,44 @@ mod tests {
         };
         let (base, gone) = (mk(false), mk(true));
         assert!(num(&gone["train"]["score"]) < num(&base["train"]["score"]));
-        let (v, why) = verdict(&base, &gone).unwrap();
+        let (v, why, _) = verdict(&base, &gone).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why[0].contains("en001a H1-H2: 10 → 0 notes"), "{why:?}");
         // losing pitch on a few notes of one song is caught the same way
         let mut fewer = base.clone();
         fewer["train"]["coverage"]["en002a"][12] = json!(7);
-        fewer["train"]["score"] = json!(0.1);
-        let (v, why) = verdict(&base, &fewer).unwrap();
+        let (v, why, _) = verdict(&base, &fewer).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why[0].contains("en002a pitch: 10 → 7 notes"), "{why:?}");
     }
 
     #[test]
     fn the_margin_is_exact_in_thousandths() {
-        let base = scored(8.0, |_| {});
-        let with = |x: f64| {
-            let mut v = base.clone();
-            v["train"]["score"] = json!(x);
-            v
+        // 0.991 − 1.001 is −0.0099999… in floating point, and still a fall of 0.010
+        assert_eq!(decide(0.991 - 1.001, vec![]).0, Verdict::Better);
+        assert_eq!(decide(1.001 - 0.991, vec![]).0, Verdict::Worse);
+        assert_eq!(decide(0.992 - 1.001, vec![]).0, Verdict::Same);
+        assert_eq!(decide(-0.5, vec!["a guard".into()]).0, Verdict::Worse);
+    }
+
+    #[test]
+    fn a_song_whose_vibrato_stops_reading_as_vibrato_takes_no_gap_with_it() {
+        // vibrato rate (term 8) is far off in en001a; then its modulation leaves the vibrato
+        // range, so it has no rate at all. Depth and rate keep no coverage (fewer notes with
+        // vibrato can be right), so only the like-for-like comparison stops this from passing.
+        let mk = |gone: bool| {
+            let mut songs: Vec<SongScore> = (1..=9)
+                .map(|i| song(&format!("en{i:03}a"), i as f64, i as f64 + 3.7))
+                .collect();
+            songs[0].pairs[8].1 = if gone { f64::NAN } else { 1.0 + 40.0 };
+            let refs: Vec<&SongScore> = songs.iter().collect();
+            report("female", &refs, None).unwrap().0
         };
-        // 1.001 − 0.991 is 0.0099999… in floating point, and still a fall of 0.010
-        assert_eq!(
-            verdict(&with(1.001), &with(0.991)).unwrap().0,
-            Verdict::Better
-        );
-        assert_eq!(
-            verdict(&with(0.991), &with(1.001)).unwrap().0,
-            Verdict::Worse
-        );
-        assert_eq!(
-            verdict(&with(1.001), &with(0.992)).unwrap().0,
-            Verdict::Same
-        );
+        let (base, gone) = (mk(false), mk(true));
+        assert!(num(&gone["train"]["score"]) < num(&base["train"]["score"]) - 0.01);
+        let (v, _, change) = verdict(&base, &gone).unwrap();
+        assert_eq!(v, Verdict::Same);
+        assert_eq!(change, 0.0);
     }
 
     #[test]
@@ -514,10 +582,9 @@ mod tests {
     #[test]
     fn the_verdict_wants_a_lower_score_and_every_guard_kept() {
         let base = scored(8.0, |_| {});
-        assert_eq!(
-            verdict(&base, &scored(6.0, |_| {})).unwrap().0,
-            Verdict::Better
-        );
+        let (v, _, change) = verdict(&base, &scored(6.0, |_| {})).unwrap();
+        assert_eq!(v, Verdict::Better);
+        assert!(change < -0.01, "{change}");
         assert_eq!(
             verdict(&base, &scored(8.0, |_| {})).unwrap().0,
             Verdict::Same
@@ -527,19 +594,18 @@ mod tests {
             Verdict::Worse
         );
         // better on the score, but a note leaves its time: worse
-        let (v, why) = verdict(&base, &scored(6.0, |s| s.misaligned = 1)).unwrap();
+        let (v, why, _) = verdict(&base, &scored(6.0, |s| s.misaligned = 1)).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why[0].contains("off time"), "{why:?}");
-        let (v, _) = verdict(&base, &scored(6.0, |s| s.mcd = 9.5)).unwrap();
+        let (v, _, _) = verdict(&base, &scored(6.0, |s| s.mcd = 9.5)).unwrap();
         assert_eq!(v, Verdict::Worse);
         // one term much worse while the rest improve: worse
-        let mut one_worse = scored(6.0, |_| {});
-        one_worse["train"]["terms"][5]["cost"] = json!(99.0);
-        let (v, why) = verdict(&base, &one_worse).unwrap();
+        let one_worse = scored(6.0, |s| s.pairs[5].1 = s.pairs[5].0 + 30.0);
+        let (v, why, _) = verdict(&base, &one_worse).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why[0].contains("H1-H2"), "{why:?}");
         // a guard that loses its value breaks
-        let (v, why) = verdict(&base, &scored(6.0, |s| s.synth_pitch = f64::NAN)).unwrap();
+        let (v, why, _) = verdict(&base, &scored(6.0, |s| s.synth_pitch = f64::NAN)).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(
             why[0].contains("pitch error up (cents): no value"),
