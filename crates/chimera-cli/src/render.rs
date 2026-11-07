@@ -1,9 +1,9 @@
 //! `chimera render …`: ports of `tools/render-{speech,text,song,beatbox,creature,vowels}.ts`.
 
 use crate::js::{fixed, num, pad_end, pad_start};
-use crate::{Ctx, FS, arg, body, peak, repo_path, wav_name};
+use crate::{Ctx, FS, arg, body, body_mix, peak, repo_path, wav_name};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
-use chimera::anatomy::human::ArticKey;
+use chimera::anatomy::human::{ArticKey, BodyMix, N_ARTIC};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
@@ -24,7 +24,7 @@ use chimera::phonetics::sing::{
 use chimera::phonetics::songs::DEMO_SONGS;
 use chimera::phonetics::syllables::lyrics_to_syllables;
 use chimera::phonetics::{Intonation, Syllable};
-use chimera::voice::human_voice::{HumanVoice, SourcePatch};
+use chimera::voice::human_voice::{HumanVoice, SCOPE_POINTS, SourcePatch, VoiceTelemetry};
 use std::io::Read;
 use std::time::Instant;
 
@@ -342,37 +342,145 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
 /// Articulator tracks are sampled at this rate (Hz): 480 samples at 48 kHz.
 const ARTIC_RATE: usize = 100;
 
-/// Render like `render_blocks`, and record the articulators at `ARTIC_RATE`: frame i is the state
-/// at i / ARTIC_RATE s. The voice runs sample by sample, so the sound is the same either way.
-fn render_tracked(v: &mut HumanVoice, out: &mut [f32]) -> Vec<Vec<f64>> {
-    let hop = FS as usize / ARTIC_RATE;
-    let frame = |v: &HumanVoice| ArticKey::ALL.iter().map(|k| js_round(v.artic.x.get(*k) * 1e4) / 1e4).collect();
-    let mut frames = vec![frame(v)];
-    for chunk in out.chunks_mut(hop) {
-        render_blocks(v, chunk);
-        frames.push(frame(v));
+/// Telemetry frames (`--tele`) are taken every `TELE_HOP` samples: the live app's cadence (the
+/// worklet posts one every 6 render quanta of 128), so each frame's RMS levels cover as long.
+pub const TELE_HOP: usize = 768;
+/// Points kept of the 256-point glottal scope in a telemetry frame (every 8th).
+pub const TELE_SCOPE: usize = 32;
+/// `--tele` file version (see `TeleRecorder`).
+pub const TELE_VERSION: u32 = 1;
+
+/// The voice's telemetry over time, for replaying a render in the app (two heads singing a duet).
+///
+/// File layout, little-endian: `b"CHTL"`, then u32 version, sampleRate, hop, frames, frameLen,
+/// nArtic, nPh, nOr, nScope, then f32 bodyFemale, bodyChild (48 bytes in all); then `frames`
+/// frames of `frameLen` f32s. A frame is the wasm telemetry block's fields in its order
+/// (crates/chimera-wasm `engine_telemetry`): phLen, orLen, velumPort, f0, voicing, pLung, outRms,
+/// noiseLevel, noiseNode, gate, clock, then artic, phAreas, orAreas, pressureRms (nPh+nOr),
+/// flow (nPh+nOr), glottalArea (nScope), glottalFlow (nScope); no gesture labels.
+/// Frame i is the state at sample i·hop (frame 0 before any sound); its RMS levels cover the hop
+/// before it. A last partial hop gets no frame.
+struct TeleRecorder {
+    t: VoiceTelemetry,
+    data: Vec<f32>,
+    frames: u32,
+    n_ph: usize,
+    n_or: usize,
+}
+
+impl TeleRecorder {
+    fn new(v: &mut HumanVoice) -> Self {
+        let mut r = TeleRecorder { t: VoiceTelemetry::default(), data: Vec::new(), frames: 0, n_ph: 0, n_or: 0 };
+        v.telemetry(&mut r.t);
+        r.n_ph = r.t.ph_areas.len();
+        r.n_or = r.t.or_areas.len();
+        r.push_current();
+        r
     }
-    frames
+
+    fn frame_len(&self) -> usize {
+        11 + N_ARTIC + 3 * (self.n_ph + self.n_or) + 2 * TELE_SCOPE
+    }
+
+    fn snap(&mut self, v: &mut HumanVoice) -> Result<(), String> {
+        v.telemetry(&mut self.t);
+        if self.t.ph_areas.len() != self.n_ph || self.t.or_areas.len() != self.n_or {
+            return Err("the airway's section count changed during the render".into());
+        }
+        self.push_current();
+        Ok(())
+    }
+
+    fn push_current(&mut self) {
+        let t = &self.t;
+        let d = &mut self.data;
+        d.extend([t.ph_len, t.or_len, t.velum_port, t.f0, t.voicing, t.p_lung, t.out_rms, t.noise_level, t.noise_node as f64, t.gate, t.clock].map(|x| x as f32));
+        for arr in [&t.artic, &t.ph_areas, &t.or_areas, &t.pressure_rms, &t.flow] {
+            d.extend_from_slice(arr);
+        }
+        let step = SCOPE_POINTS / TELE_SCOPE;
+        for arr in [&t.glottal_area, &t.glottal_flow] {
+            d.extend((0..TELE_SCOPE).map(|i| arr[i * step]));
+        }
+        self.frames += 1;
+        debug_assert_eq!(self.data.len(), self.frames as usize * self.frame_len());
+    }
+
+    fn bytes(&self, body: BodyMix) -> Vec<u8> {
+        let mut b = Vec::with_capacity(48 + 4 * self.data.len());
+        b.extend_from_slice(b"CHTL");
+        for x in [TELE_VERSION, FS as u32, TELE_HOP as u32, self.frames, self.frame_len() as u32, N_ARTIC as u32, self.n_ph as u32, self.n_or as u32, TELE_SCOPE as u32] {
+            b.extend_from_slice(&x.to_le_bytes());
+        }
+        for x in [body.female as f32, body.child as f32] {
+            b.extend_from_slice(&x.to_le_bytes());
+        }
+        for x in &self.data {
+            b.extend_from_slice(&x.to_le_bytes());
+        }
+        b
+    }
+}
+
+/// Render like `render_blocks`, recording the articulators every `ARTIC_RATE`th of a second
+/// (`artic`: frame i is the state at i / ARTIC_RATE s, plus one at the end) and/or the telemetry
+/// every `TELE_HOP` samples (`tele`). The two cadences are independent; taking telemetry is the
+/// only thing that resets its RMS levels. The voice runs sample by sample, so the sound is the
+/// same either way.
+fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) -> Result<(Vec<Vec<f64>>, Option<TeleRecorder>), String> {
+    let a_hop = FS as usize / ARTIC_RATE;
+    let frame = |v: &HumanVoice| ArticKey::ALL.iter().map(|k| js_round(v.artic.x.get(*k) * 1e4) / 1e4).collect();
+    let mut frames = if artic { vec![frame(v)] } else { Vec::new() };
+    let mut rec = if tele { Some(TeleRecorder::new(v)) } else { None };
+    let n = out.len();
+    let (mut pos, mut next_a, mut next_t) = (0usize, a_hop, TELE_HOP);
+    while pos < n {
+        let mut end = n;
+        if artic {
+            end = end.min(next_a);
+        }
+        if tele {
+            end = end.min(next_t);
+        }
+        render_blocks(v, &mut out[pos..end]);
+        pos = end;
+        if artic && (pos == next_a || pos == n) {
+            frames.push(frame(v));
+            next_a += a_hop;
+        }
+        if let Some(r) = rec.as_mut()
+            && pos == next_t
+        {
+            r.snap(v)?;
+            next_t += TELE_HOP;
+        }
+    }
+    Ok((frames, rec))
 }
 
 /// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?}`.
 /// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
 /// melody into phrases planned separately on one voice.
-/// `render notes <in.json> <out> [body] [--artic tracks.json]`: `--artic` also writes the
-/// articulators over time (`{"rate", "body", "keys", "frames"}`), to animate a face in sync.
+/// `render notes <in.json> <out> [body] [--artic tracks.json] [--tele voice.tele]`: `--artic` also
+/// writes the articulators over time (`{"rate", "body", "keys", "frames"}`), to animate a face in
+/// sync; `--tele` writes the voice's whole telemetry over time (see `TeleRecorder`), which the
+/// app's duet page replays on a 3D head.
 pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let mut artic_out: Option<String> = None;
+    let mut tele_out: Option<String> = None;
     let mut rest = Vec::new();
     let mut it = a.iter();
     while let Some(x) = it.next() {
         if x == "--artic" {
             artic_out = Some(it.next().ok_or("--artic needs a file")?.clone());
+        } else if x == "--tele" {
+            tele_out = Some(it.next().ok_or("--tele needs a file")?.clone());
         } else {
             rest.push(x.clone());
         }
     }
     let a = &rest[..];
-    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child] [--artic tracks.json]")?;
+    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]")?;
     let out_name = wav_name(arg(a, 1, "out/notes"));
     let body_name = arg(a, 2, "male");
     let b = body(body_name)?;
@@ -426,12 +534,11 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     flush(&mut phrase, start, &mut v, &mut end);
     let n = js_round(FS * (end + 0.4)) as usize;
     let mut out = vec![0f32; n];
-    let frames = match &artic_out {
-        Some(_) => render_tracked(&mut v, &mut out),
-        None => {
-            render_blocks(&mut v, &mut out);
-            Vec::new()
-        }
+    let (frames, rec) = if artic_out.is_some() || tele_out.is_some() {
+        render_tracked(&mut v, &mut out, artic_out.is_some(), tele_out.is_some())?
+    } else {
+        render_blocks(&mut v, &mut out);
+        (Vec::new(), None)
     };
     ctx.write_wav(&out_name, &out)?;
     println!("{out_name}: {} s, peak {}, {} notes", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), sounding);
@@ -439,6 +546,10 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         let j = serde_json::json!({"rate": ARTIC_RATE, "body": body_name, "keys": ArticKey::NAMES, "frames": frames});
         std::fs::write(path, j.to_string()).map_err(|e| format!("{path}: {e}"))?;
         println!("{path}: {} frames at {ARTIC_RATE} Hz", frames.len());
+    }
+    if let (Some(path), Some(r)) = (&tele_out, rec) {
+        std::fs::write(path, r.bytes(body_mix(body_name)?)).map_err(|e| format!("{path}: {e}"))?;
+        println!("{path}: {} telemetry frames every {TELE_HOP} samples", r.frames);
     }
     Ok(())
 }

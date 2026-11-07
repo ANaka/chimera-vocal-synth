@@ -24,6 +24,14 @@ import { bodyLabel, presetOf, PRESETS } from "./body.ts";
 
 // three.js only loads when the 3D view is first shown
 const AnatomyView3D = lazy(() => import("./components/AnatomyView3D.tsx").then((m) => ({ default: m.AnatomyView3D })));
+// the duet page (`?show=<id>`): two 3D heads replaying a pre-rendered song
+const DuetPage = lazy(() => import("./components/DuetPage.tsx").then((m) => ({ default: m.DuetPage })));
+
+/** the show to play, from `?show=<id>` (a plain folder name under public/shows) */
+function showId(): string | null {
+  const id = new URLSearchParams(window.location.search).get("show");
+  return id && /^[\w-]+$/.test(id) ? id : null;
+}
 
 function TopBar() {
   const started = useStore((s) => s.started);
@@ -199,6 +207,17 @@ function PlayRight() {
 }
 
 export function App() {
+  const show = showId();
+  if (show)
+    return (
+      <Suspense fallback={null}>
+        <DuetPage id={show} />
+      </Suspense>
+    );
+  return <Wall />;
+}
+
+function Wall() {
   const mode = useStore((s) => s.mode);
   return (
     <div className={`app mode-${mode}`}>

@@ -10,7 +10,7 @@ mod js;
 mod render;
 mod wav;
 
-use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, HumanBody};
+use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BodyMix, HumanBody};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -19,7 +19,7 @@ usage: chimera <command> [args] [--float]
   render speech  <out> [\"ipa / ipa\"] [male|female|child]
   render text    <out> [\"English text.\"] [male|female|child]
   render song    [outdir] [male|female|child]
-  render notes   <in.json> <out> [male|female|child] [--artic tracks.json]
+  render notes   <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]
                  (melody file; midi <= 0 is a rest; --artic also writes the articulators at 100 Hz)
   render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
   render creature [creatureId] [outdir]
@@ -59,6 +59,16 @@ pub fn body(name: &str) -> Result<HumanBody, String> {
         "male" => Ok(BODY_MALE),
         "female" => Ok(BODY_FEMALE),
         "child" => Ok(BODY_CHILD),
+        _ => Err(format!("unknown body {name:?}; have male, female, child")),
+    }
+}
+
+/// The app's body mix for a body preset (female 0..1, child 0..1), as `src/ui/body.ts` PRESETS.
+pub fn body_mix(name: &str) -> Result<BodyMix, String> {
+    match name {
+        "male" => Ok(BodyMix::new(0.0, 0.0)),
+        "female" => Ok(BodyMix::new(1.0, 0.0)),
+        "child" => Ok(BodyMix::new(0.0, 1.0)),
         _ => Err(format!("unknown body {name:?}; have male, female, child")),
     }
 }

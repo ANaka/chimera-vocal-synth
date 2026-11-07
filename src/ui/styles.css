@@ -2761,3 +2761,89 @@ input[type="range"]::-moz-range-thumb {
     min-height: 300px;
   }
 }
+
+/* ---------- the duet page (?show=<id>): heads side by side over the transport */
+.duet {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  height: 100vh;
+  height: 100dvh;
+  padding: 6px 16px max(10px, env(safe-area-inset-bottom));
+}
+
+.duet-top {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  min-width: 0;
+  padding: 4px 2px;
+}
+
+.duet-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--blue-mid);
+}
+
+.duet-heads {
+  display: grid;
+  grid-template-columns: repeat(var(--voices, 2), minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+}
+
+.duet-head .screen-body {
+  min-height: 180px;
+}
+
+.duet-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.duet-bar button.primary.large {
+  flex: none;
+  min-width: 96px;
+}
+
+.duet-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--blue-mid);
+}
+
+.duet-bar input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.duet-msg {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--blue-mid);
+}
+
+.duet-msg.error {
+  color: var(--amber);
+}
+
+@media (max-width: 720px) {
+  .duet {
+    padding: 4px 8px max(8px, env(safe-area-inset-bottom));
+  }
+  .duet-heads {
+    gap: 6px;
+  }
+  .duet-head .screen-head {
+    padding: 7px 8px 0;
+  }
+}
