@@ -100,6 +100,14 @@ opens a new one, update this list and give the experiment's number.
 6. **Speech consonants.** Not scored, only guarded. Whisper mishears /tʃ/, /dʒ/, /ʃ/ and /s/:
    "sheet" as "feet", "chicken leg" as "quickly like", "juice" as "roost". This is for a later
    loop on speech.
+   - Experiment 11 found why /ʃ/ is heard as /f/: the chamber in front of the raised tongue tip
+     (under the alveolar ridge, and the sublingual space) took the mid-oral area law, ~5.5 cm²,
+     so the front-cavity resonance that the teeth source excites sat at 1.7 kHz (male) and
+     2.1 kHz (female). A narrower law for the rays ahead of the tip: speech 40.73 → 35.76 %
+     (BETTER), singer guards pass, but reverted on `geometry_continuity` (an existing jump at
+     the top of the pharynx that the recalibrated child /ə/ lands on). Fix that jump, then keep
+     experiment 11 as it was. The /ʃ/ is still about 21 dB below the vowel (female), as loud as
+     /f/: its level is the next thing to look at.
 
 ## Experiments
 
@@ -547,3 +555,75 @@ judge is Whisper. See the README's "current batch" section for the rules.
 - Singer: training 0.582, held-out 0.789.
 - Speed: 18.2 % of one core (`os=2`).
 - The /p/ of "sharp": +7.0 dB re the loudest vowel, oral pressure 11.1x the lungs' (male).
+
+### 11. The space in front of the raised tongue tip is narrow: /ʃ/'s front cavity (reverted)
+
+- Hypothesis: the /ʃ/ of "sheet" peaked at 2.06 kHz (female) and 1.73 kHz (male), against
+  2.5–3.5 kHz in real speech, and Whisper heard "feet". A probe of the noise sources showed the
+  teeth (obstacle) source makes the /ʃ/: with it off the fricative falls 10 dB, while the
+  aspiration source changes nothing. The peak is the resonance of the front cavity between the
+  postalveolar constriction and the lips, which it excites. In the area function that cavity
+  holds a chamber of 4.7–5.5 cm² over about 1 cm (male, ~10 cm³ in all). It is the space under the
+  alveolar ridge and below the raised tip, down to the floor of the mouth (midsagittal depth
+  ≈ 1.7 cm). Those rays took the oral law, 2.6·d^1.4, which describes the mid-oral cavity
+  between the molars. In front of the tip the airway lies inside the anterior dental arch and the
+  sublingual space, far narrower. Lips and jaw were checked first and are not the cause:
+  - lip width 0.2 → 0.6: peak +100–200 Hz
+  - lip protrusion 0.75 → 0.4: +240 Hz
+  - jaw 0.35 → 0.1: nothing
+  - tongue tip forward (ttX 5.7 → 6.05): about +100–200 Hz
+- Change: `crates/chimera/src/anatomy/human.rs`: a fourth area law, `AreaLaw.ahead`, for the oral
+  rays whose midpoint lies in front of the tongue tip, faded in by
+  `smoothstep(0, 0.4·k, mid.x − tip.x)`. Vowel and consonant tables regenerated with `chimera
+  calibrate`: the vowels' formants moved up to 4–5 % (the open vowels' F1 down, /ɝ/ F2 up).
+  After recalibration the mean F1 error is 1.33 → 1.59 % (male) and 2.01 → 2.53 % (female); F2
+  and F3 are about the same. Values tried (/ʃ/ of "sheet", peak female / male):
+  - α = 2.0 (the dental arch's front law), no recalibration: 2.16 / 1.78 kHz. Too little.
+  - α = 1.2, with an uncalibrated sensitivity check of α = 0.7 (3.0 / 2.5 kHz):
+    - "Sheet": 2.81 / 2.06 kHz, 1–2 kHz band −5 → −18 dB (female).
+    - Speech NO CLEAR CHANGE: 40.73 → 39.40 %. Harvard male 37.5 → 27.5, Harvard female
+      37.5 → 46.25.
+    - Singer WORSE: 0.582 → 0.590, note MCD 8.536 → 8.648 dB, over its 0.1 dB guard.
+  - α = 1.6: "sheet" 2.34 / 1.92 kHz. The numbers below are for this value.
+  - /s/ and /f/ barely move at any value: "seat" 4.0–4.1 kHz, "feet" 4.3–4.5 kHz (female).
+- Speech: word error rate 40.73 → 35.76 % (training, **BETTER**), 50.67 → 45.33 % (held-out).
+  - Moved right: "chicken leg" (male, 5 → 1 errors), "juice" (male), "sharp" and "the thin road"
+    (female), "soft hill" (female), "some bright doors" (male).
+  - "Sheet" is now heard in the male voice ("screw the sheet": the error moved to "glue"). The
+    female still hears "feet": her /ʃ/ is still 21–22 dB below the vowel, as quiet as her /f/.
+  - Chair, chain, birch and chopped still fail.
+- Singer: training 0.582 → 0.584 (NO CLEAR CHANGE, every guard holds; note MCD 8.536 → 8.628
+  dB), held-out 0.789 → 0.810. Level 0–0.5 kHz cost 1.22.
+- Speed: `os=2`, back to back with the baseline commit: 18.2 / 19.1 % (baseline) against
+  18.4 / 19.7 % (change), so 1–3 %. A first run read 22.2 %, while other sessions loaded the
+  machine (load average 13).
+- Tests (fixtures blessed twice, then `cargo test --workspace`):
+  - `golden_analysis` fails at its first "human |H|" check: the README's airway exception. Its
+    later checks (tube networks, FFT, LPC, YIN, Nelder–Mead) don't touch the human tract.
+  - `golden_geometry` (the TypeScript-era area function) fails: it has to move with any
+    deliberate geometry change. It is the same kind of check as the airway one; the batch PR
+    would regenerate it.
+  - `golden_planning`'s beat sequencer checks fail by 1e-3 in tongue targets, which come from the
+    regenerated vowel table.
+  - **`geometry_continuity::no_area_jumps_anywhere_in_the_articulators_speech_ranges` fails:**
+    "child ə velum=1.117: 0.32 cm²". The new law doesn't cause it:
+    - new law, old tables: passes.
+    - old law (α = 2.6), new tables: fails the same way.
+    - The recalibrated child /ə/ posture lands on a jump that was already in the geometry. It is
+      at the top of the pharynx (the velopharyngeal rays), with the velum raised to about 1.117
+      (posture jaw 0.80, tbX 2.70, tbY 7.38, root −0.50).
+  - `bun test` was not run.
+- Verdict: reverted. The speech is BETTER, the singer guards hold and the speed is fine, but a
+  non-fixture test fails, so the rules revert it. This is the same position as experiment 7.
+- Commit: none (log only). The patch: in `AreaLaw` add `pub ahead: (f64, f64)`, default
+  `(1.6, 1.4)`. In the region-2 branch of the area loop, replace `a_o·d^b_o` with
+  `lerp(a_o·d^b_o, a_h·d^b_h, smoothstep(0, 0.4·k, g.mid.x − tip.x))`. Then run `chimera calibrate
+  vowels all` and `chimera calibrate consonants`.
+- Next:
+  - Fix the velopharyngeal jump that `geometry_continuity` finds for the recalibrated child /ə/
+    (velum ≈ 1.117) as its own step, then retry this change as it was.
+  - Retry α = 1.2 too: it moved /ʃ/ further (2.8 kHz female), and its speech result (−1.33)
+    was within Whisper's run-to-run noise of α = 1.6's.
+  - After that, the /ʃ/'s level: the female /ʃ/ is 21 dB below its vowel and the male 11 dB.
+    The teeth source's gain, or how its weight depends on the distance behind the teeth (2.5 cm
+    for /ʃ/, just short of where `w_dist` starts to fade, at 2.6), is the place to look.
