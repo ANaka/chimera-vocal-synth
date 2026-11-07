@@ -507,5 +507,7 @@ What they heard, in their words, and what the renders show:
 - **"Pu" of "pushes" inaudible.** The stressed /ʊ/ lasts about 40 ms; the unstressed "-es"
   gets about 100 ms. The text front end marks the stress correctly (pˈʊʃəz).
 
-Whisper's mistakes match the user's in four of the five speech complaints, which supports
-using it as the pronunciation judge.
+Whisper agrees with the user on the word errors (sheet → feet, and the j and ch words), which
+supports using it as the pronunciation judge. It disagrees on one: it heard "pushes" correctly in
+the female voice after the batch (before it heard "puffs"). It can't judge the pop or the buzz,
+since neither changes the words, so those need checks of their own.
