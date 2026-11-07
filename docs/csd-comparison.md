@@ -95,8 +95,8 @@ be hard to improve without sounding closer to her.
 - **Gap.** A term's gap is the mean over songs of |synth − singer|. It is a mean rather than a
   median so that every song's change counts, and one song gone badly wrong shows.
 - **Unit.** The gap is divided by her spread on that term over the training songs (median absolute
-  deviation, scaled to a standard deviation). The spread is a property of the singer, so a change
-  to the synth can't move it.
+  deviation, scaled to a standard deviation). The spread comes from all her notes, including any
+  the planner couldn't place on time, so a change to the synth can't move it.
 - **Cost.** A gap within one spread is about as close as two of her songs are to each other, so it
   costs nothing. Beyond that, the excess is the term's cost. Nothing is gained by matching her
   medians more closely than her own variation, which keeps a tuning loop from overfitting one
@@ -118,14 +118,21 @@ deviations from it can't be predicted from the score.
 **The verdict.** `--against <earlier score.json>` compares the training scores of two runs over
 the same songs and body:
 
-- **Better:** the score falls by at least 0.01, no term's cost rises by more than 0.25, and every
-  guard holds.
+- **Better:** the score falls by at least 0.01 (compared in the thousandths `score.json` gives),
+  no term's cost rises by more than 0.25, and every guard holds.
 - **Guards:**
   - no more notes off time (so a change can't drop hard notes from the statistics)
   - no more dropped gestures
   - note MCD up by no more than 0.1 dB
   - envelope correlation down by no more than 0.01
   - the synth's pitch error up by no more than 2 cents
+  - no song measured on fewer notes. For each song, `score.json` counts the notes compared and
+    the notes on which the synth gives each measure: band levels, H1−H2, voicing, onsets,
+    aperiodicity and pitch, and the notes long enough to look for vibrato. A measure that stops
+    being measurable on a note would otherwise drop that note, maybe a bad one, from the score.
+    Vibrato depth and rate are exempt, since they exist only on notes with vibrato, and the share
+    term scores how many have it.
+  - a guard that had a value and has none now breaks too.
 - **Worse:** any guard or term breaks, or the score rises by 0.01 or more.
 - **No clear change:** anything else.
 

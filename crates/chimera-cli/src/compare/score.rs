@@ -3,7 +3,8 @@
 //! Each term is a song-level measure both voices have: her median H1−H2 in a song against the
 //! synth's in the same song, her share of voiced frames against the synth's, and so on. A term's
 //! gap is the mean over songs of |synth − singer|, divided by the spread of her own values over
-//! the training songs (median absolute deviation, scaled to a standard deviation). A gap within
+//! the training songs (median absolute deviation, scaled to a standard deviation; taken from all
+//! her notes, so nothing the synth does can move it). A gap within
 //! one spread is about as close as two of her own songs are to each other and costs nothing;
 //! beyond that, the excess is the term's cost. The score is the weighted mean of the costs:
 //! lower is better, and 0 means every term is within her own variation.
@@ -14,7 +15,9 @@
 //!
 //! `--against <score.json>` compares the training score with an earlier run's. A change is
 //! better when the score falls by at least `MARGIN`, no term's cost rises by more than
-//! `TERM_SLACK`, and no guard breaks.
+//! `TERM_SLACK`, and no guard breaks. A guard also breaks when a value goes missing: a measure the
+//! synth gave on a song's note before and doesn't now would otherwise leave the score quietly,
+//! and could take a bad note with it.
 
 use super::{mean, median};
 use serde_json::{Value, json};
@@ -53,6 +56,28 @@ const MCD_SLACK: f64 = 0.1;
 const PITCH_SLACK: f64 = 2.0;
 const CORR_SLACK: f64 = 0.01;
 
+/// What `coverage` counts per song: the notes compared, and the notes on which the synth gives each
+/// guarded measure. Vibrato depth and rate are not counted: they exist only on notes with
+/// vibrato, and the vibrato share term already scores how many have it.
+pub const N_COVERAGE: usize = 13;
+pub const COVERAGE: [&str; N_COVERAGE] = [
+    "notes compared",
+    "level 0-.5k",
+    "level .5-1k",
+    "level 1-2k",
+    "level 2-4k",
+    "level 4-8k",
+    "H1-H2",
+    "notes long enough for vibrato",
+    "voiced share",
+    "onset, vowel-initial",
+    "onset, voiceless-initial",
+    "aperiodicity",
+    "pitch",
+];
+/// at most this many coverage losses are listed in a verdict
+const MAX_LISTED: usize = 6;
+
 /// Held out of tuning: every fifth song number, in both keys.
 pub fn held_out(id: &str) -> bool {
     let digits: String = id.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -62,8 +87,12 @@ pub fn held_out(id: &str) -> bool {
 /// One song's inputs to the score.
 pub struct SongScore {
     pub id: String,
-    /// per term (singer, synth); NaN where that side has no value in this song
+    /// per term, the singer's value over all her notes: the spreads are taken from these
+    pub singer_all: [f64; N_TERMS],
+    /// per term (singer, synth) over the notes compared; NaN where that side has no value
     pub pairs: [(f64, f64); N_TERMS],
+    /// per `COVERAGE` entry, how many notes
+    pub coverage: [u64; N_COVERAGE],
     pub notes: usize,
     pub misaligned: usize,
     pub dropped: u64,
@@ -84,7 +113,7 @@ fn spreads(train: &[&SongScore]) -> [f64; N_TERMS] {
     std::array::from_fn(|k| {
         let h: Vec<f64> = train
             .iter()
-            .map(|s| s.pairs[k].0)
+            .map(|s| s.singer_all[k])
             .filter(|v| v.is_finite())
             .collect();
         let sd = mad_sd(&h);
@@ -149,8 +178,10 @@ fn score_set(songs: &[&SongScore], spread: &[f64; N_TERMS]) -> Value {
     let avg = |f: &dyn Fn(&SongScore) -> f64| mean(&songs.iter().map(|s| f(s)).collect::<Vec<_>>());
     json!({
         "songs": songs.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+        "coverageNames": COVERAGE,
         "score": r3(if weight > 0.0 { cost / weight } else { f64::NAN }),
         "terms": terms,
+        "coverage": songs.iter().map(|s| (s.id.clone(), json!(s.coverage))).collect::<serde_json::Map<_, _>>(),
         "guards": {
             "notes": total(&|s| s.notes as u64),
             "notesMisaligned": total(&|s| s.misaligned as u64),
@@ -185,26 +216,59 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>), Strin
         return Err("one of the two runs has no training score".into());
     }
     let mut why = Vec::new();
-    let g = |k: &str| (num(&o["guards"][k]), num(&n["guards"][k]));
-    let (a, b) = g("notesMisaligned");
-    if b > a {
-        why.push(format!("more notes off time: {a} → {b}"));
+    // (old, new) of a guard; a guard that had a value and lost it breaks
+    let mut guard = |k: &str, broken: &dyn Fn(f64, f64) -> bool, what: &str| {
+        let (a, b) = (num(&o["guards"][k]), num(&n["guards"][k]));
+        if a.is_finite() && !b.is_finite() {
+            why.push(format!("{what}: no value any more"));
+        } else if a.is_finite() && broken(a, b) {
+            why.push(format!("{what}: {a} → {b}"));
+        }
+    };
+    guard("notesMisaligned", &|a, b| b > a, "more notes off time");
+    guard("droppedGestures", &|a, b| b > a, "more dropped gestures");
+    guard("noteMcdDb", &|a, b| b > a + MCD_SLACK, "note MCD up (dB)");
+    guard(
+        "envelopeCorr",
+        &|a, b| b < a - CORR_SLACK,
+        "envelope correlation down",
+    );
+    guard(
+        "synthPitchAbsCents",
+        &|a, b| b > a + PITCH_SLACK,
+        "pitch error up (cents)",
+    );
+    // no song may lose a note from any guarded measure
+    if o["coverageNames"] != n["coverageNames"] {
+        return Err(
+            "the earlier score counts other measures; rescore the baseline with this build".into(),
+        );
     }
-    let (a, b) = g("droppedGestures");
-    if b > a {
-        why.push(format!("more dropped gestures: {a} → {b}"));
+    let mut lost = Vec::new();
+    if let (Some(co), Some(cn)) = (o["coverage"].as_object(), n["coverage"].as_object()) {
+        for (song, a) in co {
+            let (a, b) = (a.as_array(), cn.get(song).and_then(|b| b.as_array()));
+            let (Some(a), Some(b)) = (a, b) else { continue };
+            for (k, (x, y)) in a.iter().zip(b).enumerate() {
+                let (x, y) = (x.as_u64().unwrap_or(0), y.as_u64().unwrap_or(0));
+                if y < x {
+                    lost.push(format!("{song} {}: {x} → {y} notes", COVERAGE[k]));
+                }
+            }
+        }
     }
-    let (a, b) = g("noteMcdDb");
-    if b > a + MCD_SLACK {
-        why.push(format!("note MCD up: {a} → {b} dB"));
-    }
-    let (a, b) = g("envelopeCorr");
-    if b < a - CORR_SLACK {
-        why.push(format!("envelope correlation down: {a} → {b}"));
-    }
-    let (a, b) = g("synthPitchAbsCents");
-    if b > a + PITCH_SLACK {
-        why.push(format!("pitch error up: {a} → {b} cents"));
+    if !lost.is_empty() {
+        let more = lost.len().saturating_sub(MAX_LISTED);
+        lost.truncate(MAX_LISTED);
+        why.push(format!(
+            "measured on fewer notes: {}{}",
+            lost.join(", "),
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
+        ));
     }
     let empty = vec![];
     let (to, tn) = (
@@ -225,12 +289,14 @@ pub fn verdict(old: &Value, new: &Value) -> Result<(Verdict, Vec<String>), Strin
             why.push(format!("{name} cost up: {ca} → {cb}"));
         }
     }
-    let d = sn - so;
+    // scores are written to thousandths; compare those exactly
+    let milli = |x: f64| (x * 1000.0).round() as i64;
+    let (d, margin) = (milli(sn) - milli(so), milli(MARGIN));
     Ok(if !why.is_empty() {
         (Verdict::Worse, why)
-    } else if d <= -MARGIN {
+    } else if d <= -margin {
         (Verdict::Better, why)
-    } else if d >= MARGIN {
+    } else if d >= margin {
         (Verdict::Worse, vec![format!("score up: {so} → {sn}")])
     } else {
         (Verdict::Same, why)
@@ -334,7 +400,9 @@ mod tests {
     fn song(id: &str, singer: f64, synth: f64) -> SongScore {
         SongScore {
             id: id.into(),
+            singer_all: [singer; N_TERMS],
             pairs: [(singer, synth); N_TERMS],
+            coverage: [10; N_COVERAGE],
             notes: 10,
             misaligned: 0,
             dropped: 0,
@@ -342,6 +410,59 @@ mod tests {
             env_corr: 0.8,
             synth_pitch: 5.0,
         }
+    }
+
+    #[test]
+    fn a_bad_song_that_stops_being_measured_does_not_improve_the_score() {
+        // nine songs one spread (3.7065) apart from her, one far off: a cost the outlier carries
+        let mk = |worst_missing: bool| {
+            let mut songs: Vec<SongScore> = (1..=9)
+                .map(|i| song(&format!("en{i:03}a"), i as f64, i as f64 + 3.7))
+                .collect();
+            songs[0].pairs[5].1 = 1.0 + 60.0;
+            if worst_missing {
+                // its H1−H2 can no longer be measured on any note
+                songs[0].pairs[5].1 = f64::NAN;
+                songs[0].coverage[6] = 0;
+            }
+            let refs: Vec<&SongScore> = songs.iter().collect();
+            report("female", &refs, None).unwrap().0
+        };
+        let (base, gone) = (mk(false), mk(true));
+        assert!(num(&gone["train"]["score"]) < num(&base["train"]["score"]));
+        let (v, why) = verdict(&base, &gone).unwrap();
+        assert_eq!(v, Verdict::Worse);
+        assert!(why[0].contains("en001a H1-H2: 10 → 0 notes"), "{why:?}");
+        // losing pitch on a few notes of one song is caught the same way
+        let mut fewer = base.clone();
+        fewer["train"]["coverage"]["en002a"][12] = json!(7);
+        fewer["train"]["score"] = json!(0.1);
+        let (v, why) = verdict(&base, &fewer).unwrap();
+        assert_eq!(v, Verdict::Worse);
+        assert!(why[0].contains("en002a pitch: 10 → 7 notes"), "{why:?}");
+    }
+
+    #[test]
+    fn the_margin_is_exact_in_thousandths() {
+        let base = scored(8.0, |_| {});
+        let with = |x: f64| {
+            let mut v = base.clone();
+            v["train"]["score"] = json!(x);
+            v
+        };
+        // 1.001 − 0.991 is 0.0099999… in floating point, and still a fall of 0.010
+        assert_eq!(
+            verdict(&with(1.001), &with(0.991)).unwrap().0,
+            Verdict::Better
+        );
+        assert_eq!(
+            verdict(&with(0.991), &with(1.001)).unwrap().0,
+            Verdict::Worse
+        );
+        assert_eq!(
+            verdict(&with(1.001), &with(0.992)).unwrap().0,
+            Verdict::Same
+        );
     }
 
     #[test]
@@ -417,6 +538,13 @@ mod tests {
         let (v, why) = verdict(&base, &one_worse).unwrap();
         assert_eq!(v, Verdict::Worse);
         assert!(why[0].contains("H1-H2"), "{why:?}");
+        // a guard that loses its value breaks
+        let (v, why) = verdict(&base, &scored(6.0, |s| s.synth_pitch = f64::NAN)).unwrap();
+        assert_eq!(v, Verdict::Worse);
+        assert!(
+            why[0].contains("pitch error up (cents): no value"),
+            "{why:?}"
+        );
         // different songs are not comparable
         let mut other = scored(6.0, |_| {});
         other["train"]["songs"] = json!(["en001a"]);

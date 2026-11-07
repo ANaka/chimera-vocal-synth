@@ -796,6 +796,69 @@ fn r2(x: f64) -> Value {
     }
 }
 
+/// One voice's song-level values for the score (in `score::TERMS` order), from its measures on
+/// these notes. Each is NaN when no note gives it.
+fn song_values(notes: &[&Note], meas: &[&NoteMeas]) -> [f64; score::N_TERMS] {
+    let col = |f: &dyn Fn(&NoteMeas) -> f64| meas.iter().map(|m| f(m)).collect::<Vec<_>>();
+    let eligible: Vec<&&NoteMeas> = meas.iter().filter(|m| m.vib_eligible).collect();
+    let vib_share = if eligible.is_empty() {
+        f64::NAN
+    } else {
+        eligible.iter().filter(|m| m.vib_depth.is_finite()).count() as f64 / eligible.len() as f64
+    };
+    let onset = |start: Start| {
+        median(
+            &notes
+                .iter()
+                .zip(meas)
+                .filter(|(n, _)| n.phrase_start && n.starts_with() == start)
+                .map(|(_, m)| m.onset)
+                .collect::<Vec<_>>(),
+        )
+    };
+    [
+        mean(&col(&|m| m.bands[0])),
+        mean(&col(&|m| m.bands[1])),
+        mean(&col(&|m| m.bands[2])),
+        mean(&col(&|m| m.bands[3])),
+        mean(&col(&|m| m.bands[4])),
+        median(&col(&|m| m.h1h2)),
+        vib_share,
+        median(&col(&|m| m.vib_depth)),
+        median(&col(&|m| m.vib_rate)),
+        mean(&col(&|m| m.voiced)),
+        onset(Start::Vowel),
+        onset(Start::Voiceless),
+        median(&col(&|m| m.aperiodicity)),
+    ]
+}
+
+/// On how many of these notes the synth gives each guarded measure (`score::COVERAGE` order):
+/// a value that goes missing must not take its note out of the score unnoticed.
+fn coverage(notes: &[&Note], meas: &[&NoteMeas]) -> [u64; score::N_COVERAGE] {
+    let count = |f: &dyn Fn(&Note, &NoteMeas) -> bool| {
+        notes.iter().zip(meas).filter(|(n, m)| f(n, m)).count() as u64
+    };
+    let onset = |start: Start| {
+        count(&|n, m| n.phrase_start && n.starts_with() == start && m.onset.is_finite())
+    };
+    [
+        notes.len() as u64,
+        count(&|_, m| m.bands[0].is_finite()),
+        count(&|_, m| m.bands[1].is_finite()),
+        count(&|_, m| m.bands[2].is_finite()),
+        count(&|_, m| m.bands[3].is_finite()),
+        count(&|_, m| m.bands[4].is_finite()),
+        count(&|_, m| m.h1h2.is_finite()),
+        count(&|_, m| m.vib_eligible),
+        count(&|_, m| m.voiced.is_finite()),
+        onset(Start::Vowel),
+        onset(Start::Voiceless),
+        count(&|_, m| m.aperiodicity.is_finite()),
+        count(&|_, m| m.cents.is_finite()),
+    ]
+}
+
 fn r3(x: f64) -> Value {
     if x.is_finite() {
         json!((x * 1000.0).round() / 1000.0)
@@ -840,8 +903,11 @@ fn compare_song(
     // notes measured on both sides; those the planner could not place on time are reported
     // but left out of every statistic (their windows would hold the wrong sound)
     let mut kept: Vec<&Note> = Vec::new();
+    // the singer on every note, aligned or not: the score's units come from these
+    let mut human_all: Vec<NoteMeas> = Vec::with_capacity(notes.len());
     for (n, &vt0) in notes.iter().zip(&vowel_t0) {
         let h = ha.note(&human, n);
+        human_all.push(h.clone());
         let s = sa.note(&synth, n);
         let d = mcd(&h.cep, &s.cep);
         let bd: [f64; 5] = std::array::from_fn(|k| s.bands[k] - h.bands[k]);
@@ -924,42 +990,15 @@ fn compare_song(
         "envelopeLagSec": r2(lag), "envelopeCorr": r2(lag_r),
         "bandDiffDb": BAND_NAMES.iter().zip(&band_mean).map(|(n, v)| (n.to_string(), r2(*v))).collect::<serde_json::Map<_, _>>(),
     });
-    // the score's song-level values (singer, synth), unrounded, in score::TERMS order
-    fn side(p: &(NoteMeas, NoteMeas, f64), s: usize) -> &NoteMeas {
-        if s == 0 { &p.0 } else { &p.1 }
-    }
-    let with_bands: Vec<&(NoteMeas, NoteMeas, f64)> = per
-        .iter()
-        .filter(|p| p.0.bands[0].is_finite() && p.1.bands[0].is_finite())
-        .collect();
-    let level = |s: usize, k: usize| {
-        mean(
-            &with_bands
-                .iter()
-                .map(|p| side(p, s).bands[k])
-                .collect::<Vec<_>>(),
-        )
-    };
-    let med_of = |f: &dyn Fn(&NoteMeas) -> f64, s: usize| median(&col(f, s));
-    let pair = |f: &dyn Fn(usize) -> f64| (f(0), f(1));
-    let pairs: [(f64, f64); score::N_TERMS] = [
-        pair(&|s| level(s, 0)),
-        pair(&|s| level(s, 1)),
-        pair(&|s| level(s, 2)),
-        pair(&|s| level(s, 3)),
-        pair(&|s| level(s, 4)),
-        pair(&|s| med_of(&|m| m.h1h2, s)),
-        pair(&vib_share),
-        pair(&|s| med_of(&|m| m.vib_depth, s)),
-        pair(&|s| med_of(&|m| m.vib_rate, s)),
-        pair(&|s| mean(&col(&|m| m.voiced, s))),
-        pair(&|s| median(&onset_of(s, Start::Vowel))),
-        pair(&|s| median(&onset_of(s, Start::Voiceless))),
-        pair(&|s| med_of(&|m| m.aperiodicity, s)),
-    ];
+    let all_notes: Vec<&Note> = notes.iter().collect();
+    let singer: Vec<&NoteMeas> = per.iter().map(|p| &p.0).collect();
+    let synth_m: Vec<&NoteMeas> = per.iter().map(|p| &p.1).collect();
+    let (h_vals, s_vals) = (song_values(&kept, &singer), song_values(&kept, &synth_m));
     let song_score = score::SongScore {
         id: id.to_string(),
-        pairs,
+        singer_all: song_values(&all_notes, &human_all.iter().collect::<Vec<_>>()),
+        pairs: std::array::from_fn(|k| (h_vals[k], s_vals[k])),
+        coverage: coverage(&kept, &synth_m),
         notes: notes.len(),
         misaligned,
         dropped,
