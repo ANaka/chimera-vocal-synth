@@ -593,7 +593,7 @@ impl HumanVoice {
         out.velum_port = self.airway.frame.as_ref().map_or(0.0, |f| f.velum_port);
         out.f0 = self.glottis.f0_now;
         out.voicing = self.glottis.voicing;
-        out.p_lung = self.p_lung / CM_H2O;
+        out.p_lung = self.p_lung_now / CM_H2O; // the pressure applied, not the ramp's target
         out.out_rms = out_rms;
         out.noise_level = noise_level;
         out.noise_node = noise_node;
