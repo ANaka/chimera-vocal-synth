@@ -511,3 +511,39 @@ Whisper agrees with the user on the word errors (sheet → feet, and the j and c
 supports using it as the pronunciation judge. It disagrees on one: it heard "pushes" correctly in
 the female voice after the batch (before it heard "puffs"). It can't judge the pop or the buzz,
 since neither changes the words, so those need checks of their own.
+
+## Batch 2: pronunciation (from 2026-11-07)
+
+Batch 1 is merged (PR #16). The owner's listening (above) asked for pronunciation, so batch 2's
+judge is Whisper. See the README's "current batch" section for the rules.
+
+### Before the batch: the fixes and the Bright control (PR #19, not a hill-climb step)
+
+- **The tinny ring: fixed.** It was a 750 Hz buzz from the lung pressure stepping once per
+  control block. It now ramps across the block. Block-periodic share of a word's tail ~20 % →
+  under 1 %.
+- **The pop on "sharp": not fixed.** The tongue squeezes the air between the closed lips and its
+  /t/ seal to 11x the lungs' pressure (88 cmH2O). The /p/ releases at +7 dB re the sentence's
+  loudest vowel (male). Absorbing a sealed pocket's wall motion halved it but broke the engine's
+  adiabatic-compression test and the creatures' parity; reverted. The ignored test
+  `the_p_of_sharp_does_not_pop` in `tests/consonant_artifacts.rs` measures it.
+- **Bright control** (`VoiceSource.brightness`, default 0.25 = the current sound).
+- Against batch 1's best: singer 0.623 → 0.582 (BETTER, onsets), held-out 0.791 → 0.789; speech
+  39.4 → 40.7 %; speed 18.2 % of one core.
+
+### The judge for batch 2
+
+- `tools/asr/sentences.tsv` gained 20 held-out sentences (set column "held"): Harvard list 2, and
+  ten unpredictable sentences dense in sh, ch and j. They never decide.
+- `speech_wer.py --against` now says BETTER (training word error rate down by at least 1.5
+  points), WORSE (up by more than 3) or NO CLEAR CHANGE, and reports the held-out rate.
+- The old batch-1 directories are kept as `out/hill/batch1-baseline` and `out/hill/batch1-best`.
+
+### Batch 2 baseline (commit 4980e3b, `out/hill/baseline`)
+
+- Speech, training: **40.73 %** (harvard female 37.5, male 37.5; nonsense female 42.25, male
+  46.48). Held-out: **50.67 %** (harvard female 35.44, male 39.24; nonsense female 70.42, male
+  60.56).
+- Singer: training 0.582, held-out 0.789.
+- Speed: 18.2 % of one core (`os=2`).
+- The /p/ of "sharp": +7.0 dB re the loudest vowel, oral pressure 11.1x the lungs' (male).
