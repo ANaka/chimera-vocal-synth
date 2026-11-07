@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
@@ -70,9 +70,13 @@ pub struct Shared {
     pub sung: AtomicI32,
     /// MIDI note sounding now (−1: none)
     pub note: AtomicI32,
-    /// output level (peak-held RMS) and DSP load (peak since the editor last read it)
+    /// output level (peak-held RMS)
     pub level: AtomicF32,
-    pub load: AtomicF32,
+    /// DSP load since the editor last read it: time spent in `process` and audio time rendered
+    /// (ns), and the worst single block (fraction of its duration)
+    pub busy_ns: AtomicU64,
+    pub audio_ns: AtomicU64,
+    pub load_peak: AtomicF32,
     pub sample_rate: AtomicF32,
     pub block: AtomicI32,
     /// the engine panicked: the plugin is silent until it is re-created
@@ -182,18 +186,18 @@ impl Plugin for Chimera {
     }
 
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, _context: &mut impl InitContext<Self>) -> bool {
-        // the airway goes unstable below this (NaN at 22.05 kHz); hosts run at 44.1 kHz and up
-        if config.sample_rate < MIN_SAMPLE_RATE {
-            nih_error!("CHIMERA needs a sample rate of at least {MIN_SAMPLE_RATE} Hz");
-            return false;
-        }
         // everything that allocates happens here, off the audio thread
         let lyrics = self.params.lyrics.read().unwrap().clone();
         self.shared.set_lyrics(&self.params, &lyrics);
         if let Some(s) = self.shared.pending.lock().unwrap().take() {
             self.sing.set_syllables(s);
         }
-        self.engine = Some(Engine::new(config.sample_rate as f64));
+        // the airway goes unstable below MIN_SAMPLE_RATE (NaN at 22.05 kHz): stay silent there
+        // rather than refusing to activate, which some hosts' plugin scans treat as an error
+        self.engine = (config.sample_rate >= MIN_SAMPLE_RATE).then(|| Engine::new(config.sample_rate as f64));
+        if self.engine.is_none() {
+            nih_error!("CHIMERA needs a sample rate of at least {MIN_SAMPLE_RATE} Hz; it stays silent");
+        }
         self.mono = vec![0.0; config.max_buffer_size as usize];
         self.shared.sample_rate.store(config.sample_rate);
         self.shared.block.store(config.max_buffer_size as i32, Ordering::Relaxed);
@@ -257,9 +261,13 @@ impl Plugin for Chimera {
         let rms = (sum / n.max(1) as f32).sqrt();
         self.level = rms.max(self.level * 0.9);
         self.shared.level.store(self.level);
-        let used = started.elapsed().as_secs_f32() / (n.max(1) as f32 / self.shared.sample_rate.load());
-        if used > self.shared.load.load() {
-            self.shared.load.store(used);
+        let busy = started.elapsed().as_nanos() as u64;
+        let audio = (n as f64 / self.shared.sample_rate.load() as f64 * 1e9) as u64;
+        self.shared.busy_ns.fetch_add(busy, Ordering::Relaxed);
+        self.shared.audio_ns.fetch_add(audio, Ordering::Relaxed);
+        let used = busy as f32 / audio.max(1) as f32;
+        if used > self.shared.load_peak.load() {
+            self.shared.load_peak.store(used);
         }
         self.shared.cursor.store(self.sing.cursor as i32, Ordering::Relaxed);
         self.shared.sung.store(self.sing.sung.map_or(-1, |i| i as i32), Ordering::Relaxed);
@@ -332,5 +340,45 @@ mod tests {
         for fs in [1000.0, 8000.0, 11025.0, 16000.0, 22050.0, 32000.0, 44100.0, 384000.0, 768000.0] {
             println!("{fs:>8} Hz: {:?}", sing_at(fs));
         }
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    use super::*;
+
+    #[test]
+    #[ignore = "measurement: start-up and per-note costs"]
+    fn costs() {
+        let t = Instant::now();
+        let _ = g2p();
+        println!("dictionary parse: {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
+        let t = Instant::now();
+        let mut e = Engine::new(44100.0);
+        println!("Engine::new: {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
+        let mut s = Sing::new();
+        s.set_syllables(lyrics_to_syllables(DEFAULT_LYRICS, g2p()));
+        let mut buf = vec![0.0f32; 256];
+        let block = 256.0 / 44100.0;
+        let (mut worst, mut total, mut blocks, mut plan_worst) = (0.0f64, 0.0f64, 0, 0.0f64);
+        for i in 0..400 {
+            if i % 40 == 0 {
+                let t = Instant::now();
+                s.note_on(&mut e, 60 + (i / 40) as u8, 96.0);
+                plan_worst = plan_worst.max(t.elapsed().as_secs_f64());
+            }
+            if i % 40 == 30 {
+                let t = Instant::now();
+                s.note_off(&mut e, 60 + (i / 40) as u8);
+                plan_worst = plan_worst.max(t.elapsed().as_secs_f64());
+            }
+            let t = Instant::now();
+            e.render(&mut buf);
+            let d = t.elapsed().as_secs_f64();
+            worst = worst.max(d);
+            total += d;
+            blocks += 1;
+        }
+        println!("render: mean {:.0}% worst {:.0}% of a 256-sample block; worst note on/off plan {:.2} ms ({:.0}% of a block)", 100.0 * total / blocks as f64 / block, 100.0 * worst / block, plan_worst * 1e3, 100.0 * plan_worst / block);
     }
 }
