@@ -627,3 +627,18 @@ judge is Whisper. See the README's "current batch" section for the rules.
   - After that, the /ʃ/'s level: the female /ʃ/ is 21 dB below its vowel and the male 11 dB.
     The teeth source's gain, or how its weight depends on the distance behind the teeth (2.5 cm
     for /ʃ/, just short of where `w_dist` starts to fade, at 2.6), is the place to look.
+
+### Decision after experiment 11: the geometry and beat-sequencer snapshots are blessable
+
+Experiment 11 changed the mouth's area rule in front of the tongue tip and recalibrated the vowel
+tables, as the rules ask. Two TypeScript-era snapshots then failed by design: `golden_geometry`
+(the area functions) and the beat sounds' and beat player's gestures in `planning.json` (their
+vowel targets moved by 0.001). Like the audio and planner fixtures in batch 1, they are now
+blessed with `CHIMERA_BLESS=1` (`golden_geometry.rs`, `golden_planning.rs`). On the current engine
+blessing them changes no value (geometry within 7e-14; planning only in number formatting and
+two last-digit floats). The beat notation stays fixed.
+
+`geometry_continuity` is a real check, not a snapshot, so experiment 11's failure there stands: its
+recalibrated child /ə/ posture lands on a jump in the area function at the top of the pharynx,
+near the raised velum. That jump was already there; experiment 12 fixes it together with
+experiment 11's change.

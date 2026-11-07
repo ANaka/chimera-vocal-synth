@@ -132,12 +132,14 @@ speech judged against the batch's baseline and required to be not WORSE):
 3. The bench is no more than **10 % slower** than the batch's baseline.
 4. **The tests pass.**
    1. Bless the golden fixtures in `crates/chimera/tests/golden`. They are snapshots of the
-      sound (the `.f32` files) and of the planners' output (the utterance, duration, phrase,
-      song and live-note plans in `planning.json`), and they change with any change to either.
-      Run `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast` **twice**: `engine.rs` reads
-      a fixture that `golden_planning` blesses, so its first run can fail. The beat
-      sequencer's expectations in `planning.json` are not blessed: a voice change shouldn't
-      move them.
+      sound (the `.f32` files), of the planners' output (the utterance, duration, phrase, song
+      and live-note plans, the beat sounds' gestures and the beat player's output, in
+      `planning.json`) and of the tract geometry (area functions, contacts and outlines, in
+      `geometry.json`), and they change with any change to these. Run `CHIMERA_BLESS=1 cargo
+      test --workspace --no-fail-fast` **twice**: `engine.rs` reads a fixture that
+      `golden_planning` blesses, so its first run can fail. The beat notation's expectations
+      are not blessed. Other geometry tests (`geometry_continuity`, `airway`) are real checks,
+      not snapshots: if one fails, fix the cause as part of the change.
    2. Then run `cargo test --workspace --no-fail-fast` and `bun run wasm && bun test tests`.
       Every test must pass, with one exception. If your change alters the airway's linear
       acoustics on purpose (wall or radiation losses, tract geometry), the airway checks in
