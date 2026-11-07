@@ -4,7 +4,8 @@
  */
 import workletUrl from "../worklet/processor.ts?worker&url";
 import { chimeraModule } from "../wasm/chimera.ts";
-import type { ToWorklet, FromWorklet, TelemetryMessage, BodyName, PlannedMessage, CreatureTelemetryMessage } from "../worklet/protocol.ts";
+import type { ToWorklet, FromWorklet, TelemetryMessage, PlannedMessage, CreatureTelemetryMessage } from "../worklet/protocol.ts";
+import type { BodyMix } from "../wasm/types.ts";
 import type { HumanArtic } from "../wasm/types.ts";
 import type { VoiceSource } from "../wasm/types.ts";
 
@@ -209,7 +210,7 @@ export class AudioEngine {
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
   }
 
-  setBody(body: BodyName): void {
+  setBody(body: BodyMix): void {
     this.send({ type: "body", body });
   }
 

@@ -2,14 +2,13 @@ import { create } from "zustand";
 import { engine } from "../audio/AudioEngine.ts";
 import { DEFAULT_SOURCE, type VoiceSource } from "../wasm/engine.ts";
 import { NEUTRAL, restTip, type HumanArtic } from "../wasm/engine.ts";
-import type { BodyName } from "../worklet/protocol.ts";
+import { defaultF0, PRESETS, sameBody, type BodyMix } from "./body.ts";
 import { creatureById } from "../wasm/engine.ts";
 import type { ParamDef } from "../wasm/types.ts";
 import { BEAT_PRESETS, BASS_NOTE, beatReady, parseBeat, type BeatStep } from "../wasm/engine.ts";
 import { singNoteOn, singNoteOff, stopSinging, ensureDictionary } from "./singing.ts";
+import { stopSpeaking } from "./speech.ts";
 import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
-
-export const DEFAULT_F0: Record<BodyName, number> = { male: 110, female: 205, child: 260 };
 
 export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox";
 
@@ -27,13 +26,16 @@ export interface ViewOptions {
   particles: boolean;
   grid: boolean;
   calipers: boolean;
+  /** the face screen shows the head in 3D (turn it with the pointer; no handles) */
+  threeD: boolean;
 }
 
 interface State {
   started: boolean;
   starting: boolean;
   startError: string | null;
-  body: BodyName;
+  /** the body shown; while the body pad is dragged it runs ahead of the voice (see previewBody) */
+  body: BodyMix;
   source: VoiceSource;
   artic: HumanArtic;
   tipFree: boolean;
@@ -67,7 +69,10 @@ interface State {
   beatHit: (id: string) => void;
   setMic: (on: boolean) => void;
   start: () => Promise<void>;
-  setBody: (b: BodyName) => void;
+  /** switch the voice to this body (rebuilds its airway) */
+  setBody: (b: BodyMix) => void;
+  /** show this body without rebuilding the voice yet (a drag in progress; setBody commits it) */
+  previewBody: (b: BodyMix) => void;
   setSource: (v: Partial<VoiceSource>) => void;
   setArtic: (v: Partial<HumanArtic>, tipFree?: boolean) => void;
   setVolume: (v: number) => void;
@@ -116,7 +121,7 @@ export const useStore = create<State>((set, get) => ({
   started: false,
   starting: false,
   startError: null,
-  body: "male",
+  body: PRESETS.male,
   source: { ...DEFAULT_SOURCE },
   artic: (() => {
     const tip = restTip(NEUTRAL.jaw, NEUTRAL.tbX, NEUTRAL.tbY);
@@ -126,7 +131,7 @@ export const useStore = create<State>((set, get) => ({
   volume: 0.8,
   hold: false,
   heldNotes: [],
-  view: { pressure: true, particles: true, grid: false, calipers: true },
+  view: { pressure: true, particles: true, grid: false, calipers: true, threeD: false },
   mode: "play",
   setMode: (m) => {
     const prev = get().mode;
@@ -135,7 +140,7 @@ export const useStore = create<State>((set, get) => ({
     // notes held across the switch would keep breathing into the other voice
     set({ mode: m, heldNotes: [] });
     // speech belongs to Speak: under a creature the human clock stops and it would resume later
-    if (prev === "speak" || m === "bestiary") engine.stopSpeech();
+    if (prev === "speak" || m === "bestiary") stopSpeaking();
     if ((prev === "bestiary") !== (m === "bestiary")) {
       // a sustain belongs to the voice it was started on
       set({ hold: false });
@@ -240,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
         // anything set before audio existed was not delivered: send the whole state now
         const s = get();
         engine.setVolume(s.volume);
-        if (s.body !== "male") engine.setBody(s.body);
+        if (!sameBody(s.body, PRESETS.male)) engine.setBody(s.body);
         engine.setSource(s.source);
         engine.setArtic(s.artic, s.tipFree);
         if (s.mode === "bestiary") engine.setCreature(s.creature, s.cparams[s.creature]);
@@ -262,10 +267,13 @@ export const useStore = create<State>((set, get) => ({
     session++;
     // the new voice starts without the old one's score: a sung note would hang
     if (get().mode === "sing") stopSinging();
-    const f0 = DEFAULT_F0[b];
+    const f0 = defaultF0(b);
+    // nor does speech carry over (and the new voice's clock starts again from zero)
+    if (get().mode === "speak") stopSpeaking();
     set((s) => ({ body: b, source: { ...s.source, f0 } }));
     engine.setBody(b);
   },
+  previewBody: (b) => set({ body: b }),
   setSource: (v) => {
     set((s) => ({ source: { ...s.source, ...v } }));
     engine.setSource(v);

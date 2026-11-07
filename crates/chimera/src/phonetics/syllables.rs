@@ -4,6 +4,7 @@
 //! Typed hyphens force syllable breaks; a lone "-" (or "~") holds the previous vowel onto the
 //! next note (melisma), as in vocaloid editors.
 
+use crate::anatomy::human::BodyMix;
 use super::english::js_is_space;
 use super::planner::is_vowel;
 use super::{Segment, Syllable};
@@ -30,7 +31,7 @@ pub struct SyllableParts {
 
 /// Split one word's segments into onset / nucleus / coda syllables.
 pub fn syllabify_segments(segs: &[Segment]) -> Vec<SyllableParts> {
-    let vi: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| is_vowel(&s.ipa, "male")).map(|(i, _)| i).collect();
+    let vi: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| is_vowel(&s.ipa, BodyMix::MALE)).map(|(i, _)| i).collect();
     if vi.is_empty() {
         return Vec::new();
     }

@@ -14,7 +14,7 @@ import { planSong, planNoteOn, planNoteOff, planMelisma } from "../wasm/engine.t
 import { EXHALE_LABEL } from "../wasm/engine.ts";
 import { DEMO_SONGS } from "../wasm/engine.ts";
 import type { Gesture } from "../wasm/types.ts";
-import type { BodyName } from "../worklet/protocol.ts";
+import { nearestBody, type BodyMix } from "./body.ts";
 
 /** A note on the piano roll, on the voice clock (s); t1 is null while it is held. */
 export interface RollNote {
@@ -90,6 +90,30 @@ interface Sounding {
 }
 
 let sounding: Sounding | null = null;
+
+/** How a syllable is written at the mouth: a hyphen when its word goes on. */
+const written = (s: Syllable) => s.text + (s.wordEnd ? "" : "-");
+
+/**
+ * The syllable being sung now, for the words at the mouth: the demo's note under the clock, or
+ * the held key's. A melisma keeps its syllable's key, so the word stays while the pitch moves.
+ */
+export function sungNow(): { key: unknown; text: string } | null {
+  const d = demoRun;
+  if (d) {
+    if (d.offset === null) return null;
+    const t = now() - d.offset;
+    // notes follow one another without a gap, so a melisma's syllable stays put
+    const k = d.times.findIndex(([a, b]) => t >= a && t < b);
+    return k < 0 ? null : { key: `${d.id}:${d.parent[k]}`, text: d.shown[k] };
+  }
+  return sounding ? { key: sounding, text: written(sounding.syl) } : null;
+}
+
+/** The syllable whose vowel is sounding from the keys now (null when no key sings). */
+export function soundingSyllable(): string | null {
+  return sounding?.syl.text ?? null;
+}
 /** keys down, oldest first */
 let keys: number[] = [];
 /** gesture tags: a note uses tag (articulation, breath) and tag + 1 (pitch, vibrato) */
@@ -119,7 +143,7 @@ function parentOf(syls: Syllable[], i: number): Syllable {
   return AH;
 }
 
-function startNote(syl: Syllable, midi: number, velocity: number, body: BodyName, text: string): void {
+function startNote(syl: Syllable, midi: number, velocity: number, body: BodyMix, text: string): void {
   const t = now();
   const tag = nextTag;
   nextTag += 2;
@@ -150,7 +174,7 @@ function glide(midi: number, text: string): void {
   s.note = addNote(midi, t, text);
 }
 
-export function singNoteOn(midi: number, velocity: number, body: BodyName): void {
+export function singNoteOn(midi: number, velocity: number, body: BodyMix): void {
   stopDemo();
   keys = keys.filter((k) => k !== midi).concat(midi);
   const st = useSing.getState();
@@ -163,7 +187,7 @@ export function singNoteOn(midi: number, velocity: number, body: BodyName): void
   useSing.setState({ cursor: (i + 1) % syls.length });
 }
 
-export function singNoteOff(midi: number, body: BodyName): void {
+export function singNoteOff(midi: number, body: BodyMix): void {
   keys = keys.filter((k) => k !== midi);
   const s = sounding;
   if (!s || s.midi !== midi) return;
@@ -196,6 +220,9 @@ interface DemoRun {
   times: [number, number][];
   midi: number[];
   text: string[];
+  /** what the mouth shows per note, and the note whose syllable it is (a melisma's parent) */
+  shown: string[];
+  parent: number[];
   end: number;
   /** voice clock of plan time 0, once the worklet has it */
   offset: number | null;
@@ -213,7 +240,7 @@ engine.onPlanned((m) => {
 });
 
 /** Sing a demo song (after `ready`, e.g. audio startup, resolves; unless stopped meanwhile). */
-export async function playDemo(name: string, body: BodyName, ready?: () => Promise<void>): Promise<void> {
+export async function playDemo(name: string, body: BodyMix, ready?: () => Promise<void>): Promise<void> {
   const song = DEMO_SONGS.find((s) => s.name === name);
   if (!song) return;
   stopSinging();
@@ -227,7 +254,7 @@ export async function playDemo(name: string, body: BodyName, ready?: () => Promi
   if (token !== demoToken) return;
   const syl = lyricsToSyllables(song.lyrics);
   if (!syl.length) return;
-  const shift = song.octave[body] * 12;
+  const shift = song.octave[nearestBody(body)] * 12;
   const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));
   const t0 = 0.35;
   const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato });
@@ -239,7 +266,10 @@ export async function playDemo(name: string, body: BodyName, ready?: () => Promi
     return [a, t];
   });
   const id = engine.schedule({ gestures: plan.gestures, segments: plan.segments, end: plan.end });
-  demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), end: plan.end, offset: null };
+  const parent: number[] = [];
+  notes.forEach((n, i) => parent.push(n.syl.melisma && i > 0 ? parent[i - 1] : i));
+  const shown = parent.map((p) => written(notes[p].syl));
+  demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), shown, parent, end: plan.end, offset: null };
   useSing.setState({ lyrics: song.lyrics, syllables: syl, cursor: 0, demo: song.name, demoAt: -1 });
 }
 

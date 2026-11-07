@@ -7,6 +7,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { initEngine, WasmVoice } from "./harness.ts";
 import type { Gesture } from "../src/wasm/types.ts";
+const MALE = { female: 0, child: 0 };
 
 await initEngine();
 const { activation } = await import("../src/wasm/engine.ts");
@@ -81,26 +82,26 @@ describe("Sing mode, live keys", () => {
     run(0.1);
 
     // first key: /la/ on A2
-    singNoteOn(45, 96, "male");
+    singNoteOn(45, 96, MALE);
     expect(useSing.getState().cursor).toBe(1);
     const a = run(0.5);
     expect(Math.abs(cents(median(a.late(a.f0)), 45))).toBeLessThan(30);
     expect(Math.min(...a.late(a.voicing))).toBeGreaterThan(0.5);
 
     // second key pressed while the first is down: legato into /ma/ on C3 (the lips close once)
-    singNoteOn(48, 96, "male");
+    singNoteOn(48, 96, MALE);
     const b = run(0.5);
     expect(Math.abs(cents(median(b.late(b.f0)), 48))).toBeLessThan(30);
     expect(Math.min(...b.minOral)).toBeLessThan(0.05); // the /m/ closure
     expect(Math.min(...b.late(b.minOral))).toBeGreaterThan(0.2); // open again on the vowel
 
     // releasing the first key (no longer sounding) changes nothing
-    singNoteOff(45, "male");
+    singNoteOff(45, MALE);
     const c = run(0.2);
     expect(Math.min(...c.voicing)).toBeGreaterThan(0.5);
 
     // melisma: the vowel carries on to E3 without a consonant
-    singNoteOn(52, 96, "male");
+    singNoteOn(52, 96, MALE);
     expect(useSing.getState().cursor).toBe(0); // wrapped round
     const d = run(0.5);
     expect(Math.abs(cents(median(d.late(d.f0)), 52))).toBeLessThan(30);
@@ -108,13 +109,13 @@ describe("Sing mode, live keys", () => {
     expect(Math.min(...d.voicing)).toBeGreaterThan(0.5);
 
     // releasing E3 while C3 is still down glides back to C3 on the same vowel
-    singNoteOff(52, "male");
+    singNoteOff(52, MALE);
     const e = run(0.4);
     expect(Math.abs(cents(median(e.late(e.f0)), 48))).toBeLessThan(30);
     expect(Math.min(...e.voicing)).toBeGreaterThan(0.5);
 
     // last key up: the note ends and the voice falls silent
-    singNoteOff(48, "male");
+    singNoteOff(48, MALE);
     const f = run(0.6);
     let peak = 0;
     for (const r of [...a.rms, ...b.rms]) peak = Math.max(peak, r);
@@ -126,9 +127,9 @@ describe("Sing mode, live keys", () => {
       voice = new WasmVoice(FS);
       useSing.getState().setLyrics("ah");
       run(0.05);
-      singNoteOn(50, velocity, "male");
+      singNoteOn(50, velocity, MALE);
       const r = run(0.5);
-      singNoteOff(50, "male");
+      singNoteOff(50, MALE);
       run(0.4);
       return { rms: median(r.late(r.rms)) };
     };
@@ -143,13 +144,13 @@ describe("Sing mode, live keys", () => {
     const schedule = engineStub.schedule as typeof fakeEngine.schedule;
     engineStub.schedule = (plan: { gestures: Gesture[] }) => (scheduled++, schedule(plan));
     let go!: () => void;
-    const waiting = playDemo("Made of air", "male", () => new Promise<void>((r) => (go = r)));
+    const waiting = playDemo("Made of air", MALE, () => new Promise<void>((r) => (go = r)));
     stopSinging(); // e.g. the mode changed while audio was starting
     go();
     await waiting;
     expect(scheduled).toBe(0);
     expect(useSing.getState().demo).toBeNull();
-    await playDemo("Made of air", "male", () => Promise.resolve());
+    await playDemo("Made of air", MALE, () => Promise.resolve());
     expect(scheduled).toBe(1);
     expect(useSing.getState().demo).toBe("Made of air");
     stopSinging();
@@ -161,16 +162,16 @@ describe("Sing mode, live keys", () => {
     useSing.getState().setVibrato(0);
     useSing.getState().setLyrics("cat dog");
     run(0.05);
-    singNoteOn(50, 96, "male");
+    singNoteOn(50, 96, MALE);
     run(0.4);
-    singNoteOff(50, "male"); // "cat": its /t/ and the breath-out are scheduled
+    singNoteOff(50, MALE); // "cat": its /t/ and the breath-out are scheduled
     expect(gesturesOf().some((g) => g.label === "exhale")).toBe(true);
     run(0.02);
-    singNoteOn(52, 96, "male"); // "dog" straight after
+    singNoteOn(52, 96, MALE); // "dog" straight after
     expect(gesturesOf().some((g) => g.label === "exhale")).toBe(false);
     const d = run(0.4);
     expect(Math.min(...d.late(d.voicing))).toBeGreaterThan(0.5);
-    singNoteOff(52, "male"); // "dog": its /g/ ending is scheduled...
+    singNoteOff(52, MALE); // "dog": its /g/ ending is scheduled...
     run(0.01);
     stopSinging(); // ...and the mode changes at once
     run(0.06);
@@ -182,13 +183,13 @@ describe("Sing mode, live keys", () => {
     voice = new WasmVoice(FS);
     useSing.getState().setLyrics("cats dogs");
     run(0.05);
-    singNoteOn(50, 96, "male");
+    singNoteOn(50, 96, MALE);
     run(0.3);
-    singNoteOff(50, "male"); // "cats": /ts/ and breath-out
+    singNoteOff(50, MALE); // "cats": /ts/ and breath-out
     run(0.01);
-    singNoteOn(52, 96, "male");
+    singNoteOn(52, 96, MALE);
     run(0.03);
-    singNoteOff(52, "male"); // "dogs" released quickly, while the /ts/ is still going
+    singNoteOff(52, MALE); // "dogs" released quickly, while the /ts/ is still going
     run(0.01);
     stopSinging();
     run(0.08);
@@ -224,7 +225,7 @@ describe("keys pressed before the audio has started", () => {
     scheduled = 0;
     const before = useSing.getState().cursor;
     useStore.getState().noteOn(52);
-    useStore.getState().setBody("female");
+    useStore.getState().setBody({ female: 1, child: 0 });
     startAudio();
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));

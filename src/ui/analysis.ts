@@ -3,10 +3,8 @@
  * engine): geometry frames for drawing, the transfer function and formants for display, and
  * vowel-space interpolation for the vowel map. Never runs inside the audio thread.
  */
-import { airwayModel, airwayFrame, airwayAreas, airwayTransfer, TractMap, BODY_MALE, BODY_FEMALE, BODY_CHILD, NEUTRAL, ARTIC_KEYS, VOWELS, VOWEL_TARGETS, type AirwayModel, type HumanArtic, type HumanBody, type HumanFrame } from "../wasm/engine.ts";
-import type { BodyName } from "../worklet/protocol.ts";
-
-export const BODIES: Record<BodyName, HumanBody> = { male: BODY_MALE, female: BODY_FEMALE, child: BODY_CHILD };
+import { airwayModel, dropAirwayModel, airwayFrame, airwayAreas, airwayTransfer, TractMap, NEUTRAL, ARTIC_KEYS, VOWELS, VOWEL_TARGETS, type AirwayModel, type HumanArtic, type HumanBody, type HumanFrame } from "../wasm/engine.ts";
+import { bodyWeights, type BodyMix } from "./body.ts";
 
 export interface VowelPoint {
   ipa: string;
@@ -17,8 +15,8 @@ export interface VowelPoint {
 }
 
 export class VoiceModel {
-  readonly body: BodyName;
-  /** the body's dimensions */
+  readonly body: BodyMix;
+  /** the body's dimensions (blended, as the engine builds it) */
   readonly bodyParams: HumanBody;
   /** template ↔ body coordinates */
   readonly tract: TractMap;
@@ -31,21 +29,39 @@ export class VoiceModel {
   private tfKey = "";
   private tf: { freqs: number[]; db: number[]; formants: number[] } | null = null;
 
-  constructor(body: BodyName, sampleRate: number) {
+  constructor(body: BodyMix, sampleRate: number) {
     this.body = body;
-    this.bodyParams = BODIES[body];
-    this.tract = new TractMap(this.bodyParams);
     this.model = airwayModel(body, sampleRate);
+    this.bodyParams = this.model.body;
+    this.tract = new TractMap(this.bodyParams);
     this.nPh = this.model.nPh;
     this.nOr = this.model.nOr;
-    const table = VOWEL_TARGETS[body] ?? {};
-    this.vowels = VOWELS.filter((v) => table[v.ipa]).map((v) => ({
-      ipa: v.ipa,
-      example: v.example,
-      F1: table[v.ipa].formants[0],
-      F2: table[v.ipa].formants[1],
-      artic: table[v.ipa].artic,
-    }));
+    // calibrated vowels of the presets, blended by the body's weights (as the engine plans them;
+    // the formants are a blend too, close to what this body produces)
+    const parts = bodyWeights(body)
+      .filter(([, w]) => w > 0)
+      .map(([n, w]) => ({ w, table: VOWEL_TARGETS[n] ?? {} }));
+    this.vowels = VOWELS.filter((v) => parts.every((p) => p.table[v.ipa])).map((v) => {
+      const at = (f: (t: (typeof parts)[number]["table"][string]) => number | undefined) => {
+        let acc = 0, ws = 0;
+        for (const p of parts) {
+          const x = f(p.table[v.ipa]);
+          if (x !== undefined) (acc += p.w * x), (ws += p.w);
+        }
+        return ws > 0 ? acc / ws : undefined;
+      };
+      const artic: Partial<HumanArtic> = {};
+      for (const k of ARTIC_KEYS) {
+        const x = at((t) => t.artic[k]);
+        if (x !== undefined) artic[k] = x;
+      }
+      return { ipa: v.ipa, example: v.example, F1: at((t) => t.formants[0])!, F2: at((t) => t.formants[1])!, artic };
+    });
+  }
+
+  /** Free the engine's model; this VoiceModel must not be used afterwards. */
+  dispose(): void {
+    dropAirwayModel(this.model);
   }
 
   static articFromArray(arr: ArrayLike<number>): HumanArtic {

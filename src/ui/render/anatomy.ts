@@ -1,16 +1,25 @@
 /**
- * Real-time-MRI style midsagittal renderer for the human model.
- * Tissue: T1-like grayscale (fat/marrow bright, muscle mid, cortical bone & teeth & air black)
- * with soft edges and film grain. Physics overlays: acoustic pressure RMS (hot scale) inside
- * the airway, airflow particles at local particle velocity u = U/A, turbulence at the active
- * noise source. Handles for direct manipulation.
+ * Vector-display midsagittal renderer for the human model (see docs/mockups/play.html).
+ * The anatomy is drawn as glowing outlines: blue for the body, the four handled articulators in
+ * their slot colours (tongue green, jaw red, lips pink, soft palate white). Physics overlays:
+ * acoustic pressure RMS lights each cross-section line of the airway (amber heat), airflow
+ * streaks move at the local particle velocity u = U/A, turbulence shows as white dots at the
+ * active noise source, and the tongue, jaw and lips leave a fading afterglow.
+ *
+ * Everything is in CSS pixels; the caller pre-scales the context by devicePixelRatio and adds
+ * the glow pass afterwards.
  */
 import type { HumanArtic, HumanFrame } from "../../wasm/types.ts";
 import type { Vec } from "./geom.ts";
-import { rotateAbout, dist, catmullRom } from "./geom.ts";
 import type { TelemetryMessage } from "../../worklet/protocol.ts";
 import type { VoiceModel } from "../analysis.ts";
-import { C, hot, pressureLevel } from "../colors.ts";
+import { V, heat, pressureLevel } from "../colors.ts";
+import { beam, beamPts, chaikin, dot, handle, label, ring, seg, type Pt } from "./vector.ts";
+import { buildProfile, Gaze, jawFn, VIEW, type Profile } from "./profile.ts";
+import { drawReadouts, type Slot } from "./readouts.ts";
+import { Expression } from "./expression.ts";
+
+export type { Slot } from "./readouts.ts";
 
 export type HandleId = "tongue" | "tip" | "jaw" | "lips" | "velum" | "larynx";
 
@@ -18,6 +27,29 @@ export interface Handle {
   id: HandleId;
   pos: Vec; // body coordinates (cm)
   label: string;
+}
+
+/** where the articulators' handles sit (body cm) */
+export function faceHandles(model: VoiceModel, f: HumanFrame, a: HumanArtic): Handle[] {
+  const t = model.tract;
+  const J = jawFn(model, a);
+  const lips = { x: (f.upperLip[6].x + f.lowerLip[6].x) / 2 + 0.15, y: (f.upperLip[6].y + f.lowerLip[6].y) / 2 };
+  return [
+    { id: "tongue", pos: f.tongueCenter, label: "Tongue body" },
+    { id: "tip", pos: f.tip, label: "Tongue tip" },
+    { id: "jaw", pos: J(7.5, 4.9), label: "Jaw" },
+    { id: "lips", pos: lips, label: "Lips" },
+    { id: "velum", pos: f.velum[Math.floor(f.velum.length / 2)], label: "Soft palate" },
+    { id: "larynx", pos: { x: f.glottis.x + 1.2 * t.scale, y: f.glottis.y }, label: "Larynx" },
+  ];
+}
+
+/** What an overlay needs of a face view: where a body point lands on screen, and the scale there. */
+export interface FaceView {
+  handles(model: VoiceModel, f: HumanFrame, a: HumanArtic): Handle[];
+  X(p: Vec): number;
+  Y(p: Vec): number;
+  readonly pxPerCm: number;
 }
 
 export interface ViewFlags {
@@ -35,332 +67,277 @@ interface Particle {
   py: number;
 }
 
-const VIEW = { x0: -7.2, x1: 12.2, y0: -4.2, y1: 15.8 };
+/** what the tongue, jaw and lips looked like a moment ago */
+interface Echo {
+  t: number;
+  tongue: Vec[];
+  jaw: Vec[];
+  upperLip: Pt[];
+  lowerLip: Pt[];
+}
+
+const ECHO_AGES = [0.09, 0.06, 0.03];
+
+/** top of the cranium in body cm (profile.ts's skin outline peaks at 22.9), with a little air */
+const CROWN = 23.4;
+
+const smoothstep = (a: number, b: number, x: number): number => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The side view's brow and eyelids (body cm): the brow rides up with the pitch and knits on low
+ * notes; the lids, two arcs over the front of the eyeball, meet when the eye blinks or closes on a
+ * long note, and open wide on a high one.
+ */
+export function eyeFeatures(c: Vec, k: number, e: Expression): { pts: Vec[]; w: number; alpha: number }[] {
+  const rx = 1.22 * k, ry = 1.08 * k;
+  const arc = (a0: number, a1: number): Vec[] => {
+    const o: Vec[] = [];
+    for (let i = 0; i <= 14; i++) {
+      const an = a0 + ((a1 - a0) * i) / 14;
+      o.push({ x: c.x + rx * Math.cos(an), y: c.y + ry * Math.sin(an) });
+    }
+    return o;
+  };
+  const deg = Math.PI / 180;
+  const wide = Math.max(0, e.brow);
+  // the upper lid comes down to meet the lower
+  const upEnd = 30 * deg + 14 * deg * wide, lo = -32 * deg;
+  const up = upEnd + (lo - upEnd) * e.lid;
+  const brow: Vec[] = [];
+  const raise = 0.42 * k * e.brow, knit = 0.3 * k * Math.max(0, -e.brow);
+  for (let i = 0; i <= 12; i++) {
+    const u = -1 + i / 6; // −1 back, +1 front
+    const front = (1 + u) / 2;
+    brow.push({ x: c.x + 0.1 * k + 0.9 * k * u, y: c.y + 1.4 * k + 0.2 * k * (1 - u * u) + raise - knit * front });
+  }
+  return [
+    { pts: arc(100 * deg, up), w: 1.15, alpha: 0.9 },
+    { pts: arc(-78 * deg, lo), w: 1.0, alpha: 0.75 },
+    { pts: brow, w: 1.4, alpha: 0.85 },
+  ];
+}
+
+/**
+ * Puffed cheeks in the side view: the face's outline above and below the lips swells forward (the
+ * air held in the mouth pushes the skin round the lips out). The lips' meeting edge, where their
+ * handle sits, stays put. Returns the map for body points, or null at rest.
+ */
+export function puffProfile(f: HumanFrame, k: number, puff: number): ((p: Vec) => Vec) | null {
+  if (Math.abs(puff) < 0.01) return null;
+  const L = { x: (f.upperLip[6].x + f.lowerLip[6].x) / 2, y: (f.upperLip[6].y + f.lowerLip[6].y) / 2 };
+  const out = 0.6 * k * puff;
+  return (p) => {
+    const dy = Math.abs(p.y - L.y) / (2.6 * k);
+    if (dy >= 1) return p;
+    const w = (1 - dy * dy) ** 2 * smoothstep(0.03, 0.45, dy) * smoothstep(L.x - 1.2 * k, L.x - 0.5 * k, p.x);
+    return w ? { x: p.x + out * w, y: p.y } : p;
+  };
+}
 
 export class AnatomyRenderer {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
-  private grain: CanvasPattern | null = null;
-  /** tissue shapes, drawn sharp */
-  private tissue: HTMLCanvasElement;
-  private tctx: CanvasRenderingContext2D;
-  /** the tissue layer softened by one blur pass, with film grain (what gets drawn) */
-  private soft: HTMLCanvasElement;
-  private sctx: CanvasRenderingContext2D;
-  /** what the tissue layer was last drawn for: an unchanged frame needs no redraw */
-  private tissueFor: { model: VoiceModel; f: HumanFrame } | null = null;
   private particles: Particle[] = [];
   private scale = 20;
   private ox = 0;
   private oy = 0;
-  private dpr = 1;
+  private w = 0;
+  private h = 0;
+  /** a narrow screen (a phone): readouts in a row above the head, slots in a row below it */
+  private compact = false;
   private sparkSeed = 1;
-  private readonly canFilter: boolean;
+  private geo: Profile | null = null;
+  private echoes: Echo[] = [];
+  private clock = 0;
+  private lastEcho = -1;
+  /** where the eye looks */
+  private gaze = new Gaze();
+  /** brows, lids and cheeks, from the voice (the view updates it) */
+  readonly face = new Expression();
 
-  constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext("2d")!;
-    this.tissue = document.createElement("canvas");
-    this.tctx = this.tissue.getContext("2d")!;
-    this.soft = document.createElement("canvas");
-    this.sctx = this.soft.getContext("2d")!;
-    this.canFilter = typeof this.tctx.filter === "string";
-    this.makeGrain();
+  constructor() {
     for (let i = 0; i < 170; i++) this.particles.push({ s: Math.random() * 17, u: Math.random() * 2 - 1, life: Math.random(), px: NaN, py: NaN });
   }
 
-  private makeGrain(): void {
-    const g = document.createElement("canvas");
-    g.width = g.height = 192;
-    const gc = g.getContext("2d")!;
-    const img = gc.createImageData(192, 192);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const v = 128 + (Math.random() + Math.random() + Math.random() - 1.5) * 90;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-      img.data[i + 3] = 255;
-    }
-    gc.putImageData(img, 0, 0);
-    this.grain = this.ctx.createPattern(g, "repeat");
+  /** size in CSS px */
+  resize(w: number, h: number): void {
+    this.w = w;
+    this.h = h;
+    // the readouts need room beside the head; a narrow screen (a phone) moves them above and below it.
+    // A tall desktop screen keeps them beside it: the head is then fitted to the width and centred,
+    // leaving room above and below, where the compact rows ran over the skull.
+    this.compact = w < 560;
+    const padX = 12, padT = this.compact ? 62 : 8, padB = this.compact ? 92 : 8;
+    // VIEW crops the top of the skull at the canvas edge; with readout rows above the head, the
+    // whole crown must fit under them, or the cut-off part draws over the readouts
+    const y1 = this.compact ? CROWN : VIEW.y1;
+    this.scale = Math.max(1, Math.min((w - 2 * padX) / (VIEW.x1 - VIEW.x0), (h - padT - padB) / (y1 - VIEW.y0)));
+    // left-aligned when there is room to spare, so the readouts get the space in front of the face
+    const spare = w - 2 * padX - (VIEW.x1 - VIEW.x0) * this.scale;
+    this.ox = padX + (this.compact ? spare / 2 : Math.min(spare / 2, Math.max(0, spare - 220))) - VIEW.x0 * this.scale;
+    this.oy = padT + Math.max(0, (h - padT - padB - (y1 - VIEW.y0) * this.scale) / 2) + y1 * this.scale;
+    for (const p of this.particles) p.px = NaN;
   }
 
-  resize(w: number, h: number, dpr: number): void {
-    this.dpr = dpr;
-    this.canvas.width = Math.round(w * dpr);
-    this.canvas.height = Math.round(h * dpr);
-    this.tissue.width = this.canvas.width;
-    this.tissue.height = this.canvas.height;
-    this.soft.width = this.canvas.width;
-    this.soft.height = this.canvas.height;
-    this.tissueFor = null;
-    const sx = w / (VIEW.x1 - VIEW.x0);
-    const sy = h / (VIEW.y1 - VIEW.y0);
-    this.scale = Math.min(sx, sy) * dpr;
-    this.ox = (this.canvas.width - (VIEW.x1 - VIEW.x0) * this.scale) / 2 - VIEW.x0 * this.scale;
-    this.oy = (this.canvas.height - (VIEW.y1 - VIEW.y0) * this.scale) / 2 + VIEW.y1 * this.scale;
-  }
-
-  /** body cm → canvas px */
+  /** body cm → CSS px */
   X(p: Vec): number {
     return this.ox + p.x * this.scale;
   }
   Y(p: Vec): number {
     return this.oy - p.y * this.scale;
   }
-  /** client px → body cm */
+  private P(p: Vec): Pt {
+    return [this.ox + p.x * this.scale, this.oy - p.y * this.scale];
+  }
+  /** CSS px (relative to the canvas) → body cm */
   toBody(cx: number, cy: number): Vec {
-    return { x: (cx * this.dpr - this.ox) / this.scale, y: (this.oy - cy * this.dpr) / this.scale };
+    return { x: (cx - this.ox) / this.scale, y: (this.oy - cy) / this.scale };
   }
   get pxPerCm(): number {
-    return this.scale / this.dpr;
+    return this.scale;
   }
 
   handles(model: VoiceModel, f: HumanFrame, a: HumanArtic): Handle[] {
-    const t = model.tract;
-    const J = this.jawFn(model, a);
-    const lips = { x: (f.upperLip[6].x + f.lowerLip[6].x) / 2 + 0.15, y: (f.upperLip[6].y + f.lowerLip[6].y) / 2 };
-    return [
-      { id: "tongue", pos: f.tongueCenter, label: "Tongue body" },
-      { id: "tip", pos: f.tip, label: "Tongue tip" },
-      { id: "jaw", pos: J(7.5, 4.9), label: "Jaw" },
-      { id: "lips", pos: lips, label: "Lips" },
-      { id: "velum", pos: f.velum[Math.floor(f.velum.length / 2)], label: "Soft palate" },
-      { id: "larynx", pos: { x: f.glottis.x + 1.2 * t.scale, y: f.glottis.y }, label: "Larynx" },
-    ];
+    return faceHandles(model, f, a);
   }
 
-  private jawFn(model: VoiceModel, a: HumanArtic): (x: number, y: number) => Vec {
-    const t = model.tract;
-    const k = t.scale;
-    const condyle = t.P(-2.5, 10.5);
-    const jawRef = t.P(6.95, 7.75);
-    const phi = (-Math.max(-0.2, Math.min(3, a.jaw)) * k) / dist(condyle, jawRef);
-    return (x: number, y: number) => rotateAbout(t.P(x, y), condyle, phi);
+  // ------------------------------------------------------------------ geometry
+  private geometry(model: VoiceModel, f: HumanFrame, a: HumanArtic): Profile {
+    if (this.geo && this.geo.f === f && this.geo.model === model) return this.geo;
+    return (this.geo = buildProfile(model, f, a));
   }
 
-  // ------------------------------------------------------------------ drawing helpers
-  private path(c: CanvasRenderingContext2D, pts: Vec[], close = true): void {
-    c.beginPath();
-    c.moveTo(this.X(pts[0]), this.Y(pts[0]));
-    for (let i = 1; i < pts.length; i++) c.lineTo(this.X(pts[i]), this.Y(pts[i]));
-    if (close) c.closePath();
-  }
-
-  private fill(c: CanvasRenderingContext2D, pts: Vec[], color: string): void {
-    if (pts.length < 3) return;
-    this.path(c, pts);
-    c.fillStyle = color;
-    c.fill();
-  }
-
-  private stroke(c: CanvasRenderingContext2D, pts: Vec[], color: string, w: number, close = false): void {
-    if (pts.length < 2) return;
-    this.path(c, pts, close);
-    c.strokeStyle = color;
-    c.lineWidth = w * this.dpr;
-    c.lineJoin = "round";
-    c.lineCap = "round";
-    c.stroke();
+  /**
+   * The lens, moved by the eye's gaze: it holds still for a few seconds, then darts somewhere
+   * new (a saccade), and every so often back to straight ahead. Pitch swings it round the front
+   * of the eyeball; yaw (looking towards or away from the viewer) foreshortens its offset and
+   * opens the edge-on disc out.
+   */
+  private lens(c: Vec, k: number, dt: number): Vec[] {
+    const g = this.gaze;
+    g.update(this.clock, dt);
+    const off = 0.85 * k * Math.cos(g.yaw);
+    const pitch = g.pitch + this.face.lookUp;
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const lc = { x: c.x + off * cp, y: c.y + off * sp };
+    const rx = (0.18 + 0.2 * Math.abs(Math.sin(g.yaw))) * k, ry = 0.42 * k;
+    const o: Vec[] = [];
+    for (let i = 0; i <= 20; i++) {
+      const an = (i / 20) * Math.PI * 2;
+      const x = Math.cos(an) * rx, y = Math.sin(an) * ry;
+      o.push({ x: lc.x + x * cp - y * sp, y: lc.y + x * sp + y * cp });
+    }
+    return o;
   }
 
   // ------------------------------------------------------------------ main draw
-  draw(model: VoiceModel, f: HumanFrame, a: HumanArtic, tele: TelemetryMessage | null, view: ViewFlags, opts: { hover: HandleId | null; drag: HandleId | null; dt: number; bodyLabel: string; formants: number[] }): void {
-    const ctx = this.ctx;
-    const W = this.canvas.width, H = this.canvas.height;
-    if (!this.tissueFor || this.tissueFor.f !== f || this.tissueFor.model !== model) {
-      this.drawTissue(model, f, a);
-      this.tissueFor = { model, f };
-    }
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = C.black;
-    ctx.fillRect(0, 0, W, H);
-    ctx.drawImage(this.soft, 0, 0);
+  draw(
+    ctx: CanvasRenderingContext2D,
+    model: VoiceModel,
+    f: HumanFrame,
+    a: HumanArtic,
+    tele: TelemetryMessage | null,
+    view: ViewFlags,
+    opts: { hover: HandleId | null; drag: HandleId | null; dt: number; formants: number[]; slots: Slot[]; info: string[] },
+  ): void {
+    this.clock += opts.dt;
+    const G = this.geometry(model, f, a);
+    const pts = (v: Vec[]) => v.map((p) => this.P(p));
+    const line = (v: Vec[], color: string, w: number, o: { alpha?: number; hot?: boolean; close?: boolean } = {}) => beamPts(ctx, pts(v), color, w, o);
 
-    // acoustic energy inside the airway (section-wise projection of the 1D simulation)
-    if (view.pressure && tele) this.drawPressure(model, f, tele);
-    if (view.grid) {
-      for (const g of f.grid) {
-        ctx.beginPath();
-        ctx.moveTo(this.X(g.inner), this.Y(g.inner));
-        ctx.lineTo(this.X(g.outer), this.Y(g.outer));
-        ctx.strokeStyle = "rgba(150, 170, 180, 0.35)";
-        ctx.lineWidth = 1 * this.dpr;
-        ctx.stroke();
+    // deep structures, dim blue
+    line(G.inset, V.blueDim, 0.9, { alpha: 0.9 });
+    line(G.skull, V.blueDim, 0.9, { close: true });
+    line(G.brain, V.blueMid, 1.1, { close: true });
+    line(G.sulcus, V.blueDim, 0.9);
+    line(G.eye, V.blueMid, 1.1);
+    const k = model.tract.scale;
+    const bulge = puffProfile(f, k, this.face.puff);
+    const puffed = (v: Vec[]) => (bulge ? v.map(bulge) : v);
+    line(this.lens(G.eyeC, k, opts.dt), V.blueDim, 0.9, { alpha: 1 - smoothstep(0.45, 0.9, this.face.lid) });
+    for (const l of eyeFeatures(G.eyeC, k, this.face)) line(l.pts, V.blue, l.w, { alpha: l.alpha });
+    for (const v of G.vertebrae) line(v, V.blueDim, 1);
+    line(G.cords[0], V.blueDim, 0.8, { alpha: 0.8 });
+    line(G.cords[1], V.blueDim, 0.8, { alpha: 0.6 });
+    line(G.nasal, V.blueMid, 1, { close: true });
+    for (const tb of G.turbinates) line(tb, V.blueDim, 0.9);
+    line(G.palOral, V.blueMid, 1.1);
+    line(G.palNasal, V.blueMid, 1.1);
+    line(G.hyoid, V.blueDim, 1);
+    line(G.thyroid, V.blueDim, 1);
+    for (const tr of G.trachea) line(tr, V.blueMid, 1);
+    for (const r of G.rings) line(r, V.blueDim, 0.9);
+
+    // the airway's cross-section lines: lit by sound pressure, else a dim measurement grid
+    if (view.pressure && tele) this.drawPressure(ctx, model, f, tele);
+    else if (view.grid) for (const gs of f.grid) seg(ctx, this.X(gs.inner), this.Y(gs.inner), this.X(gs.outer), this.Y(gs.outer), V.blueDim, 0.9, { alpha: 0.7 });
+    if (view.particles && tele) this.drawParticles(ctx, model, f, tele, opts.dt);
+
+    // afterglow: where the tongue, jaw and lips were a moment ago
+    if (tele && this.clock - this.lastEcho >= 0.028) {
+      this.lastEcho = this.clock;
+      this.echoes.push({ t: this.clock, tongue: f.tongue.slice(), jaw: G.jawLower, upperLip: chaikin(puffed(f.upperLip).map((p) => [p.x, p.y] as Pt)), lowerLip: chaikin(puffed(f.lowerLip).map((p) => [p.x, p.y] as Pt)) });
+      while (this.echoes.length && this.clock - this.echoes[0].t > 0.12) this.echoes.shift();
+    }
+    if (tele) {
+      ECHO_AGES.forEach((age, i) => {
+        const e = this.nearestEcho(this.clock - age);
+        if (!e) return;
+        const o = 0.1 + 0.07 * i;
+        line(e.tongue, V.green, 1, { alpha: o });
+        line(e.jaw, V.red, 1, { alpha: o * 0.9 });
+        const lip = (q: Pt[]) => beamPts(ctx, q.map(([x, y]) => [this.ox + x * this.scale, this.oy - y * this.scale] as Pt), V.pink, 1, { alpha: o * 0.9 });
+        lip(e.upperLip);
+        lip(e.lowerLip);
+      });
+    }
+
+    // skin, airway walls, teeth, folds
+    line(puffed(G.skinLower), V.blue, 1.7, { hot: true });
+    line(puffed(G.skinUpper), V.blue, 1.7, { hot: true });
+    line(G.outerWall, V.blue, 1.4, { hot: true });
+    line(f.inner, V.blue, 1.3, { alpha: 0.9 });
+    line(G.glottisWall, V.blue, 1.2, { alpha: 0.8 });
+    line(f.epiglottis.slice(0, 3), V.blue, 2.2, { alpha: 0.85 });
+    line(f.upperTeeth, V.blueMid, 1.1, { close: true });
+    line(G.lowerTeeth, V.blueMid, 1.1);
+    for (const fo of G.folds) line(fo, V.blue, 1);
+
+    // the four handled articulators in their slot colours
+    const tongueOutline = pts(f.tongue);
+    ctx.save();
+    const clip = new Path2D();
+    tongueOutline.forEach(([x, y], i) => (i ? clip.lineTo(x, y) : clip.moveTo(x, y)));
+    clip.closePath();
+    ctx.clip(clip);
+    for (const fb of G.fibres) line(fb, V.green, 0.8, { alpha: 0.32 });
+    ctx.restore();
+    // left open: its closing chord runs along the floor of the mouth
+    beamPts(ctx, tongueOutline, V.green, 1.6, { hot: true });
+    line(G.jawLower, V.red, 1.5, { hot: true });
+    line(G.jawUpper, V.red, 1, { alpha: 0.45 });
+    const soft = (v: Vec[], it: number) => chaikin(v.map((p) => this.P(p)), it);
+    beamPts(ctx, soft(puffed(f.upperLip), 2), V.pink, 1.5, { hot: true });
+    beamPts(ctx, soft(puffed(f.lowerLip), 2), V.pink, 1.5, { hot: true });
+    beamPts(ctx, soft(f.velum, 3), V.white, 1.25, { alpha: 0.92 });
+
+    if (tele) this.drawTurbulence(ctx, model, f, tele);
+    if (view.calipers) this.drawCalipers(ctx, f);
+    this.drawHandles(ctx, model, f, a, opts.hover, opts.drag);
+    this.drawReadouts(ctx, opts.formants, opts.info, opts.slots);
+  }
+
+  private nearestEcho(t: number): Echo | null {
+    let best: Echo | null = null, bd = 0.016;
+    for (const e of this.echoes) {
+      const d = Math.abs(e.t - t);
+      if (d < bd) {
+        bd = d;
+        best = e;
       }
     }
-    if (view.particles && tele) this.drawParticles(model, f, tele, opts.dt);
-    if (tele) this.drawTurbulence(model, f, tele);
-    if (view.calipers) this.drawCalipers(f, tele);
-    this.drawHandles(model, f, a, opts.hover, opts.drag);
-    this.drawOverlay(f, a, tele, opts.bodyLabel, opts.formants);
-  }
-
-  private drawTissue(model: VoiceModel, f: HumanFrame, a: HumanArtic): void {
-    const c = this.tctx;
-    const t = model.tract;
-    const P = (x: number, y: number) => t.P(x, y);
-    const J = this.jawFn(model, a);
-    const k = t.scale;
-    const lar = a.larynx * k;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.globalCompositeOperation = "source-over";
-    c.clearRect(0, 0, this.tissue.width, this.tissue.height);
-
-    const ulOut = f.upperLip.slice(7); // edge → nose
-    const llOut = f.lowerLip.slice(7); // edge → chin
-    const ulEdge = f.upperLip[6];
-    const llEdge = f.lowerLip[6];
-    // ---- head silhouette (skin + subcutaneous fat)
-    // facial profile in true body coordinates (the oral-region x compression of P() would
-    // flatten the nose): subnasale → nose tip → nasion → forehead
-    const ph = model.bodyParams.pharynx;
-    const B = (x: number, y: number): Vec => ({ x: x * k, y: (y < 7 ? 7 - (7 - y) * ph : y) * k });
-    const neckFront = catmullRom([B(2.3, -4.6), B(2.38, -1.5), B(2.52, 0.4), B(3.0, 1.7), J(5.3, 3.0), J(7.25, 3.35), J(7.95, 4.6), J(7.55, 5.7)], 4);
-    const face = catmullRom([ulOut[ulOut.length - 1], B(7.05, 10.6), B(7.75, 10.78), B(8.75, 11.05), B(9.25, 11.65), B(8.95, 12.6), B(8.35, 13.9), B(7.7, 15.0), B(7.95, 16.1), B(7.9, 18.1), B(6.9, 20.5)], 4);
-    const cranium = catmullRom([B(6.9, 20.5), B(3.0, 22.9), B(-2.2, 22.7), B(-6.9, 19.6), B(-8.7, 15.4), B(-8.3, 11.9), B(-7.4, 8.9), B(-6.8, 4.8), B(-6.6, 0), B(-6.6, -4.6)], 4);
-    const head: Vec[] = [...neckFront, ...llOut.slice().reverse(), llEdge, ulEdge, ...ulOut, ...face.slice(1), ...cranium.slice(1)];
-    void B;
-    this.fill(c, head, C.skin);
-    // deeper soft tissue (muscle) leaving a bright fat rim under the skin
-    const inset = catmullRom([B(1.85, -4.6), B(1.9, -0.8), B(2.3, 1.6), J(5.2, 3.6), J(6.9, 3.9), J(7.4, 4.9), J(7.2, 5.9), B(6.6, 9.9), B(7.6, 10.9), B(8.55, 11.5), B(8.1, 13.4), B(7.25, 15.2), B(7.45, 18.0), B(3.0, 22.2), B(-2.0, 22.0), B(-6.3, 19.2), B(-7.9, 15.3), B(-7.6, 12.0), B(-6.7, 8.7), B(-6.1, 4.6), B(-6.0, -4.6)], 3);
-    this.fill(c, inset, C.muscle);
-    // brain (with skull: dark cortex, bright diploë)
-    const skull = catmullRom([B(7.0, 16.2), B(7.3, 18.5), B(6.0, 20.7), B(3.0, 22.1), B(-2.0, 22.0), B(-6.3, 19.2), B(-7.9, 15.3), B(-7.4, 12.6), B(-4.6, 12.2), B(-2.2, 13.3), B(1.0, 13.7), B(4.1, 14.1), B(6.2, 14.9)], 4);
-    this.fill(c, skull, C.marrow);
-    const brain = catmullRom([B(6.55, 16.3), B(6.75, 18.4), B(5.5, 20.1), B(2.8, 21.4), B(-1.9, 21.3), B(-5.8, 18.8), B(-7.1, 15.4), B(-6.7, 13.1), B(-4.4, 12.8), B(-2.1, 13.9), B(1.0, 14.3), B(4.0, 14.7), B(5.9, 15.4)], 4);
-    this.fill(c, brain, C.brain);
-    this.stroke(c, catmullRom([B(5.4, 19.4), B(2.4, 20.5), B(-1.4, 20.4), B(-4.8, 18.4)], 4), "rgba(255,255,255,0.08)", 3);
-    // eye (vitreous dark)
-    c.beginPath();
-    c.ellipse(this.X(B(6.5, 15.4)), this.Y(B(6.5, 15.4)), 1.1 * this.scale * k, 0.95 * this.scale * k, 0, 0, Math.PI * 2);
-    c.fillStyle = "#262626";
-    c.fill();
-    // cervical spine: vertebral bodies (marrow) with dark cortex, discs, cord
-    const wallX = (y: number) => -1.2 - 0.025 * y;
-    for (let i = 0; i < 9; i++) {
-      const y0 = -4.4 + i * 1.75;
-      if (y0 > 10.5) break;
-      const x0 = wallX(y0) - 2.25;
-      const p0 = P(x0, y0 + 1.4), p1 = P(x0 + 1.6, y0);
-      const rr = 0.32 * this.scale * k;
-      c.beginPath();
-      c.roundRect(this.X(p0), this.Y(p0), this.X(p1) - this.X(p0), this.Y(p1) - this.Y(p0), rr);
-      c.fillStyle = C.cortex;
-      c.fill();
-      const q0 = P(x0 + 0.13, y0 + 1.27), q1 = P(x0 + 1.47, y0 + 0.13);
-      c.beginPath();
-      c.roundRect(this.X(q0), this.Y(q0), this.X(q1) - this.X(q0), this.Y(q1) - this.Y(q0), rr * 0.7);
-      c.fillStyle = C.marrow;
-      c.fill();
-    }
-    this.fill(c, [P(-5.3, -4.6), P(-4.5, -4.6), P(-4.5, 11.8), P(-5.1, 12.4), P(-5.6, 11.6)], "#2e2e2e");
-    this.fill(c, [P(-5.1, -4.6), P(-4.7, -4.6), P(-4.72, 11.4), P(-5.15, 11.6)], "#6f6f6f");
-    // nasal cavity (air) with turbinates
-    const pal = f.outer.slice(f.outer.length - 30); // palate region points (approx)
-    void pal;
-    const nasalAir = catmullRom([B(0.3, 11.2), B(1.1, 10.25), B(2.7, 10.75), B(4.6, 10.85), B(6.4, 10.65), B(7.6, 10.85), B(8.45, 11.3), B(8.0, 12.2), B(6.7, 13.4), B(4.4, 13.9), B(1.8, 13.6), B(0.2, 12.6)], 4);
-    this.fill(c, nasalAir, C.black);
-    for (const [cx, cy, rx, ry] of [[3.0, 11.45, 2.1, 0.32], [3.5, 12.45, 1.9, 0.3], [4.0, 13.3, 1.45, 0.22]] as const) {
-      c.beginPath();
-      c.ellipse(this.X(B(cx, cy)), this.Y(B(cx, cy)), rx * this.scale * k, ry * this.scale * k, -0.04, 0, Math.PI * 2);
-      c.fillStyle = "#7d7d7d";
-      c.fill();
-    }
-    // hard palate bone band
-    const palOral = this.palatePoints(model);
-    const palNasal = palOral.map((p) => ({ x: p.x, y: p.y + 0.55 * k }));
-    this.fill(c, [...palOral, ...palNasal.slice().reverse()], C.cortex);
-    this.fill(c, [...palOral.map((p) => ({ x: p.x, y: p.y + 0.14 * k })), ...palNasal.map((p) => ({ x: p.x, y: p.y - 0.14 * k })).reverse()], C.marrow);
-    // mandible
-    const jb = f.jawBone;
-    const jbIn = jb.map((p) => ({ x: p.x - 0.0, y: p.y + 0.75 * k }));
-    this.fill(c, [...jb, ...jbIn.slice().reverse()], C.cortex);
-    this.fill(c, [...jb.map((p) => ({ x: p.x, y: p.y + 0.15 * k })), ...jbIn.map((p) => ({ x: p.x, y: p.y - 0.15 * k })).reverse()], C.marrow);
-    // hyoid + thyroid cartilage + trachea
-    c.beginPath();
-    const hy = { x: P(1.6, 0).x + 0.0, y: P(0, 2.9).y + 0.6 * lar };
-    c.ellipse(this.X(hy), this.Y(hy), 0.5 * this.scale * k, 0.28 * this.scale * k, 0.3, 0, Math.PI * 2);
-    c.fillStyle = C.marrow;
-    c.fill();
-    const g = f.glottis;
-    const thyroid = [{ x: g.x + 0.75 * k, y: g.y - 1.6 * k }, { x: g.x + 1.75 * k, y: g.y - 0.6 * k }, { x: g.x + 1.95 * k, y: g.y + 1.2 * k }, { x: g.x + 1.45 * k, y: g.y + 1.9 * k }, { x: g.x + 1.15 * k, y: g.y + 1.1 * k }, { x: g.x + 1.3 * k, y: g.y - 0.4 * k }];
-    this.fill(c, thyroid, C.cartilage);
-    // trachea (air) below the glottis
-    const trachea = [{ x: g.x - 0.65 * k, y: g.y }, { x: g.x + 0.75 * k, y: g.y }, { x: g.x + 0.95 * k, y: -4.8 }, { x: g.x - 0.75 * k, y: -4.8 }];
-    this.fill(c, trachea, C.black);
-    for (let i = 0; i < 4; i++) {
-      const y = g.y - (0.9 + i * 1.0) * k;
-      if (y < -4.4) break;
-      this.fill(c, [{ x: g.x + 0.8 * k, y }, { x: g.x + 1.05 * k, y: y - 0.05 }, { x: g.x + 1.05 * k, y: y - 0.5 * k }, { x: g.x + 0.82 * k, y: y - 0.45 * k }], C.cartilage);
-    }
-    // ---- airway (carve to black): outer wall, mouth opening, inner wall reversed, epilarynx
-    const airway: Vec[] = [];
-    const wallAtGlottis = { x: wallX(g.y / k) * k, y: g.y };
-    airway.push(g, wallAtGlottis);
-    for (const p of f.outer) if (p.y > g.y || p.x > 0) airway.push(p);
-    for (let i = f.inner.length - 1; i >= 0; i--) airway.push(f.inner[i]);
-    this.fill(c, airway, C.black);
-    // mucosal sheen along the outer wall
-    this.stroke(c, f.outer.filter((p) => p.y > g.y), "rgba(170,170,170,0.35)", 1.4);
-    // ---- articulators
-    // tongue with subtle intrinsic-fibre texture
-    this.fill(c, f.tongue, C.tongue);
-    c.save();
-    this.path(c, f.tongue);
-    c.clip();
-    // genioglossus: fibres fan from the mental spine (behind the chin) up into the dorsum
-    const origin = J(6.0, 5.45);
-    const tc = f.tongueCenter;
-    for (let i = 0; i <= 16; i++) {
-      const ang = Math.PI * (0.18 + (0.9 * i) / 16);
-      const end = { x: tc.x + Math.cos(ang) * f.tongueRadius * 1.25, y: tc.y + Math.sin(ang) * f.tongueRadius * 1.25 };
-      c.beginPath();
-      c.moveTo(this.X(origin), this.Y(origin));
-      c.quadraticCurveTo(this.X(tc), this.Y({ x: tc.x, y: (tc.y + origin.y) / 2 }), this.X(end), this.Y(end));
-      c.strokeStyle = "rgba(0,0,0,0.12)";
-      c.lineWidth = 1.1 * this.dpr;
-      c.stroke();
-    }
-    c.restore();
-    this.stroke(c, f.tongue.slice(0, Math.floor(f.tongue.length * 0.78)), "rgba(200,200,200,0.28)", 1.2);
-    // velum
-    this.fill(c, f.velum, C.muscle);
-    this.stroke(c, f.velum, "rgba(180,180,180,0.25)", 1, true);
-    // lips (orbicularis) – fill between inner and outer surfaces
-    this.fill(c, f.upperLip, "#7a7a7a");
-    this.fill(c, f.lowerLip, "#7a7a7a");
-    // teeth: no MRI signal
-    this.fill(c, f.upperTeeth, C.tooth);
-    this.fill(c, [...f.lowerTeeth, J(6.8, 6.0), J(6.4, 6.2)], C.tooth);
-    // epiglottis cartilage
-    this.stroke(c, f.epiglottis.slice(0, 2), "#9a9a9a", 3.2 * k);
-    // vocal folds
-    this.fill(c, [{ x: g.x - 0.62 * k, y: g.y + 0.05 }, { x: g.x - 0.1, y: g.y + 0.12 * k }, { x: g.x - 0.62 * k, y: g.y + 0.32 * k }], "#8a8a8a");
-    this.fill(c, [{ x: g.x + 0.72 * k, y: g.y + 0.05 }, { x: g.x + 0.12, y: g.y + 0.12 * k }, { x: g.x + 0.72 * k, y: g.y + 0.32 * k }], "#8a8a8a");
-    // soft edges: one blur pass over the finished layer. A filter set while drawing blurs every
-    // fill separately (~60 full-canvas passes a frame), which held the app at a few fps.
-    const s = this.sctx;
-    s.setTransform(1, 0, 0, 1, 0, 0);
-    s.globalCompositeOperation = "source-over";
-    s.clearRect(0, 0, this.soft.width, this.soft.height);
-    if (this.canFilter) s.filter = `blur(${(0.55 * this.dpr).toFixed(2)}px)`;
-    s.drawImage(this.tissue, 0, 0);
-    s.filter = "none";
-    // film grain over tissue (multiplicative-ish), not blurred
-    if (this.grain) {
-      s.globalCompositeOperation = "overlay";
-      s.globalAlpha = 0.22;
-      s.fillStyle = this.grain;
-      this.path(s, head);
-      s.fill();
-      s.globalAlpha = 1;
-      s.globalCompositeOperation = "source-over";
-    }
-  }
-
-  private palatePoints(model: VoiceModel): Vec[] {
-    const t = model.tract;
-    const raw: [number, number][] = [[1.0, 9.6], [1.8, 9.92], [2.7, 10.18], [3.6, 10.3], [4.4, 10.25], [5.1, 10.05], [5.7, 9.72], [6.15, 9.36], [6.55, 9.15], [7.0, 9.6]];
-    return raw.map(([x, y]) => t.P(x, y));
+    return best;
   }
 
   private gridPoint(f: HumanFrame, s: number, u: number): Vec | null {
@@ -389,8 +366,7 @@ export class AnatomyRenderer {
     return { x: ix + (ox - ix) * w, y: iy + (oy - iy) * w };
   }
 
-  private nodeValueAtS(values: Float32Array, nodeS: Float64Array, s: number): number {
-    // nearest-node lookup (values are per section)
+  private nodeValueAtS(values: ArrayLike<number>, nodeS: Float64Array, s: number): number {
     let best = 0, bd = Infinity;
     for (let i = 0; i < nodeS.length; i++) {
       const d = Math.abs(nodeS[i] - s);
@@ -402,43 +378,24 @@ export class AnatomyRenderer {
     return values[best] ?? 0;
   }
 
-  private drawPressure(model: VoiceModel, f: HumanFrame, tele: TelemetryMessage): void {
-    const ctx = this.ctx;
+  private drawPressure(ctx: CanvasRenderingContext2D, model: VoiceModel, f: HumanFrame, tele: TelemetryMessage): void {
     const t = tele.t;
     const nodeS = model.nodeS(t.phLen, t.orLen);
     if (nodeS.length !== t.pressureRms.length) return;
-    ctx.globalCompositeOperation = "screen";
-    const g = f.grid;
-    // epilarynx: glottis → first grid line
-    const first = g[0];
-    const quads: { pts: Vec[]; s: number }[] = [{ pts: [{ x: f.glottis.x - 0.45, y: f.glottis.y }, { x: f.glottis.x + 0.55, y: f.glottis.y }, first.inner, first.outer], s: first.s * 0.5 }];
-    for (let i = 0; i < g.length - 1; i++) quads.push({ pts: [g[i].inner, g[i].outer, g[i + 1].outer, g[i + 1].inner], s: (g[i].s + g[i + 1].s) / 2 });
-    for (const q of quads) {
-      const lvl = pressureLevel(this.nodeValueAtS(t.pressureRms, nodeS, q.s));
-      if (lvl <= 0.01) continue;
-      const [r, gg, b] = hot(lvl);
-      this.path(ctx, q.pts);
-      const col = `rgba(${r | 0},${gg | 0},${b | 0},${0.35 + 0.6 * lvl})`;
-      ctx.fillStyle = col;
-      ctx.fill();
-      // close antialiasing seams between neighbouring sections
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 1.2 * this.dpr;
-      ctx.lineJoin = "round";
-      ctx.stroke();
+    for (const g of f.grid) {
+      const lvl = Math.pow(pressureLevel(this.nodeValueAtS(t.pressureRms, nodeS, g.s)), 0.85);
+      seg(ctx, this.X(g.inner), this.Y(g.inner), this.X(g.outer), this.Y(g.outer), heat(lvl), 1.15, { alpha: 0.35 + 0.65 * lvl });
     }
-    ctx.globalCompositeOperation = "source-over";
   }
 
-  private drawParticles(model: VoiceModel, f: HumanFrame, tele: TelemetryMessage, dt: number): void {
-    const ctx = this.ctx;
+  private drawParticles(ctx: CanvasRenderingContext2D, model: VoiceModel, f: HumanFrame, tele: TelemetryMessage, dt: number): void {
     const t = tele.t;
     const nodeS = model.nodeS(t.phLen, t.orLen);
     const areas = new Float32Array(t.phAreas.length + t.orAreas.length);
     areas.set(t.phAreas, 0);
     areas.set(t.orAreas, t.phAreas.length);
     const L = f.lipS;
-    ctx.lineCap = "round";
+    const path = [new Path2D(), new Path2D(), new Path2D()];
     for (const p of this.particles) {
       const U = this.nodeValueAtS(t.flow, nodeS, p.s);
       const A = Math.max(0.05, this.nodeValueAtS(areas, nodeS, p.s));
@@ -447,9 +404,7 @@ export class AnatomyRenderer {
       p.s += vis * dt;
       p.life -= dt * 0.25;
       if (p.s > L || p.s < 0 || p.life <= 0 || Math.abs(u) < 3) {
-        if (Math.abs(u) < 3 && p.life > 0) {
-          // stalled air: keep position, fade
-        } else {
+        if (!(Math.abs(u) < 3 && p.life > 0)) {
           p.s = Math.random() * 0.8;
           p.u = Math.random() * 2 - 1;
           p.life = 0.6 + Math.random() * 0.8;
@@ -460,131 +415,63 @@ export class AnatomyRenderer {
       const pos = this.gridPoint(f, p.s, p.u);
       if (!pos) continue;
       const x = this.X(pos), y = this.Y(pos);
-      const speedA = Math.min(1, Math.abs(vis) / 6);
       if (Number.isFinite(p.px)) {
-        ctx.beginPath();
-        ctx.moveTo(p.px, p.py);
-        ctx.lineTo(x, y);
-        ctx.strokeStyle = `rgba(220, 240, 255, ${0.1 + 0.45 * speedA * Math.min(1, p.life)})`;
-        ctx.lineWidth = 1.3 * this.dpr;
-        ctx.stroke();
+        // three brightness bands, one stroke each
+        const band = Math.min(2, Math.floor(Math.min(1, Math.abs(vis) / 6) * Math.min(1, p.life) * 3));
+        path[band].moveTo(p.px, p.py);
+        path[band].lineTo(x, y);
       }
       p.px = x;
       p.py = y;
     }
+    path.forEach((pa, i) => beam(ctx, pa, "#ffe2a8", 1.1, { alpha: 0.16 + 0.2 * i }));
   }
 
-  private drawTurbulence(model: VoiceModel, f: HumanFrame, tele: TelemetryMessage): void {
+  private drawTurbulence(ctx: CanvasRenderingContext2D, model: VoiceModel, f: HumanFrame, tele: TelemetryMessage): void {
     const t = tele.t;
     if (!(t.noiseLevel > 1) || t.noiseNode < 0) return;
     const s = model.branchS(t.noiseNode, t.phLen, t.orLen);
     if (s < 0) return;
     const intensity = Math.min(1, Math.log10(t.noiseLevel) / 3.2);
     if (intensity <= 0.05) return;
-    const ctx = this.ctx;
-    ctx.globalCompositeOperation = "screen";
     let seed = (this.sparkSeed = (this.sparkSeed * 16807) % 2147483647);
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < 26; i++) {
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 30; i++) {
       const pos = this.gridPoint(f, s + 0.2 + rnd() * 1.2, rnd() * 2 - 1);
       if (!pos) continue;
-      const r = (0.6 + rnd() * 1.6) * this.dpr;
-      ctx.beginPath();
-      ctx.arc(this.X(pos), this.Y(pos), r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(190, 230, 255, ${0.15 + 0.55 * intensity * rnd()})`;
-      ctx.fill();
+      dot(ctx, this.X(pos), this.Y(pos), 0.6 + rnd() * 1.4, "#f4fbff", 0.15 + 0.7 * intensity * rnd());
     }
-    ctx.globalCompositeOperation = "source-over";
   }
 
-  private drawCalipers(f: HumanFrame, tele: TelemetryMessage | null): void {
-    const ctx = this.ctx;
-    // narrowest constriction marker
+  private drawCalipers(ctx: CanvasRenderingContext2D, f: HumanFrame): void {
     let mi = -1, ma = Infinity;
     for (let i = 2; i < f.grid.length - 1; i++) if (f.grid[i].area < ma) { ma = f.grid[i].area; mi = i; }
-    if (mi >= 0 && ma < 1.2) {
-      const g = f.grid[mi];
-      ctx.beginPath();
-      ctx.moveTo(this.X(g.inner), this.Y(g.inner));
-      ctx.lineTo(this.X(g.outer), this.Y(g.outer));
-      ctx.strokeStyle = C.caliper;
-      ctx.lineWidth = 1.5 * this.dpr;
-      ctx.stroke();
-      for (const e of [g.inner, g.outer]) {
-        ctx.beginPath();
-        ctx.arc(this.X(e), this.Y(e), 2.2 * this.dpr, 0, Math.PI * 2);
-        ctx.fillStyle = C.caliper;
-        ctx.fill();
-      }
-      const label = ma <= 0.0005 ? "closed" : `${ma.toFixed(2)} cm²`;
-      this.label(label, this.X(g.outer) + 8 * this.dpr, this.Y(g.outer) - 6 * this.dpr, C.caliper);
-    }
-    void tele;
+    if (mi < 0 || ma >= 1.2) return;
+    const g = f.grid[mi];
+    const [x0, y0] = this.P(g.inner), [x1, y1] = this.P(g.outer);
+    seg(ctx, x0, y0, x1, y1, V.white, 1.4, { hot: true });
+    const nx = -(y1 - y0), ny = x1 - x0, nl = Math.hypot(nx, ny) || 1;
+    for (const [x, y] of [[x0, y0], [x1, y1]]) seg(ctx, x - (nx / nl) * 4, y - (ny / nl) * 4, x + (nx / nl) * 4, y + (ny / nl) * 4, V.white, 1.2);
+    const lx = Math.max(x0, x1) + 10, ly = Math.min(y0, y1) - 4;
+    label(ctx, ma <= 0.0005 ? "CLOSED" : `${ma.toFixed(2)} CM²`, lx, ly, { size: 11, color: V.white, ls: 0.12 });
   }
 
-  private drawHandles(model: VoiceModel, f: HumanFrame, a: HumanArtic, hover: HandleId | null, drag: HandleId | null): void {
-    const ctx = this.ctx;
+  private drawHandles(ctx: CanvasRenderingContext2D, model: VoiceModel, f: HumanFrame, a: HumanArtic, hover: HandleId | null, drag: HandleId | null): void {
+    const colour: Record<HandleId, string> = { tongue: V.green, jaw: V.red, lips: V.pink, velum: V.white, tip: V.blueMid, larynx: V.blueMid };
+    const size: Record<HandleId, number> = { tongue: 8, jaw: 7, lips: 7, velum: 6, tip: 5, larynx: 5 };
     for (const h of this.handles(model, f, a)) {
       const x = this.X(h.pos), y = this.Y(h.pos);
       const active = h.id === drag || h.id === hover;
-      const r = (active ? 8 : 6) * this.dpr;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = active ? C.caliper : C.caliperDim;
-      ctx.lineWidth = 1.5 * this.dpr;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(x - r - 3 * this.dpr, y);
-      ctx.lineTo(x - r + 3 * this.dpr, y);
-      ctx.moveTo(x + r - 3 * this.dpr, y);
-      ctx.lineTo(x + r + 3 * this.dpr, y);
-      ctx.moveTo(x, y - r - 3 * this.dpr);
-      ctx.lineTo(x, y - r + 3 * this.dpr);
-      ctx.moveTo(x, y + r - 3 * this.dpr);
-      ctx.lineTo(x, y + r + 3 * this.dpr);
-      ctx.stroke();
-      if (h.id === drag) {
-        ctx.beginPath();
-        ctx.arc(x, y, 2.5 * this.dpr, 0, Math.PI * 2);
-        ctx.fillStyle = C.caliper;
-        ctx.fill();
+      handle(ctx, x, y, colour[h.id], size[h.id] + (active ? 2 : 0), active ? 1 : 0.9);
+      if (active) {
+        ring(ctx, x, y, 28, colour[h.id], 1, { alpha: 0.75 });
+        label(ctx, h.label.toUpperCase(), x + 32, y - 18, { size: 12, color: colour[h.id], ls: 0.18 });
       }
-      if (active) this.label(h.label, x + r + 8 * this.dpr, y + 4 * this.dpr, C.caliper);
     }
   }
 
-  private label(text: string, x: number, y: number, color: string): void {
-    const ctx = this.ctx;
-    ctx.font = `${500} ${12 * this.dpr}px Archivo, system-ui, sans-serif`;
-    const w = ctx.measureText(text).width;
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(x - 4 * this.dpr, y - 12 * this.dpr, w + 8 * this.dpr, 16 * this.dpr);
-    ctx.fillStyle = color;
-    ctx.fillText(text, x, y);
-  }
-
-  private drawOverlay(f: HumanFrame, a: HumanArtic, tele: TelemetryMessage | null, bodyLabel: string, formants: number[]): void {
-    const ctx = this.ctx;
-    const d = this.dpr;
-    const W = this.canvas.width, H = this.canvas.height;
-    const lineH = 17 * d;
-    const pad = 14 * d;
-    ctx.font = `${450} ${12.5 * d}px Archivo, system-ui, sans-serif`;
-    ctx.fillStyle = "rgba(232, 234, 235, 0.82)";
-    ctx.textAlign = "left";
-    const tl = [bodyLabel, "Midsagittal, live"];
-    tl.forEach((s, i) => ctx.fillText(s, pad, pad + lineH * (i + 0.6)));
-    ctx.textAlign = "right";
-    const tr = tele ? [`f0 ${tele.t.f0.toFixed(1)} Hz`, `Lungs ${tele.t.pLung.toFixed(1)} cmH₂O`, `Voicing ${(tele.t.voicing * 100).toFixed(0)} %`] : ["Audio off"];
-    tr.forEach((s, i) => ctx.fillText(s, W - pad, pad + lineH * (i + 0.6)));
-    ctx.textAlign = "left";
-    const vp = f.velumPort;
-    const bl = [`Tract ${f.length.toFixed(1)} cm`, `Lip opening ${f.lipArea.toFixed(2)} cm²`, vp > 0.02 ? `Velum open ${vp.toFixed(2)} cm²` : "Velum closed"];
-    bl.forEach((s, i) => ctx.fillText(s, pad, H - pad - lineH * (bl.length - 1 - i)));
-    ctx.textAlign = "right";
-    const br = formants.slice(0, 3).map((F, i) => `F${i + 1} ${Math.round(F)} Hz`);
-    br.forEach((s, i) => ctx.fillText(s, W - pad, H - pad - lineH * (br.length - 1 - i)));
-    ctx.textAlign = "left";
-    void a;
+  private drawReadouts(ctx: CanvasRenderingContext2D, formants: number[], info: string[], slots: Slot[]): void {
+    // the slots sit in the empty space under the chin and in front of the neck
+    drawReadouts(ctx, { w: this.w, h: this.h, compact: this.compact, slotX: this.X({ x: 3.35, y: 0 }), slotY: this.Y({ x: 0, y: 2.05 }) }, formants, info, slots);
   }
 }

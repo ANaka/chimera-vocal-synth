@@ -4,7 +4,7 @@
 //! runs on the audio thread: these calls allocate.
 
 use chimera::airway::frequency::{find_peaks, transfer_function};
-use chimera::anatomy::human::{BodyName, HumanArtic, HumanFrame};
+use chimera::anatomy::human::{BodyMix, HumanArtic, HumanFrame};
 use chimera::control::beat_player::BeatPlayer;
 use chimera::creatures::voice::CreatureVoice;
 use chimera::math;
@@ -18,7 +18,8 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 
 struct Model {
-    body: BodyName,
+    id: usize,
+    body: BodyMix,
     fs: f64,
     airway: HumanAirway,
 }
@@ -26,7 +27,10 @@ struct Model {
 #[derive(Default)]
 struct State {
     result: Vec<u8>,
+    /// the page's models; a body is continuous, so the page drops the ones it no longer keeps
+    /// (`dropModel`, from `useModel.ts`)
     models: Vec<Model>,
+    next_model: usize,
     /// the page's English G2P (one dictionary, loaded once)
     g2p: EnglishG2P,
 }
@@ -47,7 +51,7 @@ fn to_json<T: serde::Serialize>(v: &T) -> Res {
 
 fn model<'a>(st: &'a mut State, req: &Value) -> Result<&'a mut Model, String> {
     let id: usize = arg(req, "model")?;
-    st.models.get_mut(id).ok_or_else(|| format!("no model {id}"))
+    st.models.iter_mut().find(|m| m.id == id).ok_or_else(|| format!("no model {id}"))
 }
 
 fn dispatch(st: &mut State, req: &Value) -> Res {
@@ -58,17 +62,18 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         // ---------------------------------------------------------------- the anatomy model
         "model" => {
             // the main-thread mirror of the worklet's airway: same topology and node counts
-            let body = BodyName::parse(&arg::<String>(req, "body")?);
+            let body: BodyMix = arg(req, "body")?;
             let fs: f64 = arg(req, "sampleRate")?;
             let m = if fs > 60000.0 { 1.0 } else { 2.0 };
-            let id = match st.models.iter().position(|x| x.body == body && x.fs == fs * m) {
+            let i = match st.models.iter().position(|x| x.body == body && x.fs == fs * m) {
                 Some(i) => i,
                 None => {
-                    st.models.push(Model { body, fs: fs * m, airway: HumanAirway::new(fs * m, body.body()) });
+                    st.models.push(Model { id: st.next_model, body, fs: fs * m, airway: HumanAirway::new(fs * m, body.body()) });
+                    st.next_model += 1;
                     st.models.len() - 1
                 }
             };
-            let a = &st.models[id].airway;
+            let (id, a) = (st.models[i].id, &st.models[i].airway);
             Ok(json!({
                 "model": id,
                 "body": a.body,
@@ -78,6 +83,11 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
                 "oralBranches": { "base": a.oral.branch_base, "n": a.oral.n },
                 "glottisPort": a.glottis_port,
             }))
+        }
+        "dropModel" => {
+            let id: usize = arg(req, "model")?;
+            st.models.retain(|m| m.id != id);
+            Ok(Value::Null)
         }
         "restTip" => to_json(&chimera::anatomy::human::rest_tip(arg(req, "jaw")?, arg(req, "tbX")?, arg(req, "tbY")?)),
         "frame" => {
@@ -128,16 +138,19 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         }
         // ---------------------------------------------------------------- planning (speech, song)
         "planUtterance" => to_json(&planner::plan_utterance(&arg::<Vec<Segment>>(req, "segments")?, &arg::<PlanOptions>(req, "options")?)),
+        // how many planned segments each segment becomes (a diphthong plans as its two vowels),
+        // so the UI can find a word's span in a plan's timeline
+        "plannedCounts" => to_json(&arg::<Vec<String>>(req, "ipa")?.iter().map(|s| planner::expand(s).map_or(1, |p| p.len())).collect::<Vec<_>>()),
         "planPhrases" => to_json(&planner::plan_phrases(&arg::<Vec<PhraseInput>>(req, "phrases")?, &arg::<PlanOptions>(req, "options")?)),
         "planSong" => to_json(&sing::plan_song(&arg::<Vec<SungNote>>(req, "notes")?, &arg::<SongOptions>(req, "options")?)),
         "planNoteOn" => to_json(&sing::plan_note_on(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, &arg::<NoteOnOptions>(req, "options")?)),
-        "planNoteOff" => to_json(&sing::plan_note_off(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, &arg::<String>(req, "body")?)),
+        "planNoteOff" => to_json(&sing::plan_note_off(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, arg::<BodyMix>(req, "body")?)),
         "planMelisma" => to_json(&sing::plan_melisma(arg(req, "midi")?, &arg::<MelismaOptions>(req, "options")?)),
         // ---------------------------------------------------------------- beatbox
         "parseBeat" => to_json(&beatbox::parse_beat(&arg::<String>(req, "text")?)),
         "formatBeat" => Ok(Value::String(beatbox::format_beat(&arg::<Vec<Option<BeatStep>>>(req, "steps")?))),
-        "beatReady" => to_json(&beatbox::beat_ready(&arg::<String>(req, "body")?)),
-        "leadIn" => Ok(json!(BeatPlayer::lead_in(&arg::<String>(req, "id")?, &arg::<String>(req, "body")?))),
+        "beatReady" => to_json(&beatbox::beat_ready(arg::<BodyMix>(req, "body")?)),
+        "leadIn" => Ok(json!(BeatPlayer::lead_in(&arg::<String>(req, "id")?, arg::<BodyMix>(req, "body")?))),
         _ => Err(format!("unknown fn {name}")),
     }
 }

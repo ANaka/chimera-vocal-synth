@@ -4,7 +4,7 @@ import type { VoiceSource, VoiceTelemetry } from "../wasm/types.ts";
 import type { Segment, PlannedSegment } from "../wasm/types.ts";
 import type { Gesture } from "../wasm/types.ts";
 import type { CreatureTelemetry } from "../wasm/types.ts";
-import type { BeatStep } from "../wasm/types.ts";
+import type { BeatStep, BodyMix } from "../wasm/types.ts";
 
 export interface PhraseMsg {
   segments: Segment[];
@@ -15,7 +15,7 @@ export interface PhraseMsg {
 export type BodyName = "male" | "female" | "child";
 
 export type ToWorklet =
-  | { type: "body"; body: BodyName }
+  | { type: "body"; body: BodyMix }
   | { type: "artic"; values: Partial<HumanArtic>; tipFree?: boolean }
   | { type: "source"; values: Partial<VoiceSource> }
   | { type: "gate"; level: number }
@@ -40,7 +40,7 @@ export interface TelemetryMessage {
   t: VoiceTelemetry;
   /** fraction of the render-quantum budget used by the engine (smoothed) */
   load: number;
-  body: BodyName;
+  body: BodyMix;
   nPh: number;
   nOr: number;
   /** beatbox step under the playhead (−1 when the sequencer is stopped) */
@@ -62,7 +62,7 @@ export interface CreatureTelemetryMessage {
 }
 
 export type FromWorklet =
-  | { type: "ready"; sampleRate: number; body: BodyName; nPh: number; nOr: number; creature: string }
+  | { type: "ready"; sampleRate: number; body: BodyMix; nPh: number; nOr: number; creature: string }
   | TelemetryMessage
   | CreatureTelemetryMessage
   | PlannedMessage

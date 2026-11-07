@@ -268,3 +268,35 @@ fn compare_csd_refuses_an_unmapped_phoneme() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("unmapped CSD phonemes: qq"));
 }
+
+#[test]
+fn render_notes_artic_tracks_follow_the_sound_without_changing_it() {
+    let melody = tmp("melody.json");
+    std::fs::write(
+        &melody,
+        r#"{"bpm": 120, "t0": 0, "lyrics": "Take my hand", "notes": [[0, 1], [67, 1], [63, 0.5], [60, 1.5]]}"#,
+    )
+    .unwrap();
+    let (plain, tracked, tracks) = (tmp("notes-plain"), tmp("notes-tracked"), tmp("notes-artic.json"));
+    chimera(&["render", "notes", &melody, &plain, "female"]);
+    let stdout = chimera(&["render", "notes", &melody, &tracked, "female", "--artic", &tracks]);
+    let a = std::fs::read(format!("{plain}.wav")).unwrap();
+    let b = std::fs::read(format!("{tracked}.wav")).unwrap();
+    assert!(a == b, "--artic changed the sound");
+
+    let j: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&tracks).unwrap()).unwrap();
+    assert_eq!(j["rate"], 100);
+    let keys: Vec<&str> = j["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap()).collect();
+    assert_eq!(keys.len(), 17);
+    let frames = j["frames"].as_array().unwrap();
+    // one frame at t = 0 and one per 480 samples rendered
+    let samples = (a.len() - 44) / 2;
+    assert_eq!(frames.len(), 1 + samples.div_ceil(480), "{stdout}");
+    assert!(frames.iter().all(|f| f.as_array().unwrap().len() == 17));
+    // the lips close for the /m/ of "my" (its note starts at 1 s) and open for its vowel
+    let lip = keys.iter().position(|k| *k == "lipAp").unwrap();
+    let ap = |i: usize| frames[i][lip].as_f64().unwrap();
+    let closed = (85..105).map(ap).fold(f64::MAX, f64::min);
+    let open = (105..125).map(ap).fold(f64::MIN, f64::max);
+    assert!(closed < 0.1 && open > 0.5, "lipAp closed {closed}, open {open}");
+}

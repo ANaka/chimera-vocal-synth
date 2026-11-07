@@ -238,7 +238,15 @@ impl HumanVoice {
         v.airway.apply(&x, 0.0);
         v.airway.net.snap_to_targets();
         // smaller bodies radiate more high-frequency (derivative) energy at their higher f0
-        v.output_gain *= if v.airway.body.scale < 0.95 { 0.55 } else { 1.0 };
+        // (a ramp from the adult female's scale up to the adult male's, so blended bodies have no step)
+        let sc = v.airway.body.scale;
+        v.output_gain *= if sc >= 1.0 {
+            1.0
+        } else if sc <= 0.9 {
+            0.55
+        } else {
+            0.55 + 0.45 * (sc - 0.9) / 0.1
+        };
         v.apply_source();
         v
     }

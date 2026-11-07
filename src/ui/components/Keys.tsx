@@ -1,10 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store.ts";
 import { midiSupported } from "../midi.ts";
+import { nearestBody, type BodyMix } from "../body.ts";
 
 /** Computer-keyboard layout: two rows like a piano (A W S E D F T G Y H U J K O L P ;). */
 const KEYMAP: Record<string, number> = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12, o: 13, l: 14, p: 15, ";": 16 };
-const BASE: Record<string, number> = { male: 48, female: 57, child: 60 };
+const BASES: Record<string, number> = { male: 48, female: 57, child: 60 };
+/** the lowest key, from the nearest preset body (so the keys stay on whole octaves of C/A) */
+const BASE = (b: BodyMix) => BASES[nearestBody(b)];
 
 export function Keys() {
   const body = useStore((s) => s.body);
@@ -13,10 +16,11 @@ export function Keys() {
   const noteOff = useStore((s) => s.noteOff);
   const start = useStore((s) => s.start);
   const octave = useRef(0);
-  const base = BASE[body] + octave.current * 12;
+  const base = BASE(body) + octave.current * 12;
 
   useEffect(() => {
-    const down = new Set<string>();
+    /** pressed key → the note it played (released as that note, whatever the body or octave now) */
+    const down = new Map<string, number>();
     const onDown = (e: KeyboardEvent) => {
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
@@ -27,19 +31,21 @@ export function Keys() {
       if (k === "z") octave.current = Math.max(-2, octave.current - 1);
       if (k === "x") octave.current = Math.min(2, octave.current + 1);
       if (!(k in KEYMAP) || down.has(k)) return;
-      down.add(k);
+      const midi = BASE(useStore.getState().body) + octave.current * 12 + KEYMAP[k];
+      down.set(k, midi);
       void start();
-      noteOn(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+      noteOn(midi);
       e.preventDefault();
     };
     const onUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (!down.has(k)) return;
+      const midi = down.get(k);
+      if (midi === undefined) return;
       down.delete(k);
-      noteOff(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+      noteOff(midi);
     };
     const onBlur = () => {
-      for (const k of down) noteOff(BASE[useStore.getState().body] + octave.current * 12 + KEYMAP[k]);
+      for (const midi of down.values()) noteOff(midi);
       down.clear();
     };
     window.addEventListener("keydown", onDown);
@@ -64,7 +70,7 @@ export function Keys() {
   return (
     <div className="keys-row">
       <MidiButton />
-      <div className="keys" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
+      <div className="keys" data-layout="layered" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
         <div className="white-row">
           {whites.map((m) => (
             <button key={m} className={`key white${held.includes(m) ? " down" : ""}`} onPointerDown={press(m)} onPointerUp={release(m)} onPointerCancel={release(m)} aria-label={`Note ${m}`} />

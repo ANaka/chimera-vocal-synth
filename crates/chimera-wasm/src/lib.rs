@@ -34,7 +34,7 @@
 
 pub mod api;
 
-use chimera::anatomy::human::{ArticPatch, BodyName, N_ARTIC};
+use chimera::anatomy::human::{ArticPatch, BodyMix, N_ARTIC};
 use chimera::control::score::{Gesture, Label, N_CONTROL, Targets};
 use chimera::engine::{Engine, MAX_SCHEDULE};
 use chimera::phonetics::beatbox::BeatStep;
@@ -132,14 +132,6 @@ pub struct Handle {
     /// the creature's telemetry (sized when it is chosen) and its flat block
     ctele: Option<chimera::creatures::voice::CreatureTelemetry>,
     ctele_block: Vec<f64>,
-}
-
-fn bodies(i: u32) -> BodyName {
-    match i {
-        1 => BodyName::Female,
-        2 => BodyName::Child,
-        _ => BodyName::Male,
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -274,15 +266,15 @@ pub unsafe extern "C" fn engine_set_gate(h: *mut Handle, level: f64) {
     handle!(h).engine.set_gate(level);
 }
 
-/// Switch body (0 male, 1 female, 2 child). Allocates. The new voice's node counts can be read
-/// with `engine_n_ph`/`engine_n_or`.
+/// Switch body: `female` 0 (male) … 1 (female), `child` 0 (adult) … 1 (child); see `BodyMix`.
+/// Allocates. The new voice's node counts can be read with `engine_n_ph`/`engine_n_or`.
 ///
 /// # Safety
 /// `h` must be a live handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn engine_set_body(h: *mut Handle, body: u32) {
+pub unsafe extern "C" fn engine_set_body(h: *mut Handle, female: f64, child: f64) {
     let h = handle!(h);
-    h.engine.set_body(bodies(body));
+    h.engine.set_body(BodyMix::new(female, child));
     h.engine.telemetry(&mut h.tele); // resize the telemetry buffers for the new voice
 }
 
@@ -324,12 +316,15 @@ pub unsafe extern "C" fn engine_n_or(h: *mut Handle) -> u32 {
 /// # Safety
 /// `h` must be a live handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn engine_body(h: *mut Handle) -> u32 {
-    match handle!(h).engine.info().body {
-        BodyName::Male => 0,
-        BodyName::Female => 1,
-        BodyName::Child => 2,
-    }
+pub unsafe extern "C" fn engine_body_female(h: *mut Handle) -> f64 {
+    handle!(h).engine.info().body.female
+}
+
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_body_child(h: *mut Handle) -> f64 {
+    handle!(h).engine.info().body.child
 }
 
 /// Evaluate one of the engine's math functions (diagnostics: native and wasm must agree bit for

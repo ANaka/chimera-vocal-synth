@@ -1,13 +1,53 @@
-/** Design tokens shared by canvas renderers (CSS mirrors these as custom properties). */
+/**
+ * The vector-display palette (sampled from the NORAD screens in WarGames; see docs/mockups).
+ * Blue is the body and structure, amber is sound, and green/red/pink/white are the four control
+ * slots: each screen maps its own four controls onto them and draws what they move in the same
+ * colour. CSS mirrors these as custom properties in styles.css.
+ */
+export const V = {
+  blue: "#4fb6f2",
+  blueMid: "#3487c4",
+  blueDim: "#1f5f8c",
+  frame: "#133954",
+  green: "#5be381",
+  red: "#ff5d40",
+  pink: "#ff73cf",
+  white: "#eef6f8",
+  amber: "#ffb340",
+};
+/** the four control slots, in order */
+export const SLOTS = [V.green, V.red, V.pink, V.white] as const;
+
+/** mix two #rrggbb colours */
+export function mix(hex: string, to: string, u: number): string {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16);
+  const ch = (s: number) => Math.round(((a >> s) & 255) * (1 - u) + ((b >> s) & 255) * u);
+  return "#" + [16, 8, 0].map((s) => ch(s).toString(16).padStart(2, "0")).join("");
+}
+/** the whitish core of a bright beam in this colour */
+export const core = (hex: string): string => mix(hex, "#ffffff", 0.55);
+
+const HEAT: [number, string][] = [[0, "#3a2408"], [0.35, "#c9822a"], [0.6, "#ffb340"], [0.82, "#ffe39a"], [1, "#fff8ec"]];
+/** sound level 0..1 → dim amber → amber → pale yellow → white */
+export function heat(level: number): string {
+  const v = Math.max(0, Math.min(1, level));
+  for (let i = 1; i < HEAT.length; i++) if (v <= HEAT[i][0]) return mix(HEAT[i - 1][1], HEAT[i][1], (v - HEAT[i - 1][0]) / (HEAT[i][0] - HEAT[i - 1][0]));
+  return HEAT[HEAT.length - 1][1];
+}
+
+/**
+ * Older tokens, remapped onto the vector palette so screens not yet redrawn in the new style
+ * still sit on black in blue and amber.
+ */
 export const C = {
   black: "#000000",
-  console: "#2a3035",
-  inset: "#20262a",
-  line: "#3c444a",
-  text: "#e8eaeb",
-  textDim: "#9aa3a8",
-  caliper: "#f2cf5b",
-  caliperDim: "rgba(242, 207, 91, 0.45)",
+  console: "#000000",
+  inset: "#000000",
+  line: V.frame,
+  text: V.blue,
+  textDim: V.blueMid,
+  caliper: V.amber,
+  caliperDim: "rgba(255, 179, 64, 0.45)",
   // MRI-like tissue intensities (T1-ish)
   fat: "#bdbdbd",
   skin: "#a8a8a8",
