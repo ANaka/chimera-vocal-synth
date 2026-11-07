@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Anatomy3D } from "../render/anatomy3d.ts";
+import { Petting } from "../render/petting.ts";
 import { drawReadouts } from "../render/readouts.ts";
 import { Glow, label } from "../render/vector.ts";
 import { engine } from "../../audio/AudioEngine.ts";
@@ -124,6 +125,25 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     };
     canvas.addEventListener("dblclick", home);
 
+    // petting: a mouse wiggled over the top of the head (no button down: that turns the head)
+    const pet = new Petting();
+    let crown: { x: number; y: number; cmPx: number } | null = null;
+    let lastPt: [number, number] | null = null;
+    const onHover = (e: PointerEvent) => {
+      if (e.buttons !== 0 || e.pointerType === "touch" || !crown) {
+        lastPt = null;
+        return;
+      }
+      const p: [number, number] = [e.offsetX, e.offsetY];
+      // over the crown: within 6 cm of its top, and not below the brow
+      const near = Math.hypot(p[0] - crown.x, p[1] - crown.y) < 6 * crown.cmPx && p[1] < crown.y + 4.5 * crown.cmPx;
+      if (near && lastPt) pet.stroke(Math.hypot(p[0] - lastPt[0], p[1] - lastPt[1]) / crown.cmPx);
+      lastPt = near ? p : null;
+    };
+    const offHead = () => (lastPt = null);
+    canvas.addEventListener("pointermove", onHover);
+    canvas.addEventListener("pointerleave", offHead);
+
     let w = 0, h = 0, dpr = 1;
     const maxDpr = () => Math.min(feedRef.current?.maxDpr ?? 2, window.devicePixelRatio || 1);
     /** a fed head (no settings of its own to keep) goes back to its framing when its pane changes shape */
@@ -169,6 +189,7 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
         a = tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic;
       }
       const view = feed ? feed.view : st.view;
+      r.face.content = pet.content;
       r.face.update(tele, elapsed);
       const m = feed ? feed.model : model.current;
       if (m && w > 0 && h > 0) {
@@ -215,6 +236,10 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
           drawReadouts(ctx, { w, h, compact: r.compact, slotX: w - Math.min(340, w * 0.42), slotY: h - Math.min(236, h * 0.3) }, formantsRef.current ? formants : [], info, slots);
         }
         overlayRef.current?.(ctx, r.faceView(m, f, a), m, f, a, { w, h, dt });
+        // the hearts start beside the crown on the side the face looks to, and drift that way
+        crown = r.crown(m);
+        pet.update(elapsed, [crown.x + r.facing * 7 * crown.cmPx, crown.y + 0.5 * crown.cmPx], crown.cmPx);
+        pet.draw(ctx, r.facing, crown.cmPx);
         glow.apply(canvas, ctx, dpr);
       }
       raf = requestAnimationFrame(loop);
@@ -224,6 +249,8 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
       cancelAnimationFrame(raf);
       ro.disconnect();
       canvas.removeEventListener("dblclick", home);
+      canvas.removeEventListener("pointermove", onHover);
+      canvas.removeEventListener("pointerleave", offHead);
       controls.dispose();
       r.dispose();
       gl.dispose();

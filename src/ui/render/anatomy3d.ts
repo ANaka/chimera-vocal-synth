@@ -734,6 +734,16 @@ export class Anatomy3D {
     return Math.hypot(x1 - x0, y1 - y0);
   }
 
+  /** the top of the head on screen (CSS px) and the head's scale there (px per body cm) */
+  crown(model: VoiceModel): { x: number; y: number; cmPx: number } {
+    const rest = this.restFor(model);
+    const k = model.tract.scale;
+    const s = rest.head.at(rest.head.y1 - 1.2 * k);
+    const cx = s ? (s.F + s.Bk) / 2 : rest.center.x;
+    const [x, y] = this.project(cx, rest.head.y1, 0);
+    return { x, y, cmPx: this.pxPerCmAt(cx, rest.head.y1, 0) };
+  }
+
   /** what the words at the mouth (and other overlays) need of this view */
   faceView(model: VoiceModel, f: HumanFrame, a: HumanArtic): FaceView {
     const lips = faceHandles(model, f, a).find((h) => h.id === "lips")!.pos;
