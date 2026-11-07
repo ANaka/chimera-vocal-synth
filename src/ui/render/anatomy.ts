@@ -153,7 +153,7 @@ export class AnatomyRenderer {
   private lastEcho = -1;
   /** where the eye looks */
   private gaze = new Gaze();
-  /** brows, lids and cheeks, from the voice */
+  /** brows, lids and cheeks, from the voice (the view updates it) */
   readonly face = new Expression();
 
   constructor() {
@@ -242,7 +242,6 @@ export class AnatomyRenderer {
     opts: { hover: HandleId | null; drag: HandleId | null; dt: number; formants: number[]; slots: Slot[]; info: string[] },
   ): void {
     this.clock += opts.dt;
-    this.face.update(tele, opts.dt);
     const G = this.geometry(model, f, a);
     const pts = (v: Vec[]) => v.map((p) => this.P(p));
     const line = (v: Vec[], color: string, w: number, o: { alpha?: number; hot?: boolean; close?: boolean } = {}) => beamPts(ctx, pts(v), color, w, o);

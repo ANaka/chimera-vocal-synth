@@ -76,6 +76,8 @@ export class Expression {
   private secondBlink = false;
   private lastStep = -1;
 
+  /** dt: the real time since the last update (s), not a frame-capped one, so a held note or a blink
+   *  lasts as long at a low frame rate */
   update(tele: TelemetryMessage | null, dt: number): void {
     this.clock += dt;
     const t = tele?.t;
@@ -120,8 +122,13 @@ export class Expression {
     this.lid = Math.max(blink, this.hold);
 
     // ---- the 3D head: chin up for high notes, a nod on the beat, a sway on a long note, the vibrato's wobble
+    // a nod for each beat (four steps) the sequencer passed since the last frame, the bar's first the
+    // hardest; a slow frame that skips the beat's own step still nods, once
     const step = tele?.beatStep ?? -1;
-    if (step !== this.lastStep && step >= 0 && step % 4 === 0) this.nodSpring.v -= step % 16 === 0 ? 1.3 : 0.8;
+    if (step >= 0 && this.lastStep >= 0 && step !== this.lastStep) {
+      const wrapped = step < this.lastStep;
+      if (wrapped || Math.floor(step / 4) !== Math.floor(this.lastStep / 4)) this.nodSpring.v -= wrapped || Math.floor(step / 16) !== Math.floor(this.lastStep / 16) ? 1.3 : 0.8;
+    }
     this.lastStep = step;
     this.nod = this.nodSpring.step(0.13 * this.brow, dt);
     const sway = smooth(0.6, 2, this.held) * 0.07 * Math.sin(this.clock * 1.7);

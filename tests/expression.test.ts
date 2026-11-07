@@ -72,4 +72,26 @@ describe("expression", () => {
     // the octave note held for two seconds: eyes nearly shut by its end
     expect(lids[399]).toBeGreaterThan(0.6);
   });
+
+  test("a slow frame rate keeps time, and a skipped beat step still nods", () => {
+    const v = new WasmVoice(FS);
+    v.render(480);
+    const base = telemetry(v);
+    const at = (f0: number, beatStep = -1): TelemetryMessage => ({ ...base, beatStep, t: { ...base.t, f0, voicing: 1, gate: 1, outRms: 0.1 } });
+    // three frames a second: two seconds low, then two an octave up
+    const e = new Expression();
+    for (let i = 0; i < 6; i++) e.update(at(110), 1 / 3);
+    for (let i = 0; i < 6; i++) e.update(at(220), 1 / 3);
+    expect(e.lid).toBeGreaterThan(0.6);
+    // the sequencer moves from step 3 to 5 between frames: the beat at 4 nods the head
+    const b = new Expression();
+    b.update(at(110, 3), 0.01);
+    b.update(at(110, 5), 0.01);
+    let nod = 0;
+    for (let i = 0; i < 30; i++) {
+      b.update(at(110, 5), 0.01);
+      nod = Math.min(nod, b.nod);
+    }
+    expect(nod).toBeLessThan(-0.02);
+  });
 });

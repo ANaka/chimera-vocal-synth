@@ -641,7 +641,7 @@ export class Anatomy3D {
   compact = false;
   private clock = 0;
   private readonly gaze = new Gaze();
-  /** brows, lids, cheeks and the head's nods, from the voice */
+  /** brows, lids, cheeks and the head's nods, from the voice (the view updates it) */
   readonly face = new Expression();
   /** the camera in the head's own frame (the head nods and sways under it) */
   private readonly eye = new THREE.Vector3();
@@ -735,7 +735,6 @@ export class Anatomy3D {
     const rest = this.restFor(model);
     const k = model.tract.scale;
     const face = this.face;
-    face.update(tele, dt);
     this.headPose(rest, k);
     const phi = jawAngle(model, a.jaw);
     const C = rest.condyle;
