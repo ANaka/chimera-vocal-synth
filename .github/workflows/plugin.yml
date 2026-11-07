@@ -1,6 +1,3 @@
-# MOVE ME to .github/workflows/plugin.yml (the GitHub App that pushes this branch may not write workflows).
-# Builds the CHIMERA plugin (VST3 + CLAP) for macOS as a universal binary, validates it, and
-# uploads the bundles as a downloadable artifact. Builds are ad-hoc signed, not notarized.
 name: plugin
 
 on:
