@@ -59,6 +59,9 @@ opens a new one, update this list and give the experiment's number.
      the fewer-notes guard (barely voiced short notes, lead 5). Retry it once lead 5 is fixed.
    - The like-for-like judge (after experiment 6) and experiment 8 have both cleared the way: retry
      it as it was. Rate cost is 0.64 at experiment 8.
+   - Experiment 9 kept 6.0 Hz: rate cost 0.64 → 0. What is left is the share (0.65): the synth puts
+     vibrato on every long note, she on about two thirds. That is a planner choice
+     (`vibrato_gesture`), not the source's.
 5. **Voicing in held notes.** Cost 0.26. Gaps mid-note, worst in en018a, en041a and en043a
    (0.65–0.70 voiced).
    - The same fault blocks other experiments (1, 3, 5): short notes on a stop coda that the synth
@@ -389,3 +392,31 @@ like, speech and bench OK) can now be retried as it was.
   (1.28). The cheapest next gain is experiment 5's vibrato rate (5.5 → 6.0 Hz, about −0.04, lead
   4), which the like-for-like judge already called BETTER. For H1−H2, try a wider F1 bandwidth or
   F1 that follows pitch (lead 1).
+
+### 9. Experiment 5 again under the like-for-like judge: a trained singer's vibrato rate, 6 Hz (kept)
+
+- Hypothesis: as in experiment 5. Every vibrato ran at 5.5 Hz (measured 5.50), and hers runs at
+  6.1. Trained singers' vibrato is 5.5–6.5 Hz, about 6 Hz on average (Prame 1994, Sundberg).
+  Raising the source's default rate should close the vibrato-rate gap (cost 0.64) and leave the
+  rest alone. Experiment 5 measured −0.044 and failed only the coverage guard, which the judge
+  change after experiment 6 replaced; that judge already called it BETTER.
+- Change: the default `vibrato_rate` 5.5 → 6.0 Hz in `DEFAULT_SOURCE`
+  (`crates/chimera/src/voice/human_voice.rs`) and in the glottis default
+  (`crates/chimera/src/sources/glottis.rs`). One value, experiment 5's first.
+- Singer: training score 0.747 → 0.714 (−0.034 like for like, BETTER), held-out 0.983 → 0.978.
+  - Vibrato rate cost 0.64 → 0.00 (synth 5.50 → 5.98 Hz, hers 6.08); held-out 0.09 → 0.00.
+  - Vibrato share 0.59 → 0.65 and depth 0.04 → 0.02: the detector reads a few notes differently
+    at the new rate.
+  - Aperiodicity 0.03 → 0.06, voiceless-initial onset 1.14 → 1.08, vowel-initial 1.47 → 1.49,
+    H1−H2 2.29 → 2.27. Note MCD 8.537 → 8.535 dB, envelope correlation 0.810 → 0.810, pitch error
+    4.81 → 4.86 cents. Nothing else moved by more than 0.01.
+- Speech: word error rate 39.4 → 39.4 % (OK; speech has no vibrato).
+- Speed: `os=2` 18.4 % → 19.4 %, then 18.4 % on the rerun.
+- Tests: after blessing twice (the first run fails `engine.rs`, as expected), `cargo test
+  --workspace` passes, `golden_analysis` and `golden_planning` included, and `bun test tests`
+  passes (18). The blessed `planning.json` changed too (the live-note plans carry the rate).
+- Commit: ec79db0.
+- Next: the vibrato group's last cost is the share (0.65): the synth vibratos every long note,
+  she about two thirds. The largest costs are still H1−H2 (2.27), the onsets (1.49 and 1.08) and
+  level 0–0.5 kHz (1.28). For H1−H2, try a wider F1 bandwidth or F1 that follows pitch (lead 1);
+  for the onsets, time the breath ramp to the first segment (lead 3).
