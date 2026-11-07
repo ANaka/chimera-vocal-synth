@@ -1,5 +1,6 @@
 //! Artifacts a listener reported in running speech (2026-11-07): a tinny ring as sounds fade, and
-//! a pop on the /p/ of "sharp" in "A cold paper walks under the sharp tree." (still open)
+//! a pop on the /p/ of "sharp" in "A cold paper walks under the sharp tree.", and a click before
+//! every /f/ and /v/ (found in experiment 18).
 use chimera::anatomy::human::{BODY_FEMALE, BODY_MALE, HumanBody};
 use chimera::phonetics::Plan;
 use chimera::phonetics::english::EnglishG2P;
@@ -107,4 +108,51 @@ fn the_p_of_sharp_does_not_pop() {
         assert!(most < 2.0 * lungs, "{name}: oral pressure reached {:.1}x the lungs'", most / lungs);
         assert!(db < -3.0, "{name}: the /p/ of sharp releases at {db:+.1} dB re the loudest vowel");
     }
+}
+
+/// dB of the 2 ms peaks in [t0, t1), relative to `re`.
+fn peaks_2ms(x: &[f32], t0: f64, t1: f64, re: f64) -> Vec<f64> {
+    let mut v = vec![];
+    let mut t = t0;
+    while t + 0.002 <= t1 + 1e-9 {
+        v.push(20.0 * (peak(x, idx(t), idx(t + 0.002)) / re + 1e-12).log10());
+        t += 0.002;
+    }
+    v
+}
+
+#[test]
+#[ignore = "target for the pronunciation batch: run with --ignored to measure it"]
+fn an_f_does_not_click() {
+    // The lips nearly closed, then sprang open as the lower lip tucked under the incisors (two
+    // steps in the labiodental geometry): a 2-4 ms [b]-like click about 16 ms before every /f/ and
+    // /v/, 15-20 dB above the fricative around it. Measured as the loudest 2 ms peak from 20 ms
+    // before the fricative to 10 ms into it, over the median 2 ms peak of its first 30 ms. Only
+    // where nothing else is in that window: between vowels, and the /f/ that opens a sentence (in
+    // "work faced" the /k/ release would count).
+    let mut g = EnglishG2P::new();
+    g.load_dict("four\tF AO1 R\nhours\tAW1 ER0 Z\nof\tAH1 V\nsteady\tS T EH1 D IY0\nwork\tW ER1 K\nfaced\tF EY1 S T\nus\tAH1 S\n");
+    let inputs: Vec<PhraseInput> = g
+        .to_phrases("Four hours of steady work faced us.")
+        .into_iter()
+        .map(|p| PhraseInput { segments: p.segments, intonation: Some(p.intonation), pause: Some(p.pause) })
+        .collect();
+    let mut loud = vec![];
+    for (body, name, f0) in VOICES {
+        for (what, plan) in [("ɑfɑ", plan_utterance(&tokenize_ipa("ˈɑfɑ"), &options(name, f0))), ("ɑvɑ", plan_utterance(&tokenize_ipa("ˈɑvɑ"), &options(name, f0))), ("four hours", plan_phrases(&inputs, &options(name, f0)))] {
+            let (plan, out) = render(plan, body, f0);
+            let first_only = what == "four hours";
+            for s in plan.segments.iter().filter(|s| s.ipa == "f" || s.ipa == "v").take(if first_only { 1 } else { usize::MAX }) {
+                let onset = peaks_2ms(&out, s.t0 - 0.02, s.t0 + 0.01, 1.0).into_iter().fold(f64::MIN, f64::max);
+                let mut body_db = peaks_2ms(&out, s.t0, s.t0 + 0.03, 1.0);
+                body_db.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let excess = onset - body_db[body_db.len() / 2];
+                println!("{what} ({name}): /{}/ at {:.2} s: onset peak {excess:+.1} dB over the fricative", s.ipa, s.t0);
+                if excess > 6.0 {
+                    loud.push(format!("{what} ({name}) /{}/ {excess:+.1} dB", s.ipa));
+                }
+            }
+        }
+    }
+    assert!(loud.is_empty(), "f/v onsets that click: {loud:?}");
 }

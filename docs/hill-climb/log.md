@@ -1193,3 +1193,13 @@ voice's sung consonants.
     "Her round" → "Roundtable" is an 80 ms /ɝ/ running into /ɹaʊ/ with no boundary between
     them: a lead for the /ɝ/ + /ɹ/ sequence, not the onset.
   - Don't retry the speech breath lead on its own.
+
+### Decision after experiment 18: a test for the /f/ click, under the artifact rule
+
+Experiment 18 found a click before every /f/ and /v/, as loud as a vowel. Whisper doesn't count
+it, but a listener would, so it gets the same treatment as the pop on "sharp": an ignored target
+test, `an_f_does_not_click` (the loudest 2 ms peak from 20 ms before the fricative to 10 ms into
+it, over the fricative's median 2 ms peak; between vowels and sentence-initially, both voices;
+fails above 6 dB). On the current engine it reads +8 to +20 dB; with experiment 18's patch
+(`out/onset/exp18-labiodental.patch`, `LAB_FRONT_OPENS` 0.7) +0.3 to +4.6 dB. The README's
+keep rule for target 3 now covers any artifact with such a test.

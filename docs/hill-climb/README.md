@@ -33,10 +33,13 @@ cared more about pronunciation. So batch 2 swaps the roles of the judges:
      releases are loud in general (about −5 dB in "apa"; female −13 dB).
   4. Anything else Whisper's errors point at: the training sentences' wrong words are listed by
      the speech judge.
-- **Target 3 has its own keep rule.** One pop can't move the word error rate by 1.5 points, so a
-  change aimed at it is kept when `the_p_of_sharp_does_not_pop` passes (un-ignore it in that
+- **Audible artifacts have their own keep rule.** Whisper can't count a pop or a click, and fixing
+  one can't move the word error rate by 1.5 points. A change aimed at an artifact with a target
+  test in `tests/consonant_artifacts.rs` is kept when that test passes (un-ignore it in that
   commit; this is the one test edit allowed), the speech verdict is not WORSE, and the singer
-  guard above holds. Everything else (bench, tests) as usual.
+  guard above holds. Everything else (bench, tests) as usual. Targets: the pop on "sharp"
+  (`the_p_of_sharp_does_not_pop`, fixed by experiment 16) and the click before /f/ and /v/
+  (`an_f_does_not_click`, found by experiment 18).
 - **Branch:** `t3/pronunciation-hill-climb`, stacked on `t3/consonant-fixes` (the fix for the
   buzz, and the Bright control).
 
