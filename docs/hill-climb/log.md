@@ -108,6 +108,11 @@ opens a new one, update this list and give the experiment's number.
      the top of the pharynx that the recalibrated child /ə/ lands on). Fix that jump, then keep
      experiment 11 as it was. The /ʃ/ is still about 21 dB below the vowel (female), as loud as
      /f/: its level is the next thing to look at.
+   - Experiment 12 kept it (α = 1.6), together with the fix for that jump: the roof-contact
+     model's shortcut ignored how far a ray ends off the roof (the velopharyngeal port window).
+     Speech 40.73 → 36.09 %. "Sheet" is now heard in the male voice. Still failing: the female
+     "sheet", chair, chain, birch and chopped. Next: the /ʃ/'s level (teeth source gain, or
+     `w_dist` near 2.5 cm), then α = 1.2.
 
 ## Experiments
 
@@ -642,3 +647,64 @@ two last-digit floats). The beat notation stays fixed.
 recalibrated child /ə/ posture lands on a jump in the area function at the top of the pharynx,
 near the raised velum. That jump was already there; experiment 12 fixes it together with
 experiment 11's change.
+
+### 12. Experiment 11 again, with the velopharyngeal area jump fixed (kept)
+
+- Hypothesis: as in experiment 11. The /ʃ/'s front cavity, in front of the raised tongue tip,
+  took the mid-oral area law, so its resonance sat at 1.7–2.1 kHz and Whisper heard "feet" for
+  "sheet". Experiment 11's narrower law (`AreaLaw.ahead`) fixed that. It was reverted only
+  because the recalibrated child /ə/ landed on an area jump that was already in the geometry.
+  That jump is a fault in how the area function is computed, so fixing it belongs to this change.
+- The jump's cause: a probe of the child /ə/ posture (jaw 0.80, tbX 2.70, tbY 7.38, root −0.50)
+  found it at velum 1.11470 → 1.11471, on the second oral-fan ray (175°, still region 1, behind
+  the velum). The ray's raw gap is continuous (0.602 cm). Its gap after the soft-tissue roof
+  contact falls 0.602 → 0.439, so its area falls 0.98 → 0.63 cm². The ray ends on the
+  velopharyngeal port window, 1.4 mm (child) behind the roof's first point, the uvula's tip. So
+  `on_roof` still fades the contact model in, at 0.65. The model takes the narrowest tongue gap
+  among roof points ±`half` along the roof, but skips that search when `dc − half > 0.6k`. The
+  shortcut assumes a neighbour can be closer only by `half`, which holds only for a ray ending on
+  the roof. For a ray ending off it, a neighbour can be closer by `half + pr.dist`. Here the search
+  switched on with a neighbour at 0.35 cm, inside the contact range: `cap` 0 → 0.60 in one step.
+- Change: `crates/chimera/src/anatomy/human.rs`.
+  - Experiment 11's patch as logged: `AreaLaw.ahead = (1.6, 1.4)`, faded in by
+    `smoothstep(0, 0.4·k, mid.x − tip.x)`.
+  - The roof-contact search's bound is now `dc − half − pr.dist ≤ 0.6k`. With it, a ray whose
+    search is skipped has every neighbour farther than 0.6k, so `cap` and `w` are 0 either way
+    and the contact fades in continuously. The fix leaves the calibrated vowel table
+    byte-identical: no calibrated posture sits in the band it changes.
+  - Tables regenerated with `chimera calibrate vowels all` and `chimera calibrate consonants`,
+    the same postures as experiment 11's (child /ə/ identical).
+  - Values: α = 1.6 only. α = 1.2 was not retried. In experiment 11 it put note MCD at
+    8.648 dB, over the 8.636 dB guard, and the jump fix doesn't move the tables. It needs its own
+    run, with something to offset the MCD.
+- Speech: word error rate 40.73 → 36.09 % (training, **BETTER**), 50.67 → 45.67 % (held-out).
+  Experiment 11 read 35.76 %; the difference is within Whisper's run-to-run spread.
+  - Moved right: "chicken leg" (male, 5 → 1 errors), "juice" (male), "sharp" and "the thin road"
+    (female, also male 3 → 2), "soft hill" (female), "some bright doors" (male), "birch canoe"
+    (female, 7 → 6), "rice … round bowls" (male, 2 → 1).
+  - "Sheet" is heard in the male voice ("screw the sheet": the error moved to "glue"). The
+    female still hears "feet".
+  - One got worse: "her round table sings the dark rope" (female, 3 → 4, "the" dropped).
+  - Chair, chain, chopped and the female birch still fail.
+- Singer: training 0.582 → 0.584 (NO CLEAR CHANGE). Every guard holds: 0 notes off time, 0
+  dropped gestures, note MCD 8.536 → 8.628 dB, envelope correlation 0.811, pitch error 4.85
+  cents. Held-out 0.789 → 0.810. Level 0–0.5 kHz cost 1.22; nothing else moved by more than
+  0.02. The same as experiment 11.
+- Speed: `os=2` 18.2 % (baseline) → 18.4 %, at load average 10.
+- Tests: fixtures blessed twice, then `cargo test --workspace`. Everything passes, including
+  `geometry_continuity`, `golden_geometry` and `golden_planning`, except one:
+  - `golden_analysis` fails at its first "human |H|" check ("male neutral", 9 %): the README's
+    airway exception, since the tract geometry changed on purpose.
+  - With the human checks skipped in a local, uncommitted edit, the rest of `golden_analysis`
+    passes (tube networks, FFT, LPC, YIN, Nelder–Mead).
+  - `bun run wasm && bun test tests`: 30 pass.
+  - Fixtures restored.
+- Commit: 68f6274.
+- Next:
+  - The /ʃ/'s level: the female /ʃ/ is about 21 dB below its vowel, as quiet as her /f/, so she
+    still says "feet". Look at the teeth (obstacle) source's gain, and at how its weight
+    falls with the distance behind the teeth: /ʃ/ is at 2.5 cm, just short of where `w_dist`
+    starts to fade, at 2.6.
+  - Then α = 1.2, which moved /ʃ/ further in experiment 11.
+  - The affricates (chair, chain, chopped, birch) still fail: their /ʃ/ release is presumably as
+    weak.
