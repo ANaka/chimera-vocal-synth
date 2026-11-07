@@ -122,7 +122,6 @@ fn peaks_2ms(x: &[f32], t0: f64, t1: f64, re: f64) -> Vec<f64> {
 }
 
 #[test]
-#[ignore = "target for the pronunciation batch: run with --ignored to measure it"]
 fn an_f_does_not_click() {
     // The lips nearly closed, then sprang open as the lower lip tucked under the incisors (two
     // steps in the labiodental geometry): a 2-4 ms [b]-like click about 16 ms before every /f/ and
