@@ -88,12 +88,20 @@ Keep the change only if all of these hold:
 2. The speech verdict is **OK**.
 3. The bench is no more than **10 % slower**.
 4. **The tests pass.**
-   1. Run `CHIMERA_BLESS=1 cargo test --workspace`. This regenerates the golden fixtures in
-      `crates/chimera/tests/golden`, which change with any change to the sound.
-   2. Then run `cargo test --workspace` and `bun run wasm && bun test tests`. Both must pass.
-   3. Restore the fixtures with `git checkout -- crates/chimera/tests/golden`. They are blessed
-      once per batch, when the batch goes to a PR, so the history doesn't carry a copy of them
-      for every experiment. Until then the golden tests fail on this branch, which is expected.
+   1. Bless the golden fixtures in `crates/chimera/tests/golden`, which are snapshots of the
+      sound and change with any change to it. Run
+      `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast` **twice**: `engine.rs` reads a
+      fixture that `golden_planning` blesses, so its first run can fail.
+   2. Then run `cargo test --workspace --no-fail-fast` and `bun run wasm && bun test tests`.
+      Every test must pass, with one exception. If your change alters the airway's linear
+      acoustics on purpose (wall or radiation losses, tract geometry), the airway checks in
+      `golden_analysis` ("human |H|" and the ones after it) compare against TypeScript-era
+      transfer functions and will fail. Say so in the log; the batch PR regenerates them. Every
+      other check in it must pass.
+   3. Restore the fixtures with `git checkout -- crates/chimera/tests/golden`. They are
+      blessed once per batch, when the batch goes to a PR, so the history doesn't carry a copy
+      of them for every experiment. Until then the golden tests fail on this branch, which is
+      expected.
    4. `git status` must show only your change: no test file edited.
 
 **If kept:**
