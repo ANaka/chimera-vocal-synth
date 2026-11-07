@@ -223,7 +223,9 @@ export function CreatureView() {
       } else label(ctx, fit(ctx, p.label.toUpperCase(), cw - 22, 10, 0.16), cx + 15, cy + 4, lo);
       const f = fmtParam(paramValue(p.key, p.default), p);
       label(ctx, f.value, cx, cy + 14 + big, { size: big, color, weight: "m", ls: 0.02 });
-      if (f.unit) label(ctx, f.unit.toUpperCase(), cx, cy + 32 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });
+      // under the value, or beside it on a phone, where two rows of slots leave no room below
+      if (f.unit && compact) label(ctx, f.unit.toUpperCase(), cx + labelWidth(ctx, f.value, { size: big, weight: "m", ls: 0.02 }) + 6, cy + 14 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });
+      else if (f.unit) label(ctx, f.unit.toUpperCase(), cx, cy + 32 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });
     });
   });
   return <canvas ref={ref} className="creature-canvas" aria-label="Creature airway: its outline, its airways lit by sound pressure, and its sound sources" role="img" />;

@@ -58,7 +58,7 @@ export function mouthWords(now: () => MouthWord | null, color: string): OverlayF
       const wide = ctx.measureText(text).width * 1.08;
       const size = (wide > room ? (base * room) / wide : base) * (1 - 0.55 * u);
       const alpha = left === null ? 1 : 0.75 * (1 - u) ** 1.5;
-      label(ctx, text, x0 + age * 240, ly + size * 0.36 - age * 200, { size, color, weight: "m", ls: 0.05, alpha });
+      label(ctx, text, x0 + age * 240, ly + size * 0.36 - age * 200, { size, color, weight: "m", ls: 0.05, alpha, moving: left !== null });
     }
     if (trail[trail.length - 1].left === null) seg(ctx, lx + 10, ly, x0 - 10, ly, color, 1, { dash: [2, 5], alpha: 0.7 });
   };

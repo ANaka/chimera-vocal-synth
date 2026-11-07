@@ -110,6 +110,11 @@ export interface LabelOpts {
   /** letter spacing as a fraction of the size */
   ls?: number;
   alpha?: number;
+  /**
+   * text in flight, meant to pass over other text or off the edge (a word flying off the lips);
+   * tools/layout-lint.ts skips it
+   */
+  moving?: boolean;
 }
 
 /** Hershey text (pass capitals for chrome-style labels) */
@@ -123,7 +128,10 @@ export function label(ctx: CanvasRenderingContext2D, text: string, x: number, y:
   ctx.textAlign = o.align ?? "left";
   ctx.textBaseline = o.baseline ?? "alphabetic";
   ctx.fillStyle = o.color ?? V.blue;
+  const c = ctx as CanvasRenderingContext2D & { layoutMoving?: boolean };
+  if (o.moving) c.layoutMoving = true;
   ctx.fillText(text, x, y);
+  c.layoutMoving = undefined;
   ctx.restore();
 }
 

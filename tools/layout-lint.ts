@@ -1,6 +1,8 @@
 /**
- * Layout lint: loads every mode at phone, tablet and desktop sizes in headless Chromium, before and
- * after audio starts, and fails on layout mistakes a screenshot review keeps missing:
+ * Layout lint: a smoke test of the layout. Loads every mode at phone, tablet and desktop sizes in
+ * headless Chromium, before and after audio starts, then some alternate states (every encoder page,
+ * every creature, the 3D face, a phrase being spoken), and fails on mistakes screenshot reviews
+ * kept missing:
  *
  *  - overlap     two pieces of text or controls drawn over each other (DOM text, buttons, inputs,
  *                dials, and text drawn on canvases, which the page reports by wrapping fillText)
@@ -18,13 +20,14 @@
  *    outside it (piano keys: the black keys sit on the white ones)
  *  - data-layout="scatter" on a canvas: its text may overlap other text on the same canvas
  *    (a chart that plots labels at data positions)
+ *  - label(..., { moving: true }) on canvas text in flight (a word flying off the lips)
  *  Text truncated with an ellipsis or a line clamp is reported as a warning, not an error.
  *
  * Usage: bun tools/layout-lint.ts [--url http://...] [--out out/layout] [--only 1440x900] [--mode play]
  * Without --url it starts its own Vite dev server (build the wasm first: bun run wasm).
  * Screenshots of every failing view are saved under --out.
  */
-import { chromium, type Page } from "playwright-core";
+import { chromium } from "playwright-core";
 import { mkdirSync, rmSync } from "node:fs";
 
 const arg = (name: string) => {
@@ -189,36 +192,41 @@ function inspect(): Problem[] {
   return problems;
 }
 
-/** before any page script: record the text each canvas draws in its latest frame */
+/**
+ * Before any page script: record the text each canvas has drawn since it was last wiped. Every
+ * screen starts its frame by filling (or clearing) the whole canvas, so a wipe starts a new list;
+ * text from earlier frames, or erased since, is never inspected.
+ */
 function hookCanvasText() {
-  type Item = { text: string; x0: number; y0: number; x1: number; y1: number; size: number; frame: number };
+  type Item = { text: string; x0: number; y0: number; x1: number; y1: number; size: number };
   const log = new Map<HTMLCanvasElement, Item[]>();
   (window as unknown as { __canvasText: typeof log }).__canvasText = log;
-  let frame = 0;
-  const raf = window.requestAnimationFrame.bind(window);
-  window.requestAnimationFrame = (cb) => raf((t) => {
-    frame++;
-    cb(t);
-  });
-  const fill = CanvasRenderingContext2D.prototype.fillText;
-  CanvasRenderingContext2D.prototype.fillText = function (this: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth?: number) {
+  const P = CanvasRenderingContext2D.prototype;
+  for (const name of ["fillRect", "clearRect"] as const) {
+    const orig = P[name];
+    P[name] = function (this: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+      orig.call(this, x, y, w, h);
+      const t = this.getTransform(), c = this.canvas;
+      const x0 = Math.min(t.a * x, t.a * (x + w)) + t.e, y0 = Math.min(t.d * y, t.d * (y + h)) + t.f;
+      const x1 = Math.max(t.a * x, t.a * (x + w)) + t.e, y1 = Math.max(t.d * y, t.d * (y + h)) + t.f;
+      if (x0 <= 0 && y0 <= 0 && x1 >= c.width && y1 >= c.height) log.set(c as HTMLCanvasElement, []);
+    };
+  }
+  const fill = P.fillText;
+  P.fillText = function (this: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth?: number) {
     fill.call(this, text, x, y, maxWidth as number);
-    if (!text.trim() || this.globalAlpha < 0.05) return;
+    // label({ moving: true }) marks text in flight, meant to cross other text (src/ui/render/vector.ts)
+    if (!text.trim() || this.globalAlpha < 0.05 || (this as { layoutMoving?: boolean }).layoutMoving) return;
     const m = this.measureText(text);
     const t = this.getTransform();
     // the box in canvas pixels (the transforms used here only scale and translate)
     const xs = [x - m.actualBoundingBoxLeft, x + m.actualBoundingBoxRight].map((v) => t.a * v + t.e);
     const ys = [y - m.actualBoundingBoxAscent, y + m.actualBoundingBoxDescent].map((v) => t.d * v + t.f);
     const size = parseFloat(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? "10") * Math.abs(t.d);
-    let items = log.get(this.canvas as HTMLCanvasElement);
-    if (!items || (items.length && items[0].frame !== frame)) log.set(this.canvas as HTMLCanvasElement, (items = []));
-    items.push({ text, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), size, frame });
+    const c = this.canvas as HTMLCanvasElement;
+    if (!log.has(c)) log.set(c, []);
+    log.get(c)!.push({ text, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), size });
   };
-}
-
-async function settle(page: Page) {
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(350);
 }
 
 async function main() {
@@ -239,8 +247,9 @@ async function main() {
   const viewports = only ? VIEWPORTS.filter((v) => `${v.w}x${v.h}` === only).concat(VIEWPORTS.some((v) => `${v.w}x${v.h}` === only) ? [] : [{ w: +only.split("x")[0], h: +only.split("x")[1] }]) : VIEWPORTS;
   const modes = onlyMode ? [onlyMode] : MODES;
 
-  const browser = await chromium.launch({ headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
-  let errors = 0, warnings = 0;
+  // WebGL through SwiftShader, for the 3D face
+  const browser = await chromium.launch({ headless: true, args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  let errors = 0, warnings = 0, views = 0;
   for (const { w, h } of viewports) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
     await page.addInitScript(hookCanvasText);
@@ -248,31 +257,68 @@ async function main() {
       console.log(`  pageerror at ${w}x${h}: ${e.message}`);
       errors++;
     });
-    await page.goto(url, { waitUntil: "networkidle" });
-    for (const started of [false, true]) {
-      if (started) {
-        await page.locator(".topbar button.primary").click();
-        await page.waitForSelector(".load", { timeout: 15000 });
+    const check = async (state: string, wait = 350) => {
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(wait);
+      views++;
+      const problems = (await page.evaluate(inspect)) as Problem[];
+      const errs = problems.filter((p) => !p.warn), warns = problems.filter((p) => p.warn);
+      errors += errs.length;
+      warnings += warns.length;
+      if (!problems.length) return;
+      console.log(`\n${w}x${h} ${state}: ${errs.length} error(s), ${warns.length} warning(s)`);
+      for (const p of [...errs, ...warns]) console.log(`  ${p.warn ? "warn " : "ERROR"} ${p.kind.padEnd(11)} ${p.detail}`);
+      if (errs.length) await page.screenshot({ path: `${out}/${w}x${h}-${state.replace(/[^a-z0-9]+/gi, "-")}.png`, fullPage: true });
+    };
+    const mode = (m: string) => page.getByRole("radio", { name: new RegExp(`^${m}$`, "i") }).click();
+    // every encoder page of the screens on the right (each page has its own labels)
+    const pages = async (state: string) => {
+      const tabs = page.locator(".right .enc-tab");
+      for (let i = 1; i < (await tabs.count()); i++) {
+        await tabs.nth(i).click();
+        await check(`${state}, controls page ${(await tabs.nth(i).textContent())?.trim()}`);
       }
-      for (const mode of modes) {
-        await page.getByRole("radio", { name: new RegExp(`^${mode}$`, "i") }).click();
-        await settle(page);
-        const problems = (await page.evaluate(inspect)) as Problem[];
-        const tag = `${w}x${h} ${mode}${started ? " (running)" : ""}`;
-        const errs = problems.filter((p) => !p.warn), warns = problems.filter((p) => p.warn);
-        errors += errs.length;
-        warnings += warns.length;
-        if (!problems.length) continue;
-        console.log(`\n${tag}: ${errs.length} error(s), ${warns.length} warning(s)`);
-        for (const p of [...errs, ...warns]) console.log(`  ${p.warn ? "warn " : "ERROR"} ${p.kind.padEnd(11)} ${p.detail}`);
-        if (errs.length) await page.screenshot({ path: `${out}/${w}x${h}-${mode}${started ? "-running" : ""}.png`, fullPage: true });
+      if (await tabs.count()) await tabs.first().click();
+    };
+    await page.goto(url, { waitUntil: "networkidle" });
+    for (const m of modes) {
+      await mode(m);
+      await check(m);
+    }
+    await page.locator(".topbar button.primary").click();
+    await page.waitForSelector(".load", { timeout: 15000 });
+    for (const m of modes) {
+      await mode(m);
+      await check(`${m} (running)`);
+      await pages(`${m} (running)`);
+      if (m === "play") {
+        // the 3D face lays its readouts out on its own
+        await page.locator(".view-toggles .toggle", { hasText: "3D" }).click();
+        await check("play (running), 3D", 2500);
+        await page.locator(".view-toggles .toggle", { hasText: "3D" }).click();
+      }
+      if (m === "speak") {
+        // the gestural score with a phrase in it, mid-utterance
+        await page.getByRole("button", { name: /^Speak$/ }).click();
+        await check("speak (running), speaking", 900);
+      }
+      if (m === "bestiary") {
+        // each creature has its own names and parameters
+        const specimens = page.locator(".s-gallery .specimen");
+        for (let i = 1; i < (await specimens.count()); i++) {
+          await specimens.nth(i).click();
+          const name = (await specimens.nth(i).locator(".specimen-name").textContent())?.trim();
+          await check(`bestiary (running), ${name}`);
+          await pages(`bestiary (running), ${name}`);
+        }
+        await specimens.first().click();
       }
     }
     await page.close();
   }
   await browser.close();
   await server?.close();
-  console.log(`\nlayout lint: ${errors} error(s), ${warnings} warning(s) across ${viewports.length} sizes × ${modes.length} modes × idle/running`);
+  console.log(`\nlayout lint: ${errors} error(s), ${warnings} warning(s) in ${views} views (${viewports.length} sizes)`);
   process.exit(errors ? 1 : 0);
 }
 
