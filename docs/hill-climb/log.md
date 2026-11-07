@@ -162,9 +162,9 @@ opens a new one, update this list and give the experiment's number.
    error changes. What it found instead is a geometry click on every /f/ and /v/ (−15 dB at a
    phrase start, −10 dB mid-word, louder than the vowels) from two steps in the labiodental
    geometry (`anatomy/human.rs`). The fix removes it and keeps the held /f/ within 1 dB, but
-   Whisper's total doesn't move (36.09 → 37.09 %). The patch is in experiment 18. Like the pop,
-   it is an artifact for the ear, not the word error rate: it needs its own keep rule (or a
-   check like `consonant_artifacts.rs`) from the owner.
+   Whisper's total doesn't move (36.09 → 37.09 %). The click is closed by experiment 19, which
+   kept experiment 18's patch under the artifact keep rule (`an_f_does_not_click` passes, +0.3
+   to +4.6 dB). The first-word errors stay open; see experiment 18's "Next".
 
 ## Experiments
 
@@ -1203,3 +1203,50 @@ it, over the fricative's median 2 ms peak; between vowels and sentence-initially
 fails above 6 dB). On the current engine it reads +8 to +20 dB; with experiment 18's patch
 (`out/onset/exp18-labiodental.patch`, `LAB_FRONT_OPENS` 0.7) +0.3 to +4.6 dB. The README's
 keep rule for target 3 now covers any artifact with such a test.
+
+### 19. The labiodental geometry hands over without a step: no click before /f/ and /v/ (kept)
+
+- Hypothesis (experiment 18 and the decision after it): two steps in the labiodental geometry
+  (`anatomy/human.rs`) make a [b]-like click, about vowel level, before every /f/ and /v/. The
+  lip-contact cap switched off at labiodental 0.5 in one control step, opening the near-closed
+  lips at once; and the front verticals in front of the tucked lower lip fell back to a floor
+  3.5 cm down, jumping the gap by about 2 cm and the tract's length by about 1 cm. Real lips
+  don't do either: the lower lip leaves the upper one gradually as it slides under the incisors.
+  Kept under the artifact rule, so the target is `an_f_does_not_click`, not the word error rate.
+- Change: experiment 18's patch as it was (`out/onset/exp18-labiodental.patch`), in
+  `crates/chimera/src/anatomy/human.rs`. `LAB_HANDOVER` 0.5, `LAB_GAP` 0.3, `LAB_FRONT_OPENS` 0.7;
+  no constant was adjusted. The cap hands over as `ap + LAB_GAP·k·s/(1−s)`, `s` =
+  smoothstep(0, 0.5, lab); a vertical in front of the lower lip's edge takes the lip's outer face
+  as its floor and opens to the old depth from labiodental 0.7 to 1. `an_f_does_not_click` is
+  un-ignored in the same commit.
+  - The test: male ɑfɑ +3.3, ɑvɑ +4.6, "four hours" +0.3 dB; female +2.9, +3.9, +0.8 dB (limit
+    6; +8 to +20 without the patch).
+- Speech: word error rate 36.09 → 37.09 % (training, NO CLEAR CHANGE), 45.67 → 45.67 %
+  (held-out). The same training moves as experiment 18's last value: male "sell" right (3 → 2);
+  female "rice … served" (3 → 4), "juice" (2 → 3), "Four hours" (6 → 7, Whisper stops at "For
+  our L"), male "paints the sweet stone" (4 → 5, "fast" → "first").
+  - My first grep of the judge's output, and a first per-sentence diff that filtered on the
+    wrong field, printed held-out transcripts along with the training ones. I didn't use them
+    for anything; the lines above come from a diff filtered on `set == "train"`.
+- Singer: training 0.584 → 0.589 (baseline 0.582: +0.007, within 0.05; NO CLEAR CHANGE).
+  Held-out 0.810 → 0.805. Guards: 0 notes off time, 0 dropped gestures, note MCD 8.628 →
+  **8.614 dB** (better, so the guard's small room isn't spent), envelope correlation 0.811, pitch
+  error 4.84 cents. Terms that moved, all by 0.02 or less: level 0–.5k cost 1.23 → 1.24, H1−H2
+  2.29 → 2.30, aperiodicity 0.05 → 0.07; held-out voiceless-initial onset 0.22 → 0.14.
+- Speed: `os=2` 26.1 % on the first run at load average 16 (baseline file 18.2 %). Rerun back to
+  back with the change reversed, twice: patched 27.9 / 23.0 %, HEAD 27.2 / 25.8 %. No slowdown;
+  the change adds a few comparisons per front vertical per control step.
+- Tests: fixtures blessed twice, then `cargo test --workspace --release --no-fail-fast`: 104
+  pass, `an_f_does_not_click` and `the_p_of_sharp_does_not_pop` included. The one failure is
+  `golden_analysis` at "male neutral" (9.2 %), experiment 12's geometry change; it reads the same
+  9.2055 % with this change reversed. The slow `calibrate_vowels_reproduces_the_committed_table`
+  (run with `--ignored`) passes, so the vowel tables need no recalibration. `bun run wasm && bun
+  test tests`: 30 pass. Fixtures restored.
+- Verdict: kept under the artifact rule. The click test passes, speech is not WORSE, the singer
+  guard holds (note MCD slightly better), the bench is not slower and the tests pass.
+- Commit: 5cf036b.
+- Next:
+  - Both artifact targets are closed. The front-to-back clusters (/pk/, /bd/, /tk/) still pump
+    to 3–6x (experiment 16's "Next"); they have no target test yet.
+  - The first-word errors and the /ɝ/ + /ɹ/ of "Her round" remain open (experiment 18's
+    "Next").
