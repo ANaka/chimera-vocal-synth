@@ -1366,5 +1366,4 @@ Three findings, all fixed in one commit:
   so in their entries). It prints training ones only.
 
 After the fixes: speech 36.75 % training, 44.33 % held-out; singer 0.587, held-out 0.811, note
-MCD 8.614 dB. `out/hill/best` holds this run. The listening page still plays experiment 19's
-renders: the fixes change held /f/ by 1.5–2.8 dB and short sung clusters, nothing else on it.
+MCD 8.614 dB. `out/hill/best` holds this run, and the listening page was rebuilt from it.
