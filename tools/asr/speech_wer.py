@@ -101,8 +101,9 @@ def main():
     report = {"wer": wer, "sentences": rows}
     with open(os.path.join(out, "wer.json"), "w") as f:
         json.dump(report, f, indent=1)
+    # only the training sentences' transcripts: a tuning loop must not read the held-out ones
     for r in rows:
-        if r["errors"]:
+        if r["errors"] and r["set"] == "train":
             print(f"  {r['set']:5s} {r['kind']:8s} {r['body']:6s} {r['errors']}/{r['words']}  {r['text']}  →  {r['heard']}")
     print("word error rate (%): " + ", ".join(f"{k} {v}" for k, v in sorted(wer.items())))
     if against:

@@ -231,3 +231,41 @@ fn a_ray_grazing_a_polyline_vertex_sees_no_tissue_layer_that_is_not_there() {
         assert!((c[j] - b[j]).abs() < 1e-3);
     }
 }
+
+#[test]
+fn no_area_jumps_as_the_lower_lip_tucks_for_f() {
+    // /f v/: the lower lip slides up under the upper incisors (labiodental 0 → 1) with the lips
+    // nearly shut. The vowel sweeps above start from open lips, so they never cross the handover
+    // from the lips' own contact to the incisor constriction, where steps made a click.
+    let mut jumps: Vec<String> = Vec::new();
+    let n = 400;
+    for (body_name, body) in BODIES {
+        let mut areas = Areas::new(body);
+        for jaw in [0.3, 0.5, 0.8, 1.2] {
+            for lip_ap in [0.05, 0.3, 0.8] {
+                let mut base = NEUTRAL;
+                base.jaw = jaw;
+                base.lip_ap = lip_ap;
+                base.lip_prot = 0.0;
+                let key = ArticKey::Labiodental;
+                let mut steps: Vec<f64> = Vec::with_capacity(n);
+                let mut prev = areas.at(&with(&base, key, 0.0));
+                for i in 1..=n {
+                    let cur = areas.at(&with(&base, key, i as f64 / n as f64));
+                    steps.push(max_diff(&cur, &prev));
+                    prev = cur;
+                }
+                for i in 0..steps.len() {
+                    // every step is checked here, not only the suspicious ones: the handover is
+                    // steep on purpose, and a jump inside it must still be found
+                    let mut f = |u: f64| areas.at(&with(&base, key, u));
+                    let j = jump_size(&mut f, i as f64 / n as f64, (i + 1) as f64 / n as f64, 0.05);
+                    if j > 0.05 {
+                        jumps.push(format!("{body_name} jaw={jaw} lipAp={lip_ap} labiodental={:.4}: {j:.2} cm²", (i + 1) as f64 / n as f64));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(jumps, Vec::<String>::new());
+}

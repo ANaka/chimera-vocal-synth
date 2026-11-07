@@ -267,7 +267,9 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             // the segment before that (the tip raised for /ɹ/ in "sharp tree"), reaches contact
             // sooner than from a vowel: with the usual lead it sealed ~20 ms before the front
             // closure opened, and the tongue then pumped the air shut between the two closures
-            Manner::Stop if pre_placed_behind_closure(&segs, i) => add_oral(&def.targets, t0 + PLACED_CLOSURE_DELAY, t1, 1.55, def.ipa),
+            // The delay leaves the closure 30 ms before its release (its 10 ms minimum hold and
+            // its ~20 ms early release), so a short sung stop isn't pushed past its own end.
+            Manner::Stop if pre_placed_behind_closure(&segs, i) => add_oral(&def.targets, t0 + js_min(PLACED_CLOSURE_DELAY, js_max(0.0, dur - 0.03)), t1, 1.55, def.ipa),
             Manner::Stop | Manner::Nasal => add_oral(&def.targets, t0, t1, 1.55, def.ipa),
             Manner::Tap => add_oral(&def.targets, t0, t1, 2.8, def.ipa),
             Manner::Trill => {

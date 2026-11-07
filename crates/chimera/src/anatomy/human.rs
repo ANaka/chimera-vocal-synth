@@ -512,6 +512,8 @@ const LAB_HANDOVER: f64 = 0.5;
 const LAB_GAP: f64 = 0.3;
 /// labiodental value from which the space in front of the tucked lower lip opens out
 const LAB_FRONT_OPENS: f64 = 0.7;
+/// how far in front of the lower lip's edge (cm, body-scaled) that opening reaches its full depth
+const LAB_FRONT_RAMP: f64 = 0.1;
 /// points on the tongue body's arc
 const ARC_POINTS: usize = 32;
 const MAX_CROSS: usize = 64;
@@ -1049,10 +1051,13 @@ impl HumanVocalTract {
                     // and the tract's length by ~1 cm as the edge passed it: a click on every /f/.
                     // The floor there starts as the lip's outer face, leaving the edge down and
                     // forward as its outline does (tangent 0.3 : −0.4), and opens to the old depth
-                    // as the tuck completes, so a held /f/ keeps its open front.
+                    // as the tuck completes, so a held /f/ keeps its open front. The opening grows
+                    // from nothing at the edge itself, so a ray the edge passes late in the tuck
+                    // doesn't jump from the lip to the open floor (up to 1.3 cm² in one step).
                     if x > ll_edge.x {
                         let face = js_min(ll_edge.y - (x - ll_edge.x) * 4.0 / 3.0, m.outer.y);
-                        let y_in = lerp(face, m.outer.y - 3.5 * k, smoothstep(LAB_FRONT_OPENS, 1.0, lab));
+                        let open = smoothstep(LAB_FRONT_OPENS, 1.0, lab) * smoothstep(0.0, LAB_FRONT_RAMP * k, x - ll_edge.x);
+                        let y_in = lerp(face, m.outer.y - 3.5 * k, open);
                         m.inner = v(x, y_in);
                         m.d = m.outer.y - y_in;
                     }
