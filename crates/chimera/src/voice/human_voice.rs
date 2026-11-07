@@ -296,7 +296,10 @@ impl HumanVoice {
         g.abduction = (if s.voiced { 0.1 * s.breathiness * s.breathiness } else { 0.2 + 0.1 * s.breathiness }) * k2;
         self.base_abduction = g.abduction;
         self.base_closure = 0.0;
-        g.chink = (0.004 + 0.03 * s.breathiness) * k2;
+        // Most voices, women's and trained singers' included, leave a small posterior gap between
+        // the arytenoids through the closed phase (Södersten & Lindestad 1990). It leaks a little
+        // air and damps the tract, which lifts H1 and the band below 500 Hz.
+        g.chink = (0.008 + 0.03 * s.breathiness) * k2;
         g.open_quotient = 0.78 - 0.36 * s.tension;
         // The folds close along their length and depth over a return phase, not all at once, so
         // a sung or spoken voice closes softly (0.22 at tension 0.55): an abrupt closure put
