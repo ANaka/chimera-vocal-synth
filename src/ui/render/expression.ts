@@ -56,6 +56,8 @@ export class Expression {
   lid = 0;
   /** extra gaze pitch (radians, up): the eyes roll up on high notes */
   lookUp = 0;
+  /** being petted: 0..1, set by the view; the eyes close and the brows lift with pleasure */
+  content = 0;
   /** 3D head: chin up (+) or down, radians */
   nod = 0;
   /** 3D head: tilted towards its right shoulder (+), radians */
@@ -104,7 +106,7 @@ export class Expression {
       dev = 12 * (l - this.ref);
       wobble = 12 * (l - this.fast);
     } else this.held = 0;
-    const browTo = voiced ? clamp(dev / 6, -0.7, 1) : 0;
+    const browTo = (voiced ? clamp(dev / 6, -0.7, 1) : 0) + 0.3 * this.content;
     this.brow = follow(this.brow, browTo, voiced ? 0.12 : 0.45, dt);
     this.lookUp = 0.32 * Math.max(0, this.brow);
 
@@ -119,7 +121,7 @@ export class Expression {
     }
     const b = (this.clock - this.blinkAt) / 0.17;
     const blink = this.blinkAt >= 0 && b < 1 ? Math.sin(Math.PI * b) ** 0.7 : 0;
-    this.lid = Math.max(blink, this.hold);
+    this.lid = Math.max(blink, this.hold, 0.95 * this.content);
 
     // ---- the 3D head: chin up for high notes, a nod on the beat, a sway on a long note, the vibrato's wobble
     // a nod for each beat (four steps) the sequencer passed since the last frame, the bar's first the
