@@ -98,7 +98,13 @@ function Params({ def }: { def: CreatureDef }) {
       }),
     });
   }
-  return <EncoderPages key={def.id} label={`${def.name} controls`} pages={pages} />;
+  return (
+    <>
+      {/* a sentence, too long for the header: it wraps here instead of being cut off there */}
+      {def.role && <p className="cparams-role">{def.role}</p>}
+      <EncoderPages key={def.id} label={`${def.name} controls`} pages={pages} />
+    </>
+  );
 }
 
 /** Bestiary's right column: the creatures, the waterfall, the calls, the controls, the airway, the keys. */
@@ -116,7 +122,7 @@ export function BestiaryRight() {
       <Screen className="s-calls" title="Calls">
         {def && <Calls def={def} />}
       </Screen>
-      <Screen className="s-cparams" title="Controls" sub={def?.role}>
+      <Screen className="s-cparams" title="Controls">
         {def && <Params def={def} />}
       </Screen>
       <Screen className="s-airway" title="Airway" sub="Each tube unrolled">

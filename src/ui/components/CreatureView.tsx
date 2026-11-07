@@ -5,7 +5,7 @@ import { creatureById } from "../../wasm/engine.ts";
 import type { CreatureDef } from "../../wasm/types.ts";
 import { liveTelemetry, previewTelemetry } from "../creatureLive.ts";
 import { V, SLOTS, heat, pressureLevel } from "../colors.ts";
-import { beamPts, dot, hfont, label, ring, seg, type Pt } from "../render/vector.ts";
+import { beamPts, dot, hfont, label, labelWidth, ring, seg, wrapLabel, type Pt } from "../render/vector.ts";
 
 type P = [number, number];
 
@@ -69,14 +69,10 @@ function pointAt(t: TubeGeom, s: number): P {
   return [t.pts[i - 1][0] + (t.pts[i][0] - t.pts[i - 1][0]) * u, t.pts[i - 1][1] + (t.pts[i][1] - t.pts[i - 1][1]) * u];
 }
 
-/** text cut to fit a width (in the Hershey font at this size and spacing), ending in an ellipsis */
+/** text cut to fit a width (measured as label() draws it), ending in an ellipsis */
 function fit(ctx: CanvasRenderingContext2D, text: string, maxW: number, size: number, ls: number): string {
-  ctx.save();
-  ctx.font = hfont(size);
-  const width = (s: string) => ctx.measureText(s).width + s.length * size * ls;
   let t = text;
-  while (t.length > 2 && width(t) > maxW) t = t.slice(0, -2) + "…";
-  ctx.restore();
+  while (t.length > 2 && labelWidth(ctx, t, { size, ls }) > maxW) t = t.slice(0, -2) + "…";
   return t;
 }
 
@@ -218,7 +214,13 @@ export function CreatureView() {
       const color = SLOTS[i];
       const cx = 16 + (i % perRow) * cw, cy = h - slotH + 12 + Math.floor(i / perRow) * rowH;
       dot(ctx, cx + 5, cy, 4, color);
-      label(ctx, fit(ctx, p.label.toUpperCase(), cw - 22, 10, 0.16), cx + 15, cy + 4, { size: 10, color, ls: 0.16, alpha: 0.85 });
+      // a long name takes a second line above, where the first row of slots has room, before an ellipsis
+      const lo = { size: 10, color, ls: 0.16, alpha: 0.85 };
+      const lines = wrapLabel(ctx, p.label.toUpperCase(), cw - 22, lo);
+      if (lines.length > 1 && i < perRow) {
+        label(ctx, lines[0], cx + 15, cy - 9, lo);
+        label(ctx, fit(ctx, lines.slice(1).join(" "), cw - 22, 10, 0.16), cx + 15, cy + 4, lo);
+      } else label(ctx, fit(ctx, p.label.toUpperCase(), cw - 22, 10, 0.16), cx + 15, cy + 4, lo);
       const f = fmtParam(paramValue(p.key, p.default), p);
       label(ctx, f.value, cx, cy + 14 + big, { size: big, color, weight: "m", ls: 0.02 });
       if (f.unit) label(ctx, f.unit.toUpperCase(), cx, cy + 32 + big, { size: 10, color, ls: 0.14, alpha: 0.7 });

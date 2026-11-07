@@ -4,7 +4,7 @@ import { engine } from "../../audio/AudioEngine.ts";
 import { currentPlan, onPlan, type SpokenPlan } from "../speech.ts";
 import { activation, type Gesture } from "../../wasm/engine.ts";
 import { V } from "../colors.ts";
-import { beam, beamPts, label, seg, type Pt } from "../render/vector.ts";
+import { beam, beamPts, blockLineH, label, labelBlock, seg, wrapLabel, type Pt } from "../render/vector.ts";
 
 /** rows of the score, coloured like the articulators on the face (lips pink, tongue green, soft palate white, glottis amber) */
 const ROWS: { name: string; keys: string[]; color: string }[] = [
@@ -43,7 +43,13 @@ export function ScoreView() {
     label(ctx, "PITCH", 14, top + rowH * (ROWS.length + 0.62), { size: 9, color: V.amber, ls: 0.16, alpha: 0.85 });
     for (let i = 1; i <= ROWS.length + 1; i++) seg(ctx, left, top + rowH * i, right, top + rowH * i, V.frame, 1);
     if (!sp) {
-      label(ctx, "SPEAK SOMETHING TO SEE ITS GESTURES: WHICH ARTICULATOR MOVES, WHEN, AND HOW THEY OVERLAP.", left, top + rowH * 2.6, { size: 10, color: V.blueMid, ls: 0.12 });
+      // on black over the rules, wrapped to the score's width
+      const msg = "SPEAK SOMETHING TO SEE ITS GESTURES: WHICH ARTICULATOR MOVES, WHEN, AND HOW THEY OVERLAP.";
+      const cy = (top + bottom) / 2;
+      const bh = wrapLabel(ctx, msg, right - left - 16, { size: 10, ls: 0.12 }).length * blockLineH(10) + 8;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(left, cy - bh / 2, right - left, bh);
+      labelBlock(ctx, msg, left + 8, cy, right - left - 16, { size: 10, color: V.blueMid, ls: 0.12 });
       return;
     }
     const plan = sp.plan;

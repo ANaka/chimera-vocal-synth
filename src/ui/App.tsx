@@ -125,7 +125,7 @@ function StartPrompt() {
     sing: ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Start and hear a song", "Then play the keys: each note sings the next syllable of the lyrics."],
   }[mode as "bestiary" | "beatbox" | "speak" | "sing"] ?? ["Every sound here is produced by simulating air moving through a throat, mouth and nose.", "Breathe in and start", "Then drag the tongue, lips or jaw, or play the keys."];
   return (
-    <div className="start-prompt">
+    <div className="start-prompt" data-layout="overlay">
       <p>{copy[0]}</p>
       <button
         className="primary large"

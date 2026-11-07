@@ -70,7 +70,7 @@ export function Keys() {
   return (
     <div className="keys-row">
       <MidiButton />
-      <div className="keys" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
+      <div className="keys" data-layout="layered" aria-label="Keyboard. Computer keys A to semicolon play notes; Z and X change octave.">
         <div className="white-row">
           {whites.map((m) => (
             <button key={m} className={`key white${held.includes(m) ? " down" : ""}`} onPointerDown={press(m)} onPointerUp={release(m)} onPointerCancel={release(m)} aria-label={`Note ${m}`} />

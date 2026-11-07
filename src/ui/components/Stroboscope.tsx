@@ -4,7 +4,7 @@ import { engine } from "../../audio/AudioEngine.ts";
 import { sameBody } from "../body.ts";
 import { useStore } from "../store.ts";
 import { V } from "../colors.ts";
-import { beam, beamPts, label, ring, seg, type Pt } from "../render/vector.ts";
+import { beam, beamPts, label, labelBlock, ring, seg, type Pt } from "../render/vector.ts";
 
 /**
  * The vocal folds from above, as through an endoscope, replayed slowly from the phase-locked
@@ -88,7 +88,8 @@ export function Stroboscope() {
       label(ctx, `OPEN ${Math.round((opened / n) * 100)}%`, tx0, h - 4, { size: 9, color: V.blueMid, ls: 0.16 });
       label(ctx, `${(a * 100).toFixed(1)} MM²`, tx1, h - 4, { size: 9, color: V.blueMid, align: "right", ls: 0.12 });
     } else {
-      label(ctx, "START AUDIO TO SEE THEM VIBRATE", tx0, h / 2, { size: 9, color: V.blueMid, ls: 0.16 });
+      // in the area band, clear of the FLOW label below it
+      labelBlock(ctx, "START AUDIO TO SEE THEM VIBRATE", tx0, (yA0 + yA1) / 2, tx1 - tx0, { size: 9, color: V.blueMid, ls: 0.16 });
     }
   });
   return <canvas ref={ref} className="instrument-canvas" aria-label="Vocal folds seen from above, replayed slowly, with the glottal area and flow" role="img" />;
