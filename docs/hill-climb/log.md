@@ -462,3 +462,19 @@ like, speech and bench OK) can now be retried as it was.
   0–0.5 kHz (1.28), the onsets' remaining mean gap (0.97 and 0.52) and the vibrato share (0.65).
   For H1−H2, try a wider F1 bandwidth or F1 that follows pitch (lead 1). For the onsets, look at the
   phrases still far off rather than the medians, which are now about right.
+
+### Batch review (Codex), and what changed after it
+
+The review found no engine defect and called all six changes plausible. Three things changed:
+
+- **Speech and speed are judged against the batch's baseline** (`out/hill/baseline/`), not
+  the best run. With a 3-point or 10 % allowance per step measured against the best run,
+  small losses could add up over a batch: 38 → 41 → 44 → 47 % would pass every step.
+- **Fixtures are written atomically** (a temporary file, then a rename). While one planning
+  test blessed `planning.json`, another could start and read half of it.
+- **The pressed end of the tension control is back.** Experiment 2's `0.4·tension` capped the
+  closure at 0.4 even at full "Pressed", where it had been 0.95. That is a sound no judge
+  measures, since everything is rendered at tension 0.5–0.55. Above 0.6 the closure now
+  sharpens again, to 0.95 at full tension. Every judged render is byte-identical, so no score
+  moves. A test (`tests/voice_source.rs`) keeps the closure rising with tension all the way.
+

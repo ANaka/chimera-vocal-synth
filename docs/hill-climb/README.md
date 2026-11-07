@@ -17,6 +17,10 @@ The log of every experiment is [log.md](log.md). Read it before you start.
 - **The best run so far** is in `out/hill/best/`: `score.json` and `report.md` (singer),
   `speech/wer.json` (speech) and `bench.txt` (speed). If it is missing, measure the current
   commit into `out/hill/best` the same way as below.
+- **The batch's baseline** is in `out/hill/baseline/`, measured the same way at the commit the
+  batch started from. Speech and speed are judged against it, not against the best run. A
+  small allowance per step would otherwise add up over a batch. Reset it when a batch is
+  merged and the next one starts.
 
 ## One experiment
 
@@ -69,16 +73,18 @@ The log of every experiment is [log.md](log.md). Read it before you start.
 ```sh
 cargo build --release -p chimera-cli
 cargo run --release -p chimera-cli -- compare csd ~/datasets/csd/CSD out/hill/try --against out/hill/best/score.json
-~/.cache/chimera-asr/.venv/bin/python tools/asr/speech_wer.py out/hill/try/speech --against out/hill/best/speech/wer.json
+~/.cache/chimera-asr/.venv/bin/python tools/asr/speech_wer.py out/hill/try/speech --against out/hill/baseline/speech/wer.json
 cargo run --release -q -p chimera --example bench > out/hill/try/bench.txt
 ```
 
 1. **Singer.** The comparison ends with a verdict: BETTER, WORSE or NO CLEAR CHANGE, and the
    reasons when worse. `out/hill/try/report.md` has the new score table.
-2. **Speech.** The speech judge ends with OK or WORSE. WORSE means the word error rate rose by
-   more than 3 points. It also lists the sentences Whisper got wrong.
+2. **Speech.** The speech judge ends with OK or WORSE. WORSE means the word error rate is more
+   than 3 points above the batch's baseline. It also lists the sentences Whisper got wrong.
 3. **Speed.** The bench prints the real-time load. Compare its `os=2` line with
-   `out/hill/best/bench.txt`. It is noisy, so rerun it once before calling a change slower.
+   `out/hill/baseline/bench.txt`, the batch's baseline. It is noisy and depends on what else
+   the machine is doing, so if it reads slower, rerun it and the baseline's commit back to
+   back before calling a change slower.
 
 ## Keep or revert
 
@@ -86,7 +92,7 @@ Keep the change only if all of these hold:
 
 1. The singer verdict is **BETTER**.
 2. The speech verdict is **OK**.
-3. The bench is no more than **10 % slower**.
+3. The bench is no more than **10 % slower** than the batch's baseline.
 4. **The tests pass.**
    1. Bless the golden fixtures in `crates/chimera/tests/golden`. They are snapshots of the
       sound (the `.f32` files) and of the planners' output (the utterance, duration, phrase,

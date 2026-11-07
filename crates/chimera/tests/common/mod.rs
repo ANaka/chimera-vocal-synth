@@ -48,17 +48,24 @@ pub fn blessing() -> bool {
     std::env::var("CHIMERA_BLESS").is_ok_and(|v| v == "1")
 }
 
+/// Replace a fixture in one step (write a temporary file, then rename it over the old one), so a
+/// test reading it while another blesses it sees the old file or the new, never half of one.
+fn write_fixture(path: &str, bytes: &[u8]) {
+    let tmp = format!("{path}.{}.tmp", std::process::id());
+    std::fs::write(&tmp, bytes).unwrap();
+    std::fs::rename(&tmp, path).unwrap();
+    println!("blessed {path}");
+}
+
 pub fn save_f32(name: &str, data: &[f32]) {
     let path = format!("{}/tests/golden/{name}.f32", env!("CARGO_MANIFEST_DIR"));
     let bytes: Vec<u8> = data.iter().flat_map(|x| x.to_le_bytes()).collect();
-    std::fs::write(&path, bytes).unwrap();
-    println!("blessed {path}");
+    write_fixture(&path, &bytes);
 }
 
 pub fn save_json(name: &str, v: &Value) {
     let path = format!("{}/tests/golden/{name}.json", env!("CARGO_MANIFEST_DIR"));
-    std::fs::write(&path, serde_json::to_string(v).unwrap()).unwrap();
-    println!("blessed {path}");
+    write_fixture(&path, serde_json::to_string(v).unwrap().as_bytes());
 }
 
 /// For renders that may legitimately part after a discrete decision goes the other way on a
