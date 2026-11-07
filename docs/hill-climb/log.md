@@ -1325,3 +1325,29 @@ keep rule for target 3 now covers any artifact with such a test.
     needs a citation (Stevens 1998, ch. 8; Shadle 1985) before it's coded.
   - Given the ±2-point chaos, a lift aimed at the female "sheet" should be checked on that
     sentence's /ʃ/ level before spending a judge run, and its verdict read as noisy.
+
+### Batch 2 result (experiments 11–20)
+
+| | Baseline (4980e3b) | Best (experiment 19) |
+|---|---|---|
+| Speech, training word error rate | 40.73 % | 37.09 % |
+| Speech, held-out | 50.67 % | 45.67 % |
+| Singer, training / held-out | 0.582 / 0.789 | 0.589 / 0.805 |
+| Note MCD (guard 8.636 dB) | 8.536 dB | 8.614 dB |
+| The /p/ of "sharp" re the loudest vowel (male) | +7.0 dB | −6.8 dB |
+| Click before /f/ /v/ over the fricative | +8 to +20 dB | +0.3 to +4.6 dB |
+| Real-time load (`os=2`) | 18.2 % | 18.4 % (quiet-machine reading) |
+
+- Kept: 12 (the narrow space in front of the raised tongue tip puts /ʃ/ at its real pitch; and
+  the roof contact no longer jumps at the port window), 16 (a pre-placed closure behind a stop
+  seals as the front one opens: no pop), 19 (the labiodental geometry hands over without a step:
+  no click). 11 found 12's change and was reverted on a test 12 fixed; 13, 14, 15, 17, 18 and 20
+  were reverted.
+- The female /ʃ/, /tʃ/ and /dʒ/ are still about 20 dB below her vowels. Every fix tried (13,
+  20) either broke the note-MCD guard or didn't move the speech total.
+- The speech judge is noisier than its threshold (experiment 20): renders a few 16-bit steps apart
+  moved Whisper's training total by about ±2 points, against the 1.5-point BETTER margin.
+- Open for the owner: widen the batch's note-MCD guard (0.1 → 0.3 dB proposed), and double the
+  training sentences to make the speech judge steadier.
+- Listening page (shared with the owner directly; before = the baseline, now = the
+  best run; four training and four held-out sentences, two songs).
