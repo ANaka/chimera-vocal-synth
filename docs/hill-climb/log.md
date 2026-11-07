@@ -57,6 +57,8 @@ opens a new one, update this list and give the experiment's number.
    (`vibrato_gesture` in `crates/chimera/src/phonetics/sing.rs`).
    - Experiment 5 raised the rate to 5.9–6.1 Hz: rate cost 0.66 → 0, score −0.044, but WORSE on
      the fewer-notes guard (barely voiced short notes, lead 5). Retry it once lead 5 is fixed.
+   - The like-for-like judge (after experiment 6) and experiment 8 have both cleared the way: retry
+     it as it was. Rate cost is 0.64 at experiment 8.
 5. **Voicing in held notes.** Cost 0.26. Gaps mid-note, worst in en018a, en041a and en043a
    (0.65–0.70 voiced).
    - The same fault blocks other experiments (1, 3, 5): short notes on a stop coda that the synth
@@ -83,6 +85,10 @@ opens a new one, update this list and give the experiment's number.
      change to how songs are planned. The change is ready to keep once the owner decides how that
      fixture may be updated (a bless path for the song plans, or an exception in the rules like the
      airway one). Until then, no `plan_song` change can be kept.
+   - Experiment 8 kept it, once the planners' snapshots were blessed: voiced share cost 0.26 →
+     0.04, aperiodicity 0.90 → 0.03. This lead is about closed. What is left is the phrase-initial
+     notes that never phonate after a voiceless stop (en044a no. 145, en036a no. 71), which is
+     lead 3's.
 6. **Speech consonants.** Not scored, only guarded. Whisper mishears /tʃ/, /dʒ/, /ʃ/ and /s/:
    "sheet" as "feet", "chicken leg" as "quickly like", "juice" as "roost". This is for a later
    loop on speech.
@@ -353,3 +359,33 @@ The beat sequencer's expectations stay fixed.
 Experiment 7's change (a phrase's last note held to 0.05 s before its end, −0.145 like for
 like, speech and bench OK) can now be retried as it was.
 
+### 8. Experiment 7 again, now that the planners' snapshots bless: the last note held to the end (kept)
+
+- Hypothesis: as in experiments 6 and 7. `plan_song` ends a phrase's last vowel and coda
+  `min(0.12, 0.3·note)` before the note's end to leave a breath, but the call's last phrase is
+  followed by a rest (both callers split phrases at rests), so the breath comes from the rest. On
+  short phrase-final notes the steady window caught the coda, not the vowel. Holding the call's
+  last note to 50 ms before its end (the breath's release) should raise voiced share and lower
+  aperiodicity. Experiment 7 was BETTER on every judge and reverted only on
+  `songs_match_typescript`, which the decision after it turned into a blessed snapshot.
+- Change: `plan_song` in `crates/chimera/src/phonetics/sing.rs`: the reserve is
+  `min(0.05, 0.3·note)` for the call's last phrase and stays `min(0.12, 0.3·note)` for a phrase
+  that runs straight into another in the same call. One value, experiment 7's.
+- Singer: training score 0.889 → 0.747 (−0.145 like for like, BETTER), held-out 1.018 → 0.983.
+  The same numbers as experiment 7:
+  - Voiced share cost 0.26 → 0.04 (synth 0.876 → 0.896, hers 0.927); aperiodicity 0.90 → 0.03.
+  - H1−H2 2.14 → 2.29 and level 0–0.5 kHz 1.14 → 1.28: more short notes' vowels are measured, with
+    lead 1's pitch-dependent H1−H2.
+  - Vowel-initial onset 1.39 → 1.47; voiceless-initial 1.11 → 1.14.
+  - Note MCD 8.573 → 8.537 dB, envelope correlation 0.797 → 0.810. Nothing else moved by more than
+    0.05.
+- Speech: word error rate 39.4 → 39.4 % (OK; speech doesn't use `plan_song`).
+- Speed: `os=2` 18.2 % → 18.4 %.
+- Tests: after blessing twice (the first run fails `engine.rs` on the beatbox fixture, as
+  expected), `cargo test --workspace` passes, `golden_planning` and `golden_analysis` included, and
+  `bun test tests` passes (18).
+- Commit: 31643bb.
+- Next: the largest costs are now H1−H2 (2.29), the onsets (1.47 and 1.14) and level 0–0.5 kHz
+  (1.28). The cheapest next gain is experiment 5's vibrato rate (5.5 → 6.0 Hz, about −0.04, lead
+  4), which the like-for-like judge already called BETTER. For H1−H2, try a wider F1 bandwidth or
+  F1 that follows pitch (lead 1).
