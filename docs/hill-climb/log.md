@@ -935,3 +935,15 @@ experiment 11's change.
     20 ms between the affricate's VOT and the /k/ closure's lead.
   - /dʒ/ is a separate fault: it is quiet, and it has no abduction at all, where a voiced
     fricative gets 0.035. Look at its release's glottal setting and level, not its timing.
+
+### Decision after experiment 15: the pop gets its own keep rule
+
+The owner asked for the pop on "sharp" to be fixed, but a single pop can't lower the training
+word error rate by the 1.5 points that batch 2's keep rule asks for. So a change aimed at target 3
+is kept when the ignored test `the_p_of_sharp_does_not_pop` passes (and is un-ignored in the same
+commit), speech is not WORSE, and the singer guard holds. See the README.
+
+Experiments 13 and 15 both point at the female fricatives' level (lead 6) and both run into the
+singer's note-MCD guard, which experiment 12 left with 0.008 dB of room. Whether to widen that
+guard for this batch is the owner's call; until then, experiments avoid changing the female
+voice's sung consonants.
