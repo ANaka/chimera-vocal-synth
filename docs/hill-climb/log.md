@@ -145,6 +145,12 @@ opens a new one, update this list and give the experiment's number.
    itself (the aspiration allowance is 20 ms against a 50 ms VOT), or the stop-closure lead (it
    moves every stop and the sung consonants, so watch the singer's timing guard).
 
+8. **The pop on "sharp" (target 3).** Closed by experiment 16: the /t/, its tip already raised
+   by the /ɹ/, sealed 19 ms early behind the closed lips and the tongue and jaw pumped the
+   trapped air to 10.5x the lungs'. Aimed 25 ms later, it seals as the lips open (1.3x,
+   −6.8 dB). Other front-to-back clusters after a vowel (/pk/, /bd/, /tk/) still reach 3–6x;
+   see experiment 16's "Next".
+
 ## Experiments
 
 ### 1. A trained singer's jitter, not a clinical one (kept)
@@ -947,3 +953,80 @@ Experiments 13 and 15 both point at the female fricatives' level (lead 6) and bo
 singer's note-MCD guard, which experiment 12 left with 0.008 dB of room. Whether to widen that
 guard for this batch is the owner's call; until then, experiments avoid changing the female
 voice's sung consonants.
+
+### 16. A pre-placed closure behind a stop seals as the front one opens: the pop on "sharp" (kept)
+
+- Hypothesis: target 3, under its own keep rule. A trace of the male "sharp tree" (/ɹ/
+  2.063–2.123 s, /p/ 2.123–2.188, /t/ 2.188–2.250) found the following:
+  - The lips seal at about 2.130 s.
+  - The tongue seals for /t/ at 2.169 s, 19 ms before its planned closure. The lips open at
+    2.1925, so a pocket is trapped for 23 ms.
+  - The /t/'s latency lead (`early`, 31 ms for the tip) assumes a tip rising from a vowel.
+    Here the tip comes from the /ɹ/ posture (TtX 5.35, TtY 9.35), already close to the ridge,
+    so it reaches contact early.
+  - The pressure was already 5.5x the lungs' at the seal. In the last 30 ms before it, the
+    swept volume ahead of the tongue was about 4.6 cm³, pushed back through a gap closing to
+    zero:
+    - tip forward 2.5 cm³
+    - lips un-protruding 1.5 cm³
+    - jaw 1.5 cm³
+    - curl unwinding 1.0 cm³
+  - After the seal the pocket shrank 6.9 → 5.4 cm³ (the jaw rising 1.17 → 0.75 cm alone
+    accounts for −1.1 cm³), taking the pressure to 10.5x.
+  - In a trapped pocket of a few cm³, any of these motions overshoots 2x the lungs'. So the
+    model can't stand an early seal at all. What it can do is seal when the lips open.
+- Change: `crates/chimera/src/phonetics/planner.rs`. A stop that closes behind the stop before
+  it (front-to-back place order, `closes_in_front`) is aimed `PLACED_CLOSURE_DELAY` = 25 ms later
+  when its dominant articulators were set by the consonant before that stop, or by a rhotic
+  vowel (`pre_placed_behind_closure`). After a plain vowel the timing is unchanged. The test
+  `the_p_of_sharp_does_not_pop` is un-ignored. Values tried, as a delay on every front-to-back
+  stop cluster at first (p/lung, then the first stop's release in dB re the loudest vowel, male):
+
+  | delay | /ʃˈɑɹptɹˈi/ | /ˈɑptɑ/ | /ˈɑpkɑ/ |
+  |---|---|---|---|
+  | 0 (before) | 10.5x, +7.0 | 2.1x, −7.9 | 4.0x, +1.5 |
+  | 15 ms | 4.5x, +6.5 | 2.2x, −4.5 | 3.2x, −0.9 |
+  | 25 ms | 1.3x, −6.5 | 2.2x, −2.5 | 3.2x, −0.2 |
+  | 35 ms | 1.4x, −7.0 | 2.1x, −1.8 | 3.0x, +0.3 |
+
+  - A blanket delay makes the /p/ of "apt" louder: from a vowel the /t/ already seals as the
+    lips open, so delaying it releases the /p/ into an open tract. So the rule is limited to a
+    pre-placed articulator.
+  - A first version counted any vowel as placing the articulators. A vowel always sets the
+    tongue body, so that also moved /pk/ and /tk/; it was narrowed to consonants and rhotic
+    vowels.
+  - With the rule, /ˈhɛlpt/ reads 1.2x, −12.3 dB and /ˈɝptɑ/ 2.97x, +5.4 → 2.05x, −4.8 dB.
+    /ˈɑptɑ/, /ˈɑpkɑ/ and /ˈɑtkɑ/ are as before.
+- The /p/ of "sharp tree" (the test): male +6.9 → **−6.8 dB**, oral pressure 10.5x → **1.3x**;
+  female −8.0 → −17.6 dB, 10.5x → 1.3x. The p's of "paper" sit at −6 and −7.
+- Speech: word error rate 36.09 → 36.09 % (training, NO CLEAR CHANGE), 45.67 → 45.67 %
+  (held-out). No word moved. Whisper hears "sharp tree" right in both voices, before and after
+  ("The coated paper locks under the sharp tree.").
+- Singer: training 0.584 → 0.584 (baseline 0.582, NO CLEAR CHANGE). Every guard holds: 0 notes
+  off time, 0 dropped gestures, note MCD 8.628 dB (unchanged), envelope correlation 0.811,
+  pitch error 4.85 cents. Held-out 0.810 → 0.810. No sung cluster in the training songs seems
+  to meet the rule, or none that changes a scored term.
+- Speed: `os=2` 18.4 % (baseline 18.2 %), at load average 10–17.
+- Tests: fixtures blessed twice, then `cargo test --workspace --release`.
+  - Everything passes, `the_p_of_sharp_does_not_pop` included, except `golden_analysis` at
+    "male neutral" (9 %). That is experiment 12's geometry change (the README's airway
+    exception); this change touches only the planner.
+  - `bun run wasm && bun test tests`: 30 pass.
+  - Fixtures restored.
+- Verdict: kept under target 3's rule. The test passes, speech is not WORSE, and the singer
+  guard holds.
+- Commit: 8ebb020.
+- Next:
+  - Other front-to-back clusters still pump, from the same physics: the second constriction
+    narrows to closure with the front one shut.
+    - /ˈɑpkɑ/: 4.0x, /p/ at +1.5 dB (male).
+    - /ˈɑbdɑ/: 6.4x, /b/ at +1.9. The folds are adducted, so the pocket runs back to the
+      glottis.
+    - /ˈɑtkɑ/: 3.1x.
+  - None of these is pre-placed, so a delay only trades the pump for a released first stop.
+    The model's articulators keep moving at full speed into a sealed or nearly sealed space.
+    A real speaker's are slowed by the rising pressure, and the cheeks and lips yield. Two
+    candidates: a consonant jaw target (alveolars and velars have high jaw positions, so the
+    jaw would be up before the second closure), or a lip seal that leaks above a contact
+    pressure (the README's "real leak path"). Both reach every stop, so watch the singer's
+    note MCD.
