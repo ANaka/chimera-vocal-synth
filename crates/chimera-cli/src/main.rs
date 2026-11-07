@@ -26,6 +26,7 @@ usage: chimera <command> [args] [--float]
   render vowels  [male|female|child] [out]
   diagnose       [outdir]
   compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
+                 [--against earlier/score.json]  (score.json: distance to the singer, and the verdict)
   calibrate vowels     [male|female|child|all] [--out file]
   calibrate consonants [--out file]
 

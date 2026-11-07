@@ -24,14 +24,18 @@ tools/fetch-csd.sh            # 1.85 GB to ~/datasets/csd; unpacks CSD/english
 cargo run --release -p chimera-cli -- compare csd                      # the 50 `a` songs, female body, all cores (~2 min)
 cargo run --release -p chimera-cli -- compare csd ~/datasets/csd/CSD out/csd --songs en001a,en002a
 #   --songs a | b | all | <ids>   --body female|male|child   --jobs n   --float
+cargo run --release -p chimera-cli -- compare csd ~/datasets/csd/CSD out/csd-new --against out/csd/score.json
+#   score this build and give the verdict against an earlier run's score
 ```
 
 It writes the following to the output directory (`out/csd` by default):
 
 - `<id>-synth.wav`: the synth's render, on the same timeline as `english/wav/<id>.wav`. You can
   load both into a DAW, or make spectrograms of the pair with `bun tools/spectrogram.ts`.
-- `report.md`: medians over songs, spectral balance per vowel, and one line per song.
+- `report.md`: the score, medians over songs, spectral balance per vowel, and one line per song.
 - `report.json`: every note's measures for the singer and the synth.
+- `score.json`: the score, its terms and guards, for the training and held-out songs (below), and
+  the verdict when run with `--against`.
 
 ## Method
 
@@ -62,7 +66,7 @@ measurement window would hold the wrong sound. The report gives the count.
 | aperiodicity | YIN's aperiodicity: noise and roughness in the voice |
 | H1−H2 (dB) | first minus second harmonic, the standard voice-quality measure: high is breathy or lax, low is pressed. Measured in each voiced frame at that frame's own f0, then the median is taken |
 | voiced share | share of steady frames the synth actually voices; a frame is voiced when YIN finds a period and it is within 35 dB of the signal's loud level |
-| voice onset (s) | first voiced frame of a phrase-initial note, relative to the note start; vowel-initial and consonant-initial phrases are reported separately |
+| voice onset (s) | first voiced frame of a phrase-initial note, relative to the note start, by what the phrase opens on: a vowel, a voiceless consonant (the voicing is the vowel's) or a voiced one (the voicing is the consonant's) |
 | band levels, synth − singer (dB) | 0–0.5, 0.5–1, 1–2, 2–4 and 4–8 kHz, each relative to the 0–8 kHz total: spectral tilt and vowel colour, per vowel |
 | note MCD (dB) | mel-cepstral distance between the note's averaged log-mel spectra (40 bands, 13 coefficients); on the usual MCD scale, but note-level, not frame-aligned |
 | envelope lag and correlation | the shift (within ±0.3 s) that best lines up the two level envelopes: overall timing, and how much the loudness shape matches |
@@ -78,38 +82,95 @@ measurement window would hold the wrong sound. The report gives the count.
   chain.
 - **One singer.** Treat the numbers as directions to tune in, not as targets for every voice.
 
-## Baseline (2026-11-05, the 50 `a` songs, female body)
+## The score
 
-7,032 of 7,220 notes are compared. The other 188 were too short for the planner to place on time:
-up to 25 in a song (en028a), mostly in fast passages.
+`score.json` folds the measures into one number: how far the synth is from the singer, in units of
+her own variation. It is what an automated tuning loop climbs (lower is better), so it is built to
+be hard to improve without sounding closer to her.
 
-| measure | singer | synth |
-|---|---|---|
-| pitch error vs score (median \|cents\|) | 15.3 | 5.0 |
-| long notes with vibrato | 65 % | 100 % |
-| vibrato depth (peak cents) / rate (Hz) | 39 / 6.0 | 35 / 5.5 |
-| H1−H2 (dB) | +3.8 | −1.7 |
-| H1−H2 on notes ≤ C4 / notes ≥ G4 (dB) | +4.1 / 0.0 | −5.8 / +8.0 |
-| voiced share of steady frames | 0.94 | 0.88 (0.64 in en041a) |
-| voice onset, consonant-initial phrases (s) | +0.01 | −0.06 |
+- **Terms.** Each term is a song-level value both voices have: her median H1−H2 in a song against
+  the synth's in that song, the two voiced shares, and so on. There are 13 terms: the five band
+  levels, H1−H2, vibrato share, depth and rate, voiced share, voice onset of vowel-initial phrases
+  and of phrases that open on a voiceless consonant, and aperiodicity.
+- **Gap.** A term's gap is the mean over songs of |synth − singer|. It is a mean rather than a
+  median so that every song's change counts, and one song gone badly wrong shows.
+- **Unit.** The gap is divided by her spread on that term over the training songs (median absolute
+  deviation, scaled to a standard deviation). The spread is a property of the singer, so a change
+  to the synth can't move it.
+- **Cost.** A gap within one spread is about as close as two of her songs are to each other, so it
+  costs nothing. Beyond that, the excess is the term's cost. Nothing is gained by matching her
+  medians more closely than her own variation, which keeps a tuning loop from overfitting one
+  singer.
+- **Score.** The score is the weighted mean of the costs. Each of six groups gets one share:
+  spectrum (the five bands), H1−H2, vibrato (its three terms), voicing, onsets (its two terms) and
+  noise (aperiodicity). 0 means every term is within her own variation.
 
-- **Spectral balance.** Over all vowels, synth minus singer is −3.2, 0.0, +1.4, +4.5 and +8.0 dB
-  in the five bands.
-- **Distance and timing.** Note MCD is 9.2 dB. The envelope lag is −0.02 s (between −0.06 and
-  +0.04 s) with correlation 0.79.
+**Held-out songs.** Every fifth song (en005, en010, …, en050, in both keys) is held out. The
+spreads and the verdict use the other 40 songs only. The held-out songs are scored with the same
+spreads, to check that a change carries over to songs it wasn't tuned on.
+
+**Not scored.** Voice onsets of phrases that open on a voiced consonant are reported but not
+scored. CSD's note starts mark the start of the syllable, while `plan_song` sings onset consonants
+before the beat so that the vowel lands on it. Measured against CSD, those onsets mix that
+convention with real timing errors. Pitch is not scored either: the synth sings the score, and her
+deviations from it can't be predicted from the score.
+
+**The verdict.** `--against <earlier score.json>` compares the training scores of two runs over
+the same songs and body:
+
+- **Better:** the score falls by at least 0.01, no term's cost rises by more than 0.25, and every
+  guard holds.
+- **Guards:**
+  - no more notes off time (so a change can't drop hard notes from the statistics)
+  - no more dropped gestures
+  - note MCD up by no more than 0.1 dB
+  - envelope correlation down by no more than 0.01
+  - the synth's pitch error up by no more than 2 cents
+- **Worse:** any guard or term breaks, or the score rises by 0.01 or more.
+- **No clear change:** anything else.
+
+## Baseline (2026-11-07, the 50 `a` songs, female body)
+
+All 7,220 notes are compared: the planner now places every vowel within 30 ms of its annotated
+start (on 2026-11-05, 188 notes were too short for their consonants and ran late).
+
+**Score: 1.433 on the 40 training songs, 1.590 on the 10 held-out songs.** The costs, largest
+first:
+
+| term | singer | synth | cost |
+|---|---|---|---|
+| level 4–8 kHz (dB re total) | −24.8 | −17.3 | 5.38 |
+| aperiodicity | 0.005 | 0.010 | 2.88 |
+| H1−H2 (dB) | +3.2 | −0.8 | 2.08 |
+| level 2–4 kHz | −18.4 | −14.0 | 1.43 |
+| level 0–0.5 kHz | −4.0 | −7.4 | 1.39 |
+| onset, vowel-initial (s) | +0.005 | −0.015 | 1.39 |
+| onset, voiceless-initial (s) | +0.018 | −0.024 | 1.11 |
+| vibrato rate (Hz) | 6.1 | 5.5 | 0.67 |
+| vibrato share | 0.64 | 1.00 | 0.62 |
+| level 0.5–1 kHz | −6.7 | −6.8 | 0.28 |
+| voiced share | 0.93 | 0.88 | 0.26 |
+| vibrato depth (peak cents) | 39 | 35 | 0.01 |
+| level 1–2 kHz | −15.1 | −13.4 | 0 |
+
+Singer and synth values are medians over the training songs. Note MCD is 9.24 dB and the envelope
+correlation 0.80.
 
 What this points at:
 
-1. **Too much energy above 2 kHz**, about +8 dB at 4–8 kHz, for every vowel.
-2. **The fundamental is weak on low notes and too strong on high ones.** The singer's H1−H2 falls
-   only about 4 dB from her low notes to her high ones. The synth's rises by 14 dB.
-3. **Consonants come too early.** For consonant-initial phrases the singer's voicing starts at
-   the note's annotated start, but the synth sings its onset consonants about 60 ms before it.
-   Either CSD annotates the syllable start rather than the vowel, or this singer puts consonants
-   on the beat. Either way it is a timing difference to check by ear.
-4. **Vibrato is too uniform.** The synth puts 35-cent vibrato on every long note. The singer uses
-   it on about two thirds of them, a little wider and faster.
-5. **Voicing gaps in the steady part of notes.** These are worst in en041a, en018a and en043a,
-   which are worth listening to first.
-6. **Short notes don't fit.** When a note is too short for its consonants, the planner runs late,
-   about 2.6 % of notes here. Fast lyrics will drift off the beat.
+1. **The spectrum tilts too little.** The synth has about 7.5 dB too much at 4–8 kHz and 4.4 dB too
+   much at 2–4 kHz, and 3.4 dB too little below 500 Hz, for every vowel.
+2. **The fundamental doesn't track pitch the way hers does.** H1−H2 on notes ≤ C4 is −5.8 dB
+   (singer +4.0), and on notes ≥ G4 it is +8.2 dB (singer +0.1). Her H1−H2 falls about 4 dB from
+   her low notes to her high ones; the synth's rises by 14 dB. Points 1 and 2 together sound like
+   a source that is too pressed on most notes.
+3. **The synth is less periodic than she is.** Its aperiodicity is about twice hers, which points
+   at jitter, shimmer or noise in the source.
+4. **Voicing starts early at phrase starts.** It starts 20 ms early before a vowel. Before a
+   voiceless consonant it starts about 40 ms early, where both voices should only start voicing at
+   the vowel. Before /s/, /f/ and /h/ the synth voices 100–130 ms before the note, so the voicing
+   runs into the fricative or comes before it.
+5. **Vibrato is too uniform.** The synth puts 35-cent vibrato on every long note. She uses it on
+   about two thirds of them, a little faster.
+6. **Voicing gaps in the steady part of notes.** These are worst in en018a, en041a and en043a
+   (0.65–0.70 voiced).

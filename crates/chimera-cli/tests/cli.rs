@@ -155,6 +155,11 @@ fn calibrate_vowels_reproduces_the_committed_table() {
 /// A tiny dataset in CSD's layout: two phrases (a gap between) and a melisma, with a stereo
 /// 16-bit 44.1 kHz "singer" that is a pure tone at each note's pitch.
 fn mini_csd(dir: &str, syllables: [&str; 4]) {
+    mini_song(dir, "x01a", syllables, 0.0);
+}
+
+/// One song of the tiny dataset; the singer's second harmonic has amplitude `h2` (re the first).
+fn mini_song(dir: &str, id: &str, syllables: [&str; 4], h2: f64) {
     let notes = [
         (0.3, 0.8, 69.0),
         (0.8, 1.3, 69.0),
@@ -167,7 +172,7 @@ fn mini_csd(dir: &str, syllables: [&str; 4]) {
     for ((a, b, m), s) in notes.iter().zip(syllables) {
         csv += &format!("{a:.4},{b:.4},{m},{s}\r\n");
     }
-    std::fs::write(format!("{dir}/english/csv/x01a.csv"), csv).unwrap();
+    std::fs::write(format!("{dir}/english/csv/{id}.csv"), csv).unwrap();
     let fs = 44100.0;
     let n = (3.0 * fs) as usize;
     let mut data = Vec::with_capacity(n * 4);
@@ -177,8 +182,8 @@ fn mini_csd(dir: &str, syllables: [&str; 4]) {
             .iter()
             .find(|(a, b, _)| t >= *a && t < *b)
             .map_or(0.0, |(_, _, m)| {
-                let hz = 440.0 * 2f64.powf((m - 69.0) / 12.0);
-                0.3 * (2.0 * std::f64::consts::PI * hz * t).sin()
+                let ph = 2.0 * std::f64::consts::PI * 440.0 * 2f64.powf((m - 69.0) / 12.0) * t;
+                0.3 * (ph.sin() + h2 * (2.0 * ph).sin())
             });
         let s = ((v * 32767.0).round() as i16).to_le_bytes();
         data.extend_from_slice(&s);
@@ -200,7 +205,7 @@ fn mini_csd(dir: &str, syllables: [&str; 4]) {
     b.extend_from_slice(b"data");
     b.extend_from_slice(&(data.len() as u32).to_le_bytes());
     b.extend_from_slice(&data);
-    std::fs::write(format!("{dir}/english/wav/x01a.wav"), b).unwrap();
+    std::fs::write(format!("{dir}/english/wav/{id}.wav"), b).unwrap();
 }
 
 #[test]
@@ -248,6 +253,77 @@ fn compare_csd_sings_the_annotation_on_the_recordings_timeline() {
             .unwrap()
             .contains("| measure |")
     );
+}
+
+#[test]
+fn compare_csd_scores_training_and_held_out_songs_and_judges_a_rerun() {
+    // six songs whose singer differs in H1−H2, so that term has a spread; x05a is held out
+    let dir = tmp("csd-score");
+    let ids = ["x01a", "x02a", "x03a", "x04a", "x05a", "x06a"];
+    for (i, id) in ids.iter().enumerate() {
+        mini_song(
+            &dir,
+            id,
+            ["l_ii", "ii", "d_ou", "m_ai_n"],
+            0.1 + 0.15 * i as f64,
+        );
+    }
+    let songs = ids.join(",");
+    let (first, second) = (tmp("csd-score-1"), tmp("csd-score-2"));
+    chimera(&[
+        "compare", "csd", &dir, &first, "--songs", &songs, "--jobs", "3",
+    ]);
+    let score: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{first}/score.json")).unwrap())
+            .unwrap();
+    let names = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(
+        names(&score["train"]["songs"]),
+        ["x01a", "x02a", "x03a", "x04a", "x06a"]
+    );
+    assert_eq!(names(&score["heldout"]["songs"]), ["x05a"]);
+    let h1h2 = &score["train"]["terms"][5];
+    assert_eq!(h1h2["name"], "H1-H2");
+    assert!(h1h2["spread"].as_f64().unwrap() > 0.0, "{h1h2}");
+    assert!(score["train"]["score"].is_number(), "{score}");
+    assert_eq!(score["train"]["guards"]["notes"], 20);
+
+    // the engine is deterministic: the same build scored again is no change
+    let stdout = chimera(&[
+        "compare",
+        "csd",
+        &dir,
+        &second,
+        "--songs",
+        &songs,
+        "--jobs",
+        "3",
+        "--against",
+        &format!("{first}/score.json"),
+    ]);
+    assert!(stdout.contains("NO CLEAR CHANGE"), "{stdout}");
+    // a run over other songs can't be judged against it
+    let other = Command::new(env!("CARGO_BIN_EXE_chimera"))
+        .args([
+            "compare",
+            "csd",
+            &dir,
+            &tmp("csd-score-3"),
+            "--songs",
+            "x01a,x02a,x03a,x04a,x05a",
+            "--against",
+            &format!("{first}/score.json"),
+        ])
+        .output()
+        .unwrap();
+    assert!(!other.status.success());
+    assert!(String::from_utf8_lossy(&other.stderr).contains("other songs"));
 }
 
 #[test]

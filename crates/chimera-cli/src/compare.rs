@@ -22,6 +22,10 @@
 //!
 //! "Voiced" means YIN finds a period and the frame is within 35 dB of the signal's loud level.
 //!
+//! `score.json` (see `score.rs`) folds the measures into one number, how far the synth is from the
+//! singer in units of her own song-to-song spread, over training songs and held-out songs; with
+//! `--against <earlier score.json>` it also gives the verdict on a change.
+//!
 //! The band and cepstral measures compare averaged spectra, so they see vowel colour, spectral
 //! tilt and noise, not frame-level detail. At this singer's pitch (C4–C6) harmonics are 260 Hz+
 //! apart, which is why there are no LPC formants here.
@@ -40,6 +44,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod score;
 
 /// A gap between notes longer than this (s) ends a phrase: the synth stops and breathes.
 const PHRASE_GAP: f64 = 0.08;
@@ -114,6 +120,20 @@ fn csd_ipa(sym: &str) -> Option<(&'static str, bool)> {
     })
 }
 
+/// IPA onsets with no voicing of their own: after them, the first voiced frame is the vowel's.
+const VOICELESS: [&str; 9] = ["p", "t", "k", "f", "θ", "s", "ʃ", "h", "tʃ"];
+
+/// What a phrase starts with, which decides what its first voiced frame belongs to.
+#[derive(Clone, Copy, PartialEq)]
+enum Start {
+    Vowel,
+    /// a voiceless consonant: the voicing starts with the vowel, whichever convention places it
+    Voiceless,
+    /// a voiced consonant: the voicing starts with the consonant, which `plan_song` sings before
+    /// the note while CSD's note starts mark the start of the syllable
+    Voiced,
+}
+
 struct Note {
     start: f64,
     end: f64,
@@ -125,6 +145,16 @@ struct Note {
     phrase_start: bool,
     /// end of the previous note (−∞ for the first)
     prev_end: f64,
+}
+
+impl Note {
+    fn starts_with(&self) -> Start {
+        match self.syl.onset.first() {
+            None => Start::Vowel,
+            Some(c) if VOICELESS.contains(&c.ipa.as_str()) => Start::Voiceless,
+            Some(_) => Start::Voiced,
+        }
+    }
 }
 
 /// Read `csv/<id>.csv` into notes with engine syllables, melismas and phrase ends.
@@ -755,11 +785,20 @@ struct SongResult {
     /// (vowel IPA, mcd, band diffs synth − human)
     vowels: Vec<(String, f64, [f64; 5])>,
     line: String,
+    score: score::SongScore,
 }
 
 fn r2(x: f64) -> Value {
     if x.is_finite() {
         json!((x * 100.0).round() / 100.0)
+    } else {
+        Value::Null
+    }
+}
+
+fn r3(x: f64) -> Value {
+    if x.is_finite() {
+        json!((x * 1000.0).round() / 1000.0)
     } else {
         Value::Null
     }
@@ -849,12 +888,11 @@ fn compare_song(
     let abs_cents = |side| col(&|m: &NoteMeas| m.cents.abs(), side);
     let vs_human: Vec<f64> = per.iter().map(|p| (p.1.cents - p.0.cents).abs()).collect();
     let mcds: Vec<f64> = per.iter().map(|p| p.2).collect();
-    // phrase starts, split by whether voicing means the vowel (vowel-initial) or the onset
-    // consonant (or the vowel after a voiceless one) has begun
-    let onset_of = |side: usize, vowel_initial: bool| -> Vec<f64> {
+    // phrase starts, by what the first voiced frame belongs to
+    let onset_of = |side: usize, start: Start| -> Vec<f64> {
         kept.iter()
             .zip(&per)
-            .filter(|(n, _)| n.phrase_start && n.syl.onset.is_empty() == vowel_initial)
+            .filter(|(n, _)| n.phrase_start && n.starts_with() == start)
             .map(|(_, p)| if side == 0 { p.0.onset } else { p.1.onset })
             .collect()
     };
@@ -879,12 +917,56 @@ fn compare_song(
         "aperiodicity": {"human": r2(median(&col(&|m| m.aperiodicity, 0))), "synth": r2(median(&col(&|m| m.aperiodicity, 1)))},
         "h1h2Db": {"human": r2(median(&col(&|m| m.h1h2, 0))), "synth": r2(median(&col(&|m| m.h1h2, 1)))},
         "voicedShare": {"human": r2(mean(&col(&|m| m.voiced, 0))), "synth": r2(mean(&col(&|m| m.voiced, 1)))},
-        "vowelOnsetSec": {"human": r2(median(&onset_of(0, true))), "synth": r2(median(&onset_of(1, true)))},
-        "consonantOnsetSec": {"human": r2(median(&onset_of(0, false))), "synth": r2(median(&onset_of(1, false)))},
+        "vowelOnsetSec": {"human": r3(median(&onset_of(0, Start::Vowel))), "synth": r3(median(&onset_of(1, Start::Vowel)))},
+        "voicelessOnsetSec": {"human": r3(median(&onset_of(0, Start::Voiceless))), "synth": r3(median(&onset_of(1, Start::Voiceless)))},
+        "voicedOnsetSec": {"human": r3(median(&onset_of(0, Start::Voiced))), "synth": r3(median(&onset_of(1, Start::Voiced)))},
         "noteMcdDb": r2(mean(&mcds)),
         "envelopeLagSec": r2(lag), "envelopeCorr": r2(lag_r),
         "bandDiffDb": BAND_NAMES.iter().zip(&band_mean).map(|(n, v)| (n.to_string(), r2(*v))).collect::<serde_json::Map<_, _>>(),
     });
+    // the score's song-level values (singer, synth), unrounded, in score::TERMS order
+    fn side(p: &(NoteMeas, NoteMeas, f64), s: usize) -> &NoteMeas {
+        if s == 0 { &p.0 } else { &p.1 }
+    }
+    let with_bands: Vec<&(NoteMeas, NoteMeas, f64)> = per
+        .iter()
+        .filter(|p| p.0.bands[0].is_finite() && p.1.bands[0].is_finite())
+        .collect();
+    let level = |s: usize, k: usize| {
+        mean(
+            &with_bands
+                .iter()
+                .map(|p| side(p, s).bands[k])
+                .collect::<Vec<_>>(),
+        )
+    };
+    let med_of = |f: &dyn Fn(&NoteMeas) -> f64, s: usize| median(&col(f, s));
+    let pair = |f: &dyn Fn(usize) -> f64| (f(0), f(1));
+    let pairs: [(f64, f64); score::N_TERMS] = [
+        pair(&|s| level(s, 0)),
+        pair(&|s| level(s, 1)),
+        pair(&|s| level(s, 2)),
+        pair(&|s| level(s, 3)),
+        pair(&|s| level(s, 4)),
+        pair(&|s| med_of(&|m| m.h1h2, s)),
+        pair(&vib_share),
+        pair(&|s| med_of(&|m| m.vib_depth, s)),
+        pair(&|s| med_of(&|m| m.vib_rate, s)),
+        pair(&|s| mean(&col(&|m| m.voiced, s))),
+        pair(&|s| median(&onset_of(s, Start::Vowel))),
+        pair(&|s| median(&onset_of(s, Start::Voiceless))),
+        pair(&|s| med_of(&|m| m.aperiodicity, s)),
+    ];
+    let song_score = score::SongScore {
+        id: id.to_string(),
+        pairs,
+        notes: notes.len(),
+        misaligned,
+        dropped,
+        mcd: mean(&mcds),
+        env_corr: lag_r,
+        synth_pitch: median(&abs_cents(1)),
+    };
     let line = format!(
         "{id}  {:>3} notes ({misaligned:>2} off-time)  pitch |c| H {:>5} S {:>5}  vib H {:>4}c/{:>3}Hz S {:>4}c/{:>3}Hz  aper H {} S {}  H1-H2 H {:>5} S {:>5}  MCD {:>4}  lag {:+.2}s r {}  bands {}",
         notes.len(),
@@ -913,6 +995,7 @@ fn compare_song(
         notes: rows,
         vowels,
         line,
+        score: song_score,
     })
 }
 
@@ -925,12 +1008,14 @@ fn meas_json(m: &NoteMeas) -> Value {
     })
 }
 
-/// `compare csd [csd-dir] [outdir] [--songs en001a,en002b|all|a|b] [--body female] [--jobs n]`
+/// `compare csd [csd-dir] [outdir] [--songs en001a,en002b|all|a|b] [--body female] [--jobs n]
+/// [--against earlier/score.json]`
 pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let mut pos: Vec<&str> = Vec::new();
     let mut songs = "a".to_string();
     let mut body_name = "female".to_string();
     let mut jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let mut against: Option<String> = None;
     let mut it = a.iter();
     while let Some(x) = it.next() {
         let mut val = |name: &str| it.next().cloned().ok_or(format!("{name} needs a value"));
@@ -938,6 +1023,7 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             "--songs" => songs = val("--songs")?,
             "--body" => body_name = val("--body")?,
             "--jobs" => jobs = val("--jobs")?.parse().map_err(|e| format!("--jobs: {e}"))?,
+            "--against" => against = Some(val("--against")?),
             _ => pos.push(x),
         }
     }
@@ -1057,6 +1143,13 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             .sum::<u64>(),
         MAX_MISALIGN * 1000.0,
     );
+    let (score_json, score_md, verdict) = score::report(
+        &body_name,
+        &results.iter().map(|r| &r.score).collect::<Vec<_>>(),
+        against.as_deref(),
+    )?;
+    md += &score_md;
+    md += "## Measures\n\n";
     md += "| measure | human | synth |\n|---|---|---|\n";
     for (label, key) in [
         ("pitch error vs score (|cents|)", "pitchAbsCentsVsScore"),
@@ -1071,14 +1164,19 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             "vowelOnsetSec",
         ),
         (
-            "voice onset re note start, consonant-initial phrases (s)",
-            "consonantOnsetSec",
+            "voice onset re note start, phrases opening on a voiceless consonant (s)",
+            "voicelessOnsetSec",
+        ),
+        (
+            "voice onset re note start, phrases opening on a voiced consonant (s; not scored)",
+            "voicedOnsetSec",
         ),
     ] {
+        let d = if key.ends_with("OnsetSec") { 3 } else { 2 };
         md += &format!(
             "| {label} | {} | {} |\n",
-            fx(overall(key, Some("human")), 2),
-            fx(overall(key, Some("synth")), 2)
+            fx(overall(key, Some("human")), d),
+            fx(overall(key, Some("synth")), d)
         );
     }
     md += &format!(
@@ -1156,8 +1254,15 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         "report.json",
         serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?,
     )?;
+    write(
+        "score.json",
+        serde_json::to_string_pretty(&score_json).map_err(|e| e.to_string())?,
+    )?;
     println!("\n{md}");
-    println!("wrote {out_dir}/report.md, {out_dir}/report.json");
+    println!("wrote {out_dir}/report.md, {out_dir}/report.json, {out_dir}/score.json");
+    if let Some(v) = verdict {
+        println!("{v}");
+    }
     Ok(())
 }
 
