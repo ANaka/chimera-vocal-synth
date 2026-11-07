@@ -55,8 +55,14 @@ opens a new one, update this list and give the experiment's number.
 4. **Vibrato.** Costs: rate 0.67, share 0.62. The synth puts 35-cent vibrato on every long note
    at 5.5 Hz. She uses it on about two thirds of her long notes, at about 6.1 Hz
    (`vibrato_gesture` in `crates/chimera/src/phonetics/sing.rs`).
+   - Experiment 5 raised the rate to 5.9–6.1 Hz: rate cost 0.66 → 0, score −0.044, but WORSE on
+     the fewer-notes guard (barely voiced short notes, lead 5). Retry it once lead 5 is fixed.
 5. **Voicing in held notes.** Cost 0.26. Gaps mid-note, worst in en018a, en041a and en043a
    (0.65–0.70 voiced).
+   - The same fault blocks other experiments (1, 3, 5): short notes on a stop coda that the synth
+     voices 0–12 % of the time, so one stray voiced frame decides whether H1−H2 and pitch are
+     measured. Any change to the sound flips a few of them either way, and the fewer-notes guard
+     calls a loss WORSE. Fixing these notes is the most useful next step.
 6. **Speech consonants.** Not scored, only guarded. Whisper mishears /tʃ/, /dʒ/, /ʃ/ and /s/:
    "sheet" as "feet", "chicken leg" as "quickly like", "juice" as "roost". This is for a later
    loop on speech.
@@ -193,3 +199,33 @@ opens a new one, update this list and give the experiment's number.
   The breath's 60 ms lead over the first segment is the real fault. Time the breath ramp to the
   first segment's oral closure (or, for a vowel, end it at the vowel's start), so that pressure
   builds behind a closure or into adducted folds, not into the open air (lead 3).
+
+### 5. A trained singer's vibrato rate, 6 Hz rather than 5.5 (reverted)
+
+- Hypothesis: the synth puts every vibrato at 5.5 Hz (measured 5.49), and hers runs at 6.1
+  (6.0 over all her notes). Trained singers' vibrato is 5.5–6.5 Hz, about 6 Hz on average
+  (Prame 1994, Sundberg). Raising the source's default rate should close the vibrato-rate gap
+  (cost 0.66) and leave everything else alone, since only the pitch modulation's speed changes.
+- Change: the default `vibrato_rate` 5.5 → 6.0 Hz in `DEFAULT_SOURCE`
+  (`crates/chimera/src/voice/human_voice.rs`) and in the glottis default
+  (`crates/chimera/src/sources/glottis.rs`). Speech has no vibrato, so it is untouched. Tried,
+  against experiment 4's best (experiment 3, 0.889):
+  - 6.0 Hz: 0.845 (−0.044 like for like); WORSE, en009a and en048a lose one H1−H2 and pitch note
+    each.
+  - 5.9 Hz: 0.843 (−0.046); WORSE, en019a, en033a (one note fewer long enough for vibrato), en034a,
+    en048a and one more each lose a note.
+  - 6.1 Hz: 0.846 (−0.044); WORSE, en019a loses one H1−H2 and pitch note.
+- Singer: training 0.889 → 0.845 at 6.0 Hz (not kept), held out 1.018 → 1.007–1.008 at 5.9 and
+  6.1 Hz. Vibrato rate cost 0.66 → 0.00 at every rate (synth 5.49 → 5.87 / 5.98 / 6.08 Hz, hers
+  6.08); vibrato share 0.59 → 0.60–0.64; nothing else moved by more than 0.03.
+- Speech: not measured (the singer verdict was WORSE).
+- Verdict: WORSE on the fewer-notes guard at every rate. Every note that flips is a short note
+  (0.08–0.34 s, mostly a stop coda: "aʊt", "lʊk", "ɹis", "mʌst") that the synth voices 0–12 % of
+  its length, so one stray voiced frame decides whether it is measured. Notes were also gained
+  ("dɑk" en015a, "ɪt" en045a, "noʊt" en011a): the flips go both ways, as noise. The vibrato
+  oscillator runs through these notes even where the gesture gives them no depth, so its phase
+  is enough to move a frame. I stopped at three rates rather than search for a rate that happens
+  to pass the guard.
+- Next: fix lead 5 first. These barely voiced short notes have now blocked or limited three
+  experiments (1, 3, 5). Once they voice reliably, retry 6 Hz: it is worth about −0.04.
+
