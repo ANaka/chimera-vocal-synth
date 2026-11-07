@@ -60,7 +60,7 @@ pub const DEFAULT_GLOTTIS: GlottisParams = GlottisParams {
     jitter: 0.004,
     shimmer: 0.03,
     vibrato_depth: 0.0,
-    vibrato_rate: 5.5,
+    vibrato_rate: 6.0,
     drift: 6.0,
     fry: 0.0,
     diplophonia: 0.0,
