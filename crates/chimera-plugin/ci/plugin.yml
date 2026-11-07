@@ -1,0 +1,75 @@
+# MOVE ME to .github/workflows/plugin.yml (the GitHub App that pushes this branch may not write workflows).
+# Builds the CHIMERA plugin (VST3 + CLAP) for macOS as a universal binary, validates it, and
+# uploads the bundles as a downloadable artifact. Builds are ad-hoc signed, not notarized.
+name: plugin
+
+on:
+  push:
+    branches: [main, "t3/**"]
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "bundler.toml"
+      - ".cargo/**"
+      - "public/data/cmudict.txt.gz"
+      - ".github/workflows/plugin.yml"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test the plugin crate
+        run: cargo test -p chimera-plugin --release
+
+      - name: Bundle (universal: Apple Silicon + Intel)
+        run: cargo xtask bundle-universal chimera-plugin --profile plugin
+
+      - name: Ad-hoc sign
+        run: |
+          codesign --force --deep --sign - target/bundled/CHIMERA.vst3
+          codesign --force --deep --sign - target/bundled/CHIMERA.clap
+          lipo -info target/bundled/CHIMERA.vst3/Contents/MacOS/*
+
+      - name: Validate the CLAP build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cv" && cd "$RUNNER_TEMP/cv"
+          gh release download -R free-audio/clap-validator -p '*macos-universal.zip'
+          unzip -q ./*.zip
+          for t in ./*.tar.gz; do [ -e "$t" ] && tar xzf "$t"; done
+          V=$(find . -type f -name clap-validator -perm -u+x | head -1)
+          # excluded: failures nih-plug's own examples share (state reload with this validator
+          # version), and sample rates below 32 kHz, which the plugin refuses on purpose
+          "$V" validate --only-failed \
+            -x 'state-reproducibility-.*' -x state-invalid-random -x process-varying-sample-rates \
+            "$GITHUB_WORKSPACE/target/bundled/CHIMERA.clap"
+
+      - name: Package
+        run: |
+          mkdir -p out
+          ditto -c -k --keepParent target/bundled/CHIMERA.vst3 out/CHIMERA.vst3.zip
+          ditto -c -k --keepParent target/bundled/CHIMERA.clap out/CHIMERA.clap.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chimera-plugin-macos
+          path: out/*.zip
+          if-no-files-found: error
