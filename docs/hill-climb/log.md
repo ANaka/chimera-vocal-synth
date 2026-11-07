@@ -63,6 +63,19 @@ opens a new one, update this list and give the experiment's number.
      voices 0–12 % of the time, so one stray voiced frame decides whether H1−H2 and pitch are
      measured. Any change to the sound flips a few of them either way, and the fewer-notes guard
      calls a loss WORSE. Fixing these notes is the most useful next step.
+   - Experiment 6 found the main cause: 315 of the 368 notes the synth voices under 30 % (she
+     voices them over 70 %) are a phrase's last note. `plan_song` ends a phrase's last vowel up to
+     120 ms (30 % of the note) before the note's end to leave a breath, though callers already
+     split phrases at rests. Holding the note to 50 ms before its end: score 0.889 → 0.747, voiced
+     share and aperiodicity costs to about 0. WORSE only on the fewer-notes guard, through two
+     phrase-initial notes the synth never voices (below). Retry it once those voice.
+   - The note that blocks it, en044a no. 145 "pæ" at 63.77 s (phrase-initial, 0.18 s, then
+     "dwi"): the /p/ burst and aspiration are there (63.76–63.84 s), then 50 ms at −55 dB, about
+     25 dB below the aspiration, where the vowel should be, and voicing starts only with the next
+     note's /d/. The vowel never phonates after a phrase-initial voiceless stop. Its old "onset"
+     was a stray frame 80 ms before the note. en036a no. 71 "ki" is the same shape. Look at why the
+     folds don't start after the stop's abduction at a phrase start (lead 3's breath timing, or the
+     abduction gesture's release).
 6. **Speech consonants.** Not scored, only guarded. Whisper mishears /tʃ/, /dʒ/, /ʃ/ and /s/:
    "sheet" as "feet", "chicken leg" as "quickly like", "juice" as "roost". This is for a later
    loop on speech.
@@ -229,3 +242,40 @@ opens a new one, update this list and give the experiment's number.
 - Next: fix lead 5 first. These barely voiced short notes have now blocked or limited three
   experiments (1, 3, 5). Once they voice reliably, retry 6 Hz: it is worth about −0.04.
 
+
+### 6. A phrase holds its last note to the end; the breath comes from the rest (reverted)
+
+- Hypothesis: lead 5's barely voiced notes are mostly phrase-final. Of the 368 notes the synth
+  voices under 30 % of their steady part while she voices them over 70 %, 315 end a phrase.
+  `plan_song` ends a phrase's last vowel and its coda `min(0.12, 0.3·note)` before the note's end
+  "to leave a breath before the next phrase". But both callers (`compare csd` and `render notes`)
+  split phrases at rests and call `plan_song` once per phrase, so the breath has the rest after
+  the note. A 0.12 s "aʊt" gave its vowel and /t/ 0.08 s, and the steady window (30–80 % of the
+  note) caught the /t/. A singer holds the note to its notated end and puts the coda on the
+  release. Holding the last phrase of a `plan_song` call to the note's end should raise voiced
+  share and lower aperiodicity, and leave a mid-call phrase end (no rest) as it was.
+- Change: `plan_song` in `crates/chimera/src/phonetics/sing.rs`: the reserve stays
+  `min(0.12, 0.3·note)` for a phrase that runs straight into another in the same call, and
+  becomes `min(r, 0.3·note)` for the call's last phrase. Tried, against experiment 3:
+  - r = 0: 0.939 (+0.050); WORSE. Voiced share cost 0.26 → 0.00, aperiodicity 0.90 → 0.00, but the
+    voice decays for about 50 ms after the plan ends (the breath's 50 ms ramp-out; the folds part
+    45 ms after a sonorant), so it runs past the note into the next phrase's onset search, which
+    starts 30 ms after the previous note. Vowel-initial onset −0.015 → −0.040 s (cost 1.39 → 3.44),
+    voiceless-initial cost 1.11 → 1.40, level 0–0.5 kHz 1.14 → 1.44.
+  - r = 0.05 (the breath's release, so the sound stops at the note's end): 0.747 (−0.142 like for
+    like); WORSE, en036a and en044a lose one voiceless-initial onset each.
+  - r = 0.04: 0.733 (−0.156); WORSE, the same two onsets and one H1−H2 and pitch note in en048a.
+  - r = 0.06: 0.762 (−0.127); WORSE, the en044a onset.
+- Singer at r = 0.05: training 0.889 → 0.747, held-out 1.018 → 0.98 (from the held-out costs).
+  Voiced share cost 0.26 → 0.04 (synth 0.876 → 0.896, hers 0.927), aperiodicity 0.90 → 0.03,
+  H1−H2 2.14 → 2.29, level 0–0.5 kHz 1.14 → 1.28, onsets 1.39 → 1.47 and 1.11 → 1.14. Note MCD
+  8.573 → 8.537 dB, envelope correlation 0.797 → 0.810. Nothing else moved by more than 0.05.
+- Speech: not measured (the singer verdict was WORSE). Speech doesn't use `plan_song`.
+- Verdict: WORSE on the fewer-notes guard at every value. The lost onsets are two phrase-initial
+  notes the synth never voices, before or after (en044a no. 145 "pæ", en036a no. 71 "ki"). Their
+  onset was a stray voiced frame 80–100 ms before the note, which the change removed. The
+  rules' answer is revert; the gain is real but waits on those notes.
+- Next: fix the vowel that never phonates after a phrase-initial voiceless stop (lead 5's second
+  note: aspiration, then 50 ms at −55 dB where the vowel should be). Then retry this change at
+  r = 0.05: it is worth about −0.14, the largest single gain so far. H1−H2 and the low band rose
+  a little with it, as more of the short notes' vowels are now measured.
