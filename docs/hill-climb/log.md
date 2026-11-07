@@ -144,6 +144,11 @@ opens a new one, update this list and give the experiment's number.
    weaker. Leave that timing alone. What's left to try: lengthen the stressed vowel in the plan
    itself (the aspiration allowance is 20 ms against a 50 ms VOT), or the stop-closure lead (it
    moves every stop and the sung consonants, so watch the singer's timing guard).
+   - Experiment 17 measured both. The closure lead varies by vowel (/t/ lands 7 ms early after
+     /i/, 23 ms late after /ɑ/), but aiming it later doesn't save the /i/. The /i/ of "sweet" and
+     "eats" undershoots: the /w/ and /ɝ/ before it hold the tongue body to their ends. Length is
+     the lever: an aspiration allowance of 50 ms (the VOT), given only where the stop is
+     aspirated, fixes "paints" in both voices, but the total stays at 36.09 %. See its "Next".
 
 8. **The pop on "sharp" (target 3).** Closed by experiment 16: the /t/, its tip already raised
    by the /ɹ/, sealed 19 ms early behind the closed lips and the tongue and jaw pumped the
@@ -1030,3 +1035,72 @@ voice's sung consonants.
     jaw would be up before the second closure), or a lip seal that leaks above a contact
     pressure (the README's "real leak path"). Both reach every stop, so watch the singer's
     note MCD.
+
+### 17. Tense vowels heard as lax: what cuts them, and an aspiration allowance as long as the VOT (reverted)
+
+- Hypothesis: "eats" → "it's", "sweet stone" → "switch tone", "paints" → "pinks" and "reads" →
+  "greater", in both voices: the tense vowels are heard as lax ones. Experiment 14 left two
+  candidates, the realisation cutting the vowel (stop closures early, aspiration longer than its
+  allowance) and the vowel undershooting its target. Measured first (male, LPC formants and
+  10 ms levels; a Whisper probe with the judge's settings on the six failing nonsense sentences):
+  - **The closure lead depends on the vowel, but it isn't what loses the /i/.** The /t/ of
+    /ɑhˈVtə/ reaches −30 dB re the vowel's peak, against its planned onset: i −7, ɪ −4, e −3,
+    u 0, o +3, ɛ +7, ə +9, æ +14, ɑ +23 ms. The tip's 31 ms latency lead is fixed, but its travel
+    to the ridge is 2.4 cm from /i/ and 4.2 cm from /ɑ/ (vowel-table ttY against the stop's 9.68).
+    Aiming the closure by travel (16.5 ms per cm round 2.8 cm) moves /ɑ/ from +23 to −5 ms but /i/
+    only from −7 to −5: after /i/ the level falls 8–9 dB in the 20 ms before contact (F1 370 →
+    310 Hz) as the tip narrows an already narrow front tract. Aiming it later only (up to 21 ms
+    for /i/) moved no word in the probe.
+  - **The /i/ undershoots, mostly from its neighbours.** "sweet" (/i/ planned 1.682–1.792 s): F2
+    reaches 2200 Hz (table 2225) only from 1.725 s, about 35 ms before the level falls for the /t/;
+    the /w/ owns the tongue body until its end, then the 12 Hz dynamics take 40 ms. F1 stays at
+    390–400 (table /i/ 337, /ɪ/ 424) and F3 at 2550–2700 (/i/ 2901, /ɪ/ 2603). "river eats"
+    (/i/ 0.937–1.030 s, after /ɝ/): F1 about 445, F2 1650 → 2080 only as the /t/ closes. It never
+    reaches /i/. This /i/ also takes `klatt_durations`' vowel-after-vowel factor (0.7), which
+    applies across the word boundary.
+  - **"paints"**: the /p/'s aspiration takes 1.05–1.10 s, and the /eɪ/ (planned 1.053–1.211) is
+    voiced for about 70 ms, from 1.10 s to the nasal murmur at 1.17. Its /e/ sits at 465/2030 Hz,
+    the table's /e/, which is only 40 Hz of F1 from /ɪ/ (424/2031), as in Hillenbrand's data. What
+    separates them is length and the glide.
+  - **Length is the lever.** Adding 30 ms to every stressed tense vowel (a diagnostic, not a
+    rule) makes "paints" heard right in both voices, and the male "sweet stone" too.
+- Change: `crates/chimera/src/phonetics/durations.rs`, the aspiration allowance (a stressed vowel
+  after a voiceless stop gets back the time the aspiration eats). It is 20 ms, against the
+  planner's 50 ms VOT (the abduction gesture holds to `t1 + 0.4·VOT`, then ramps for 45 ms, and
+  voicing starts about 50 ms after the release). Sung durations are explicit, so this is speech
+  only. Values tried, full speech judge:
+  - **Diagnostic, stressed tense vowels +30 ms**: 36.09 → 37.09 % (NO CLEAR CHANGE).
+    - Right: "paints" and "sweet stone" (male 4 → 2), "paints" (female 5 → 4), male "Glue",
+      female "rice … served" (3 → 1) and "thrown", male "chair" (3 → 2).
+    - Wrong: male "chicken leg" 1 → 7 (Whisper stops after "These days,"), "the thin road" (male
+      2 → 4, female 2 → 3), female "birch" and "steady".
+  - **Allowance 20 → 50 ms**: 36.09 → 36.09 % (NO CLEAR CHANGE).
+    - Right: male "paints", female "thrown" and "a large size", male "steady" (7 → 6).
+    - Wrong: female "sharp tree" ("tray"), male "pushes a heavy" ("has a"), female "Four hours"
+      (6 → 7: Whisper stops at "For our L").
+  - **Allowance 50 ms, and only where the planner aspirates** (not after /s/, as in "steady" and
+    "stone", whose /t/ is unaspirated but got the allowance): 36.09 → 36.09 % (NO CLEAR CHANGE),
+    held-out 45.67 → 44.67 % (not used). "paints" is heard right in both voices. Otherwise as the
+    row before.
+- Speech: training 36.09 → 36.09 % at best (the last two rows); held-out not used.
+- Singer, bench, tests: not run. The deciding verdict failed at every value.
+- Verdict: reverted. The speech is not BETTER at any value: each gain on a target word is paid
+  for by a loss elsewhere. Some losses are Whisper stopping mid-sentence.
+- Commit: none (log only).
+- Next:
+  - "paints" is solved by length: any allowance of 50 ms or more fixes it in the male voice, and
+    in both when the allowance is limited to aspirated stops. Keep that variant in mind as a
+    passenger for a change that moves more words. On its own it is a wash.
+  - The /i/ of "eats" and "sweet" is lost to its neighbours, not to the stop: the /w/ and the
+    /ɝ/ hold the tongue body until their ends, and the /i/ then needs 40 ms to arrive. Two
+    untried, speech-only angles:
+    - the vowel-after-vowel 0.7 factor in `klatt_durations` across a word boundary
+      ("river eats"). Klatt has no such rule; a word-initial vowel isn't shortened by the
+      word before it;
+    - an earlier tongue-body release for /w/ and /ɹ/ before a front vowel (coarticulation: a
+      speaker's tongue anticipates /i/ during the /w/ of "sweet").
+  - "sweet stone" and "eats" also fail on the /ts/: with the /i/ fixed, the male hears "each"
+    and "switch". A /t/ released into /s/ is heard as /tʃ/. Look at the /s/ after a /t/ release
+    (its tip place and the frication's spectrum) as a separate lead.
+  - The tip-travel closure lead is real (30 ms of spread from /i/ to /ɑ/) but moves sung
+    consonants, so it's for after the owner's note-MCD decision.
