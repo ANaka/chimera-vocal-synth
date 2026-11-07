@@ -27,6 +27,14 @@ opens a new one, update this list and give the experiment's number.
      high bands are about done. H1−H2 (2.21) and level 0–0.5 kHz (1.32) did not move: they are
      not the closure. They point at the open quotient and how it follows pitch: the synth's
      H1−H2 rises with pitch where hers falls.
+   - Experiment 3 opened a small posterior chink: level 0–0.5 kHz 1.32 → 1.14, H1−H2 only
+     2.21 → 2.14. What is left of H1−H2 is how it follows pitch and vowel, not its level. By
+     vowel class and pitch, the synth's H1−H2 swings two to three times as far as hers as the
+     harmonics cross F1: close vowels −9 → +23 dB from MIDI 56 to 68 (hers 1 → 11), mid vowels
+     −10 → +14 from 60 to 72 (hers 5 → −3). The tract's closed-glottis F1 bandwidths are 35–70 Hz
+     (female body). Two candidates: a wider F1 bandwidth (wall resistance: doubling
+     `WALL_SOFT.resistance` raises B1 by about half but lowers F1 by 10–20 Hz, so the vowel tables
+     need `chimera calibrate`), or F1 that follows pitch (singers open the jaw on high notes).
 2. **Aperiodicity.** Cost 2.9: the synth's is about twice hers. Look at jitter, shimmer, drift
    and aspiration noise in the source. She is a clean, trained voice.
    - Experiment 1 lowered the jitter: cost 1.74. Most of what is left comes from a few songs with
@@ -116,3 +124,35 @@ opens a new one, update this list and give the experiment's number.
 - Next: the high bands are close to her now. The largest costs are H1−H2 (2.21), the onsets
   (1.39 and 1.10), level 0–0.5 kHz (1.32) and aperiodicity (0.97). H1−H2 and the low band point
   at the open quotient and how it follows pitch (lead 1), not at the closure.
+
+### 3. A posterior glottal chink that stays open through closure (kept)
+
+- Hypothesis: H1−H2 (cost 2.21) and level 0–0.5 kHz (1.32) were too low. At the default
+  breathiness the folds sealed almost completely (chink 0.007 cm² on the female body). Most voices,
+  women's and trained singers' included, keep a small posterior gap through the closed phase
+  (Södersten & Lindestad 1990). Its leak lifts H1 and damps the tract, so H1−H2 and the low band
+  should rise and H1−H2 should swing less as the harmonics cross F1.
+- Change: `apply_source` in `crates/chimera/src/voice/human_voice.rs`: chink base 0.004 → 0.008
+  (`0.008 + 0.03·breathiness`, times k²). Tried, against experiment 2:
+  - 0.02: 0.896; WORSE, seven notes fewer measured (H1−H2 and pitch on en008a, en009a, en018a and
+    more). Every lost note is one the synth hardly voices (5–10 % voiced: short notes on a stop
+    coda like "dɑk", "ɹaɪt", "ɪt"); one stray voiced frame decides whether they are measured.
+  - 0.016: 0.883; WORSE, the same kind of notes.
+  - 0.012: 0.878; WORSE: one note fewer for H1−H2 (en048a "lʊk", 10 % voiced) and one fewer long
+    enough for vibrato (en033a no. 96, a 0.6 s /ə/ whose voiced run fell under 0.4 s).
+  - 0.008: 0.889; BETTER. Kept.
+  - The larger chinks scored better but lose more of these notes. That is lead 5 again: notes
+    the synth barely voices.
+- Singer: training score 0.930 → 0.889 (−0.041 like for like), held-out 1.045 → 1.018.
+  - Level 0–0.5 kHz 1.32 → 1.14 (synth median −7.31 → −7.04 dB, hers −4.02).
+  - H1−H2 2.21 → 2.14 (−1.21 → −0.96 dB, hers +3.20). The swing with pitch is unchanged: by
+    pitch the synth's medians still run −5 dB at MIDI 54 to +12 at 72, hers +2 to 0.
+  - Level 4–8 kHz 0.68 → 0.44, level 2–4 kHz 0.13 → 0.00, aperiodicity 0.97 → 0.90.
+  - Note MCD 8.624 → 8.573 dB. Nothing else moved by more than 0.02.
+- Speech: word error rate 39.07 → 39.40 % (OK).
+- Speed: `os=2` 19.1 % → 18.2 %.
+- Tests: pass, including `golden_analysis`.
+- Commit: f5cc671.
+- Next: a larger chink doesn't flatten H1−H2's swing with pitch, and it costs notes the synth
+  barely voices. Try a wider F1 bandwidth or F1 that follows pitch (lead 1). Lead 5 is worth
+  a run of its own: those barely voiced short notes before a stop make every guard noisy.
