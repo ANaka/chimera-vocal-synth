@@ -1,7 +1,9 @@
 //! The planners, singing, beatbox sounds and beat sequencer against the TypeScript engine
 //! (fixtures from `bun tools/golden/planning.ts`). Plans are compared as the JSON the UI receives:
 //! the same keys everywhere, strings and labels exact, `speed`/`releaseHold`/`tag` exact, other
-//! numbers to 1e-9 relative (absolute floor 1e-9).
+//! numbers to 1e-9 relative (absolute floor 1e-9). The planners' expectations (utterances,
+//! durations, phrases, songs, live notes) are re-blessed with `CHIMERA_BLESS=1` after an intended
+//! change, like the audio fixtures; the beat sequencer's stay the TypeScript engine's.
 mod common;
 use chimera::anatomy::human::BODY_MALE;
 use chimera::control::beat_player::BeatPlayer;
@@ -72,6 +74,21 @@ fn de<T: serde::de::DeserializeOwned>(v: &Value) -> T {
     serde_json::from_value(v.clone()).unwrap_or_else(|e| panic!("{e}: {v}"))
 }
 
+/// `CHIMERA_BLESS=1`: write the Rust planners' output as the new expectations of one section of
+/// planning.json (its inputs stay). The tests run in parallel, so each rewrites the file under a
+/// lock with only its own section changed.
+fn bless(section: &str, field: &str, got: Vec<Value>) {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = LOCK.lock().unwrap();
+    let mut f = load("planning");
+    let items = f[section].as_array_mut().unwrap();
+    assert_eq!(items.len(), got.len());
+    for (item, v) in items.iter_mut().zip(got) {
+        item[field] = v;
+    }
+    save_json("planning", &f);
+}
+
 fn val<T: serde::Serialize>(x: &T) -> Value {
     serde_json::to_value(x).unwrap()
 }
@@ -82,11 +99,18 @@ fn utterances_match_typescript() {
     let mut st = Stats::default();
     let us = f["utterances"].as_array().unwrap();
     assert!(us.len() >= 60);
+    let mut got = Vec::new();
     for u in us {
         let segs: Vec<Segment> = de(&u["segments"]);
         let opts: PlanOptions = de(&u["opts"]);
-        let plan = plan_utterance(&segs, &opts);
-        cmp(&format!("utterance {:?}", u["name"].as_str().unwrap()), &u["plan"], &val(&plan), &mut st);
+        let plan = val(&plan_utterance(&segs, &opts));
+        if !blessing() {
+            cmp(&format!("utterance {:?}", u["name"].as_str().unwrap()), &u["plan"], &plan, &mut st);
+        }
+        got.push(plan);
+    }
+    if blessing() {
+        return bless("utterances", "plan", got);
     }
     report("utterances", &st);
 }
@@ -95,12 +119,19 @@ fn utterances_match_typescript() {
 fn klatt_durations_match_typescript() {
     let f = load("planning");
     let mut st = Stats::default();
+    let mut got = Vec::new();
     for (ci, c) in f["klatt"].as_array().unwrap().iter().enumerate() {
         let segs: Vec<Segment> = de(&c["segments"]);
         let infos: Vec<SegInfo> = de(&c["infos"]);
         // the info callback receives the segment: find its index by identity
-        let durs = klatt_durations(&segs, |s| infos[segs.iter().position(|x| std::ptr::eq(x, s)).unwrap()]);
-        cmp(&format!("klatt {ci}"), &c["durs"], &val(&durs), &mut st);
+        let durs = val(&klatt_durations(&segs, |s| infos[segs.iter().position(|x| std::ptr::eq(x, s)).unwrap()]));
+        if !blessing() {
+            cmp(&format!("klatt {ci}"), &c["durs"], &durs, &mut st);
+        }
+        got.push(durs);
+    }
+    if blessing() {
+        return bless("klatt", "durs", got);
     }
     report("klatt", &st);
 }
@@ -109,10 +140,18 @@ fn klatt_durations_match_typescript() {
 fn phrases_match_typescript() {
     let f = load("planning");
     let mut st = Stats::default();
+    let mut got = Vec::new();
     for (i, p) in f["phrases"].as_array().unwrap().iter().enumerate() {
         let phrases: Vec<PhraseInput> = de(&p["phrases"]);
         let opts: PlanOptions = de(&p["opts"]);
-        cmp(&format!("phrases {i}"), &p["plan"], &val(&plan_phrases(&phrases, &opts)), &mut st);
+        let plan = val(&plan_phrases(&phrases, &opts));
+        if !blessing() {
+            cmp(&format!("phrases {i}"), &p["plan"], &plan, &mut st);
+        }
+        got.push(plan);
+    }
+    if blessing() {
+        return bless("phrases", "plan", got);
     }
     report("phrases", &st);
 }
@@ -121,10 +160,18 @@ fn phrases_match_typescript() {
 fn songs_match_typescript() {
     let f = load("planning");
     let mut st = Stats::default();
+    let mut got = Vec::new();
     for s in f["songs"].as_array().unwrap() {
         let notes: Vec<SungNote> = de(&s["notes"]);
         let opts: SongOptions = de(&s["opts"]);
-        cmp(&format!("song {:?}", s["name"].as_str().unwrap()), &s["plan"], &val(&plan_song(&notes, &opts)), &mut st);
+        let plan = val(&plan_song(&notes, &opts));
+        if !blessing() {
+            cmp(&format!("song {:?}", s["name"].as_str().unwrap()), &s["plan"], &plan, &mut st);
+        }
+        got.push(plan);
+    }
+    if blessing() {
+        return bless("songs", "plan", got);
     }
     report("songs", &st);
 }
@@ -134,6 +181,7 @@ fn live_notes_match_typescript() {
     let f = load("planning");
     let mut st = Stats::default();
     let mut legato = 0;
+    let mut gestures = Vec::new();
     for (i, n) in f["notes"].as_array().unwrap().iter().enumerate() {
         let midi = num(&n["midi"]);
         let got = match n["kind"].as_str().unwrap() {
@@ -146,9 +194,16 @@ fn live_notes_match_typescript() {
             "melisma" => plan_melisma(midi, &de::<MelismaOptions>(&n["opts"])),
             k => panic!("{k}"),
         };
-        cmp(&format!("note {i} ({})", n["kind"]), &n["gestures"], &val(&got), &mut st);
+        let got = val(&got);
+        if !blessing() {
+            cmp(&format!("note {i} ({})", n["kind"]), &n["gestures"], &got, &mut st);
+        }
+        gestures.push(got);
     }
     assert!(legato > 0);
+    if blessing() {
+        return bless("notes", "gestures", gestures);
+    }
     report("notes", &st);
 }
 

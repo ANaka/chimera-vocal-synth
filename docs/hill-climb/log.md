@@ -341,3 +341,15 @@ were.
   so the next run should pick a lead outside `plan_song`: the vibrato rate (lead 4, about −0.04,
   in the source), or F1 bandwidth for H1−H2 (lead 1).
 
+### Decision after experiment 7: the planners' snapshots are blessed too
+
+`golden_planning` compared the planners against TypeScript-era plans in `planning.json`. Blessing
+didn't regenerate those, so no change to `plan_song` (or any planner) could pass the tests.
+Like the audio fixtures, these are snapshots of a retired engine. `CHIMERA_BLESS=1` now
+rewrites the utterance, duration, phrase, song and live-note plans in `planning.json`, keeping
+its inputs. Blessing an unchanged planner rewrites the same values (worst difference 2e-16).
+The beat sequencer's expectations stay fixed.
+
+Experiment 7's change (a phrase's last note held to 0.05 s before its end, −0.145 like for
+like, speech and bench OK) can now be retried as it was.
+

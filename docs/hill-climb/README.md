@@ -88,10 +88,13 @@ Keep the change only if all of these hold:
 2. The speech verdict is **OK**.
 3. The bench is no more than **10 % slower**.
 4. **The tests pass.**
-   1. Bless the golden fixtures in `crates/chimera/tests/golden`, which are snapshots of the
-      sound and change with any change to it. Run
-      `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast` **twice**: `engine.rs` reads a
-      fixture that `golden_planning` blesses, so its first run can fail.
+   1. Bless the golden fixtures in `crates/chimera/tests/golden`. They are snapshots of the
+      sound (the `.f32` files) and of the planners' output (the utterance, duration, phrase,
+      song and live-note plans in `planning.json`), and they change with any change to either.
+      Run `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast` **twice**: `engine.rs` reads
+      a fixture that `golden_planning` blesses, so its first run can fail. The beat
+      sequencer's expectations in `planning.json` are not blessed: a voice change shouldn't
+      move them.
    2. Then run `cargo test --workspace --no-fail-fast` and `bun run wasm && bun test tests`.
       Every test must pass, with one exception. If your change alters the airway's linear
       acoustics on purpose (wall or radiation losses, tract geometry), the airway checks in
