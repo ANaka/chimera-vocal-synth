@@ -35,7 +35,7 @@ jobs:
       - name: Test the plugin crate
         run: cargo test -p chimera-plugin --release
 
-      - name: Bundle (universal: Apple Silicon + Intel)
+      - name: Bundle a universal binary (Apple Silicon + Intel)
         run: cargo xtask bundle-universal chimera-plugin --profile plugin
 
       - name: Ad-hoc sign
