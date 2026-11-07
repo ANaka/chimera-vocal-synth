@@ -23,6 +23,10 @@ opens a new one, update this list and give the experiment's number.
    - Together they sound like a source that is too pressed. Look at the open quotient, skew and
      closure sharpness, and at how they vary with pitch and effort
      (`crates/chimera/src/sources/glottis.rs`, and how `voice/human_voice.rs` drives it).
+   - Experiment 2 softened the closure: the 2–4 and 4–8 kHz costs fell to 0.13 and 0.68, so the
+     high bands are about done. H1−H2 (2.21) and level 0–0.5 kHz (1.32) did not move: they are
+     not the closure. They point at the open quotient and how it follows pitch: the synth's
+     H1−H2 rises with pitch where hers falls.
 2. **Aperiodicity.** Cost 2.9: the synth's is about twice hers. Look at jitter, shimmer, drift
    and aspiration noise in the source. She is a clean, trained voice.
    - Experiment 1 lowered the jitter: cost 1.74. Most of what is left comes from a few songs with
@@ -80,3 +84,35 @@ opens a new one, update this list and give the experiment's number.
 - Next: don't lower shimmer again: the note MCD guard is close. The rest of the aperiodicity cost
   is in songs with voicing gaps (en043a, en018a), which is lead 5, and the largest single cost is
   still level 4–8 kHz (lead 1).
+
+### 2. The folds close over a return phase, not at a corner (kept)
+
+- Hypothesis: at tension 0.55, which the comparison sings with, the glottal area pulse closed
+  with sharpness 0.635: close to a hard corner, as if the folds met all at once. Real folds close
+  along their length and depth over a return phase, so the source spectrum falls faster above
+  about 1 kHz. The synth had 7.5 dB too much at 4–8 kHz and 4.4 dB too much at 2–4 kHz, on every
+  vowel. A softer closure should lower both bands and leave the low bands and H1−H2 roughly
+  alone.
+- Change: `apply_source` in `crates/chimera/src/voice/human_voice.rs`: closure sharpness
+  `0.25 + 0.7·tension` → `0.4·tension` (0.22 at tension 0.55; speech, at 0.5, gets 0.2). Tried,
+  against experiment 1:
+  - `0.1 + 0.55·tension` (0.40): 1.047; BETTER. 4–8 kHz cost 2.91, 2–4 kHz 0.60.
+  - `0.4·tension` (0.22): 0.930; BETTER. Kept.
+  - `0.2·tension` (0.11): 0.915; BETTER, but the synth's 4–8 kHz median (−25.6 dB) passes hers
+    (−24.8), MCD is flat (8.628) and it leaves tension almost no say in the closure. The extra
+    0.015 is not worth that.
+- Singer: training score 1.245 → 0.930 (−0.314 like for like), held-out 1.402 → 1.045.
+  - Level 4–8 kHz cost 5.37 → 0.68 (synth median −17.3 → −23.7 dB, hers −24.8).
+  - Level 2–4 kHz 1.43 → 0.13 (−14.0 → −17.1, hers −18.4).
+  - Aperiodicity 1.74 → 0.97 (held out 0.96 → 0.05): YIN reads less high-frequency energy
+    between the harmonics.
+  - H1−H2 2.09 → 2.21: within the 0.25 a term may rise.
+  - Level 0–0.5 kHz 1.41 → 1.32. Note MCD 9.288 → 8.624 dB. Nothing else moved by more than
+    0.07.
+- Speech: word error rate 39.07 → 39.07 % (OK).
+- Speed: `os=2` 18.5 % → 19.1 % (3 %).
+- Tests: pass, including `golden_analysis`.
+- Commit: 8c04752.
+- Next: the high bands are close to her now. The largest costs are H1−H2 (2.21), the onsets
+  (1.39 and 1.10), level 0–0.5 kHz (1.32) and aperiodicity (0.97). H1−H2 and the low band point
+  at the open quotient and how it follows pitch (lead 1), not at the closure.
