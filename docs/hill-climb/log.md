@@ -76,6 +76,13 @@ opens a new one, update this list and give the experiment's number.
      was a stray frame 80 ms before the note. en036a no. 71 "ki" is the same shape. Look at why the
      folds don't start after the stop's abduction at a phrase start (lead 3's breath timing, or the
      abduction gesture's release).
+   - Experiment 7 retried experiment 6 at r = 0.05 under the like-for-like judge: BETTER (0.889 →
+     0.747), speech and speed OK, but reverted on a test. `songs_match_typescript` in
+     `crates/chimera/tests/golden_planning.rs` checks `plan_song` against TypeScript-era plans in
+     `tests/golden/planning.json`, which `CHIMERA_BLESS` doesn't regenerate, so it fails on any
+     change to how songs are planned. The change is ready to keep once the owner decides how that
+     fixture may be updated (a bless path for the song plans, or an exception in the rules like the
+     airway one). Until then, no `plan_song` change can be kept.
 6. **Speech consonants.** Not scored, only guarded. Whisper mishears /tʃ/, /dʒ/, /ʃ/ and /s/:
    "sheet" as "feet", "chicken leg" as "quickly like", "juice" as "roost". This is for a later
    loop on speech.
@@ -295,4 +302,42 @@ and a rerun is NO CLEAR CHANGE.
 Checked on experiment 5's change (vibrato 5.5 → 6.0 Hz): BETTER, −0.043 like for like. It
 was not kept: that is for an experiment to do. Experiments 5 and 6 are worth retrying as they
 were.
+
+### 7. Experiment 6 again under the like-for-like judge: the last note held to the end (reverted)
+
+- Hypothesis: as in experiment 6. `plan_song` ends a phrase's last vowel and coda
+  `min(0.12, 0.3·note)` before the note's end to leave a breath, but the call's last phrase is
+  followed by a rest (both callers split phrases at rests), so the breath comes from the rest. The
+  steady window of short phrase-final notes caught the coda instead of the vowel. Holding the
+  call's last note to 50 ms before its end (the breath's release) should raise voiced share and
+  lower aperiodicity. Experiment 6 measured this at −0.142 and failed only the coverage guard,
+  which the judge change after it removed.
+- Change: `plan_song` in `crates/chimera/src/phonetics/sing.rs`: the reserve is
+  `min(0.12, 0.3·note)` for a phrase that runs straight into another in the same call, and
+  `min(0.05, 0.3·note)` for the call's last phrase. One value, the one experiment 6 settled on.
+- Singer: training score 0.889 → 0.747 (−0.145 like for like, BETTER), held-out 1.018 → 0.983.
+  - Voiced share cost 0.26 → 0.04 (synth 0.876 → 0.896, hers 0.927).
+  - Aperiodicity 0.90 → 0.03.
+  - H1−H2 2.14 → 2.29 and level 0–0.5 kHz 1.14 → 1.28: more of the short notes' vowels are now
+    measured, and they have the pitch-dependent H1−H2 of lead 1.
+  - Vowel-initial onset 1.39 → 1.47; voiceless-initial 1.11 → 1.14.
+  - Note MCD 8.573 → 8.537 dB, envelope correlation 0.797 → 0.810. Nothing else moved by more than
+    0.05.
+- Speech: word error rate 39.4 → 39.4 % (OK; speech doesn't use `plan_song`).
+- Speed: `os=2` 18.2 % → 18.4 %.
+- Tests: `bun test tests` passes (18). After blessing twice, `cargo test --workspace` fails one
+  test: `songs_match_typescript` (`golden_planning.rs`), "Made of air (male)" gestures[138].t1
+  11.6066 vs 11.6766. That is the last note's vowel ending 70 ms later (0.12 → 0.05 s), the change
+  itself. The baseline passes it. The test compares `plan_song` against TypeScript-era plans in
+  `tests/golden/planning.json`, and `CHIMERA_BLESS` doesn't regenerate them (the TypeScript engine
+  is gone), so it isn't a blessed fixture. The rules' only exception is the airway checks in
+  `golden_analysis`.
+- Verdict: reverted on a failing test, as the rules require, though every judge passed. Editing or
+  re-baselining the test to let the change through is not this experiment's to do.
+- Next: the owner should decide whether the song plans in `planning.json` may be re-blessed after
+  an intended planner change (as the sound fixtures are), or add a rules exception for
+  `songs_match_typescript` like the airway one. Then keep this change as it is: it is worth −0.145
+  and takes voiced share and aperiodicity to about 0. Until then no `plan_song` change can be kept,
+  so the next run should pick a lead outside `plan_song`: the vibrato rate (lead 4, about −0.04,
+  in the source), or F1 bandwidth for H1−H2 (lead 1).
 
