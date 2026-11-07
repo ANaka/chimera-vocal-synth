@@ -2007,6 +2007,12 @@ input[type="range"]::-moz-range-thumb {
   text-align: left;
 }
 
+/* column headings fit their column at the chart's narrowest (600 px), instead of running together */
+.ipa-chart thead th {
+  padding: 1px 0;
+  letter-spacing: 0.05em;
+}
+
 .ipa-chart td {
   border: 1px solid var(--frame);
   padding: 0 1px;
