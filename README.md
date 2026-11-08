@@ -35,6 +35,8 @@ Open `http://127.0.0.1:5317/?mode=speak` for the English-input version. Type a s
 The AudioWorklet needs a secure context, so open it on localhost or over HTTPS (for example
 `tailscale serve`). Vercel builds it with `vercel.json`.
 
+For MP4 export with the full vocal-tract display and timed English captions, see the [performance renderer](tools/performance/README.md).
+
 Offline renders and measurement:
 
 ```sh

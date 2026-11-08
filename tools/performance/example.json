@@ -1,0 +1,43 @@
+{
+  "title": "Voice test",
+  "bpm": 120,
+  "lines": [
+    {
+      "section": "Speech",
+      "words": [
+        {
+          "text": "Hello",
+          "start": 0.15,
+          "end": 0.48,
+          "hz": 125
+        },
+        {
+          "text": "world",
+          "start": 0.48,
+          "end": 0.78,
+          "hz": 140
+        }
+      ]
+    },
+    {
+      "sung": true,
+      "words": [
+        {
+          "text": "music",
+          "start": 1,
+          "end": 1.75,
+          "notes": [
+            [
+              57,
+              1
+            ],
+            [
+              60,
+              2
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}
