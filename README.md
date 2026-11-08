@@ -55,3 +55,9 @@ bun tools/spectrogram.ts in.wav out.png
   step at a time.
 
 Agents: see [AGENTS.md](AGENTS.md).
+
+## License
+
+[MIT](LICENSE). Bundled third-party files keep their own licenses: the CMU Pronouncing
+Dictionary ([public/data/CMUDICT-LICENSE.txt](public/data/CMUDICT-LICENSE.txt)) and the fonts
+([public/fonts/](public/fonts/)).
