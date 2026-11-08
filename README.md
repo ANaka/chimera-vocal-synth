@@ -29,6 +29,9 @@ bun run dev        # builds the wasm, then Vite on 127.0.0.1:5317
 bun run test       # wasm build, cargo test --workspace, bun test tests
 ```
 
+Open `http://127.0.0.1:5317/?mode=speak` for the English-input version. Type a sentence and press
+**Speak** (or **⌘/Ctrl + Enter**) to hear the physical voice.
+
 The AudioWorklet needs a secure context, so open it on localhost or over HTTPS (for example
 `tailscale serve`). Vercel builds it with `vercel.json`.
 
