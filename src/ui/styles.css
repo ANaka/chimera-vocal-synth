@@ -2847,6 +2847,24 @@ input[type="range"]::-moz-range-thumb {
   color: var(--amber);
 }
 
+/* capture mode (?capture, for tools/show-video.ts): only the heads, edge to edge */
+.duet.capture {
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+.duet.capture .duet-heads {
+  gap: 0;
+}
+.duet.capture .duet-top,
+.duet.capture .duet-bar,
+.duet.capture .duet-head .screen-head {
+  display: none;
+}
+.duet.capture .duet-head {
+  border: 0;
+}
+
 @media (max-width: 720px) {
   .duet {
     padding: 4px 8px max(8px, env(safe-area-inset-bottom));

@@ -507,6 +507,17 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         tension: Some(0.55),
         ..Default::default()
     });
+    // a song's own voice: an optional "source" object over those settings (pitch and voicing stay
+    // the score's); a misspelt key is an error rather than silently the default
+    if let Some(src) = j.get("source") {
+        const KEYS: [&str; 10] = ["glide", "pressure", "breathiness", "tension", "fry", "roughness", "vibratoDepth", "vibratoRate", "drift", "brightness"];
+        let obj = src.as_object().ok_or("source: expected an object")?;
+        if let Some(k) = obj.keys().find(|k| !KEYS.contains(&k.as_str())) {
+            return Err(format!("source: unknown key {k:?} (known: {})", KEYS.join(", ")));
+        }
+        let patch: SourcePatch = serde_json::from_value(src.clone()).map_err(|e| format!("source: {e}"))?;
+        v.set_source(&patch);
+    }
     let (mut t, mut k, mut end) = (t0, 0usize, 0.0f64);
     let mut phrase: Vec<SungNote> = Vec::new();
     let mut start = t;

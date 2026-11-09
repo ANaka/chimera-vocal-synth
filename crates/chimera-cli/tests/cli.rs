@@ -378,6 +378,31 @@ fn render_notes_artic_tracks_follow_the_sound_without_changing_it() {
 }
 
 #[test]
+fn render_notes_source_sets_the_songs_voice_and_refuses_unknown_keys() {
+    let song = |name: &str, source: &str| {
+        let melody = tmp(&format!("{name}.json"));
+        std::fs::write(&melody, format!(r#"{{"bpm": 120, "t0": 0, "lyrics": "Take my hand", "notes": [[0, 1], [67, 1], [63, 0.5], [60, 1.5]]{source}}}"#)).unwrap();
+        melody
+    };
+    let wav = |melody: &str, out: &str| {
+        chimera(&["render", "notes", melody, out, "male"]);
+        std::fs::read(format!("{out}.wav")).unwrap()
+    };
+    let plain = wav(&song("src-none", ""), &tmp("src-none"));
+    // an empty source is no source; a brighter, rougher voice is a different sound
+    assert!(plain == wav(&song("src-empty", r#", "source": {}"#), &tmp("src-empty")), "an empty source changed the sound");
+    let bright = wav(&song("src-bright", r#", "source": {"brightness": 0.7, "roughness": 0.3, "vibratoRate": 4.5}"#), &tmp("src-bright"));
+    assert_eq!(plain.len(), bright.len());
+    assert!(plain != bright, "the source settings did nothing");
+    // a misspelt key, or the score's own pitch, is refused
+    for (name, src) in [("src-typo", r#", "source": {"brightnes": 0.7}"#), ("src-f0", r#", "source": {"f0": 200}"#)] {
+        let out = Command::new(env!("CARGO_BIN_EXE_chimera")).args(["render", "notes", &song(name, src), &tmp(name), "male"]).output().unwrap();
+        assert!(!out.status.success(), "{name} was accepted");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("source: unknown key"), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+#[test]
 fn render_notes_tele_records_the_live_telemetry_without_changing_the_sound() {
     let melody = tmp("tele-melody.json");
     std::fs::write(

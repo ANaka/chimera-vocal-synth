@@ -277,7 +277,8 @@ async function main() {
   if (duet) makeDuet(duetDir);
 
   // WebGL through SwiftShader, for the 3D face
-  const browser = await chromium.launch({ headless: true, args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  // CHIMERA_CHROME: a browser to use in place of Playwright's own (as for e2e and show-video)
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHIMERA_CHROME || undefined, args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
   let errors = 0, warnings = 0, views = 0;
   for (const { w, h } of viewports) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
