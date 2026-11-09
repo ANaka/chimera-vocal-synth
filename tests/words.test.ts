@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { initEngine } from "./harness.ts";
+import type { Trail } from "../src/ui/mouthWords.ts";
 
 await initEngine();
 const { EnglishG2P, planPhrases, tokenizeIpa } = await import("../src/wasm/engine.ts");
@@ -69,36 +70,91 @@ describe("the trail at the mouth", () => {
     advanceTrail(t, word("b"), 1);
     expect(t.entries.map((e) => e.word.key)).toEqual(["b"]);
   });
+
+  test("a word that comes back while flying off forgets where it left from", () => {
+    const t: Trail = { entries: [] };
+    advanceTrail(t, word("a"), 0);
+    advanceTrail(t, null, 0.02);
+    t.entries[0].spot = wordSpot(622, 1080, 547, 628, 27, 1, 549);
+    advanceTrail(t, word("a"), 0.04);
+    expect(t.entries.length).toBe(1);
+    expect(t.entries[0].left).toBeNull();
+    expect(t.entries[0].spot).toBeUndefined();
+  });
 });
 
 describe("where the words at the mouth go", () => {
-  // a duet pane at 1080p (three heads side by side): 640 px wide, the lips' midline 509 px across
-  // at rest, 27 px per cm
-  const W = 640, H = 1080;
+  // a duet pane at 1920×1080 (three heads side by side): the overlay is 622 px wide, the face at
+  // 27 px per cm; the lips' midline is 509 px across at rest
+  const W = 622, H = 1080;
 
   test("a face at rest has its words in front of the lips, clear of their outline", () => {
     const s = wordSpot(W, H, 509, 595, 27, 1, 506);
-    expect(s.at).toBe("front");
+    expect([s.at, s.y]).toEqual(["front", 595]);
     expect(s.x).toBeCloseTo(509 + 1.2 * 27);
-    expect(s.room).toBeCloseTo(W - (509 + 1.2 * 27) - 14);
+    expect(s.lo).toBe(s.x);
+    expect(s.hi).toBeCloseTo(W - 14);
     // a corner of the mouth turned out past the midline pushes them on
     expect(wordSpot(W, H, 470, 595, 27, 1, 500).x).toBeCloseTo(500 + 0.6 * 27);
+    // facing left: the same, mirrored
+    const l = wordSpot(W, H, W - 509, 595, 27, -1, W - 506);
+    expect(l.at).toBe("front");
+    expect(l.x).toBeCloseTo(W - 509 - 1.2 * 27);
+    expect(l.lo).toBe(14);
+    expect(l.hi).toBe(l.x);
   });
 
   test("a face swung to the pane's edge has its words under the chin, not at the bottom of the pane", () => {
-    // the lead's head at 41.5 s in a show whose singer turns and nods (measured on the page): the
-    // words went to the bottom of the pane, 18 cm below the lips
-    const s = wordSpot(W, H, 547, 628, 20.2, 1, 549);
-    expect(s.at).toBe("under");
-    expect(s.x).toBeCloseTo(547 + 20.2);
-    expect(s.y).toBeCloseTo(628 + 6.5 * 20.2);
-    expect(s.room).toBe(W - 16);
-    // mirrored: a head facing left
-    const l = wordSpot(W, H, W - 547, 628, 20.2, -1, W - 549);
-    expect([l.at, l.x, l.y]).toEqual(["under", W - 547 - 20.2, 628 + 6.5 * 20.2]);
+    // the duet's lead at 41.5 s in a show whose singer turns and nods: the lips' midline 547 px
+    // across, 47 px from the edge; the words went to the bottom of the pane, 18 cm below the lips
+    const s = wordSpot(W, H, 547, 628, 27, 1, 549);
+    expect(s.at).toBe("chin");
+    expect(s.x).toBeCloseTo(547 + 27);
+    expect(s.y).toBeCloseTo(628 + 6.5 * 27);
+    // a long word may reach back under the jaw, but not more than a cm behind the lips (the throat)
+    expect([s.lo, s.hi]).toEqual([547 - 27, W - 8]);
+    const l = wordSpot(W, H, W - 547, 628, 27, -1, W - 549);
+    expect([l.at, l.x, l.lo, l.hi]).toEqual(["chin", W - 547 - 27, 8, W - 547 + 27]);
+  });
+
+  test("on a laptop's duet panes the turned face's words stay under the chin too", () => {
+    // 1280×720: 409 px panes, 17.6 px per cm at rest; the turn left 26 px in front of the lips, and
+    // the scale across the head's own axes fell to 12.9 px per cm, which sent them below the neck
+    const s = wordSpot(408.7, 635, 347.9, 420, 17.6, 1, 349);
+    expect(s.at).toBe("chin");
+    expect(s.y).toBeCloseTo(420 + 6.5 * 17.6);
+  });
+
+  test("on a phone's duet panes, where the words are taller than the room under the chin, they go below the neck", () => {
+    // 375×812: 114 px panes, the lips at the pane's edge, 8.3 px per cm (the words' 26 px floor is
+    // over 3 cm there)
+    const s = wordSpot(114, 665, 117, 348, 8.3, 1, 116);
+    expect([s.at, s.x, s.lo, s.hi]).toEqual(["neck", 117, 8, 106]);
+    expect(s.y).toBeCloseTo(348 + 18 * 8.3);
+    expect(wordSpot(114, 400, 117, 348, 8.3, 1, 116).y).toBe(400 - 14);
+  });
+
+  test("a face swaying at the limit doesn't flicker between front and under", () => {
+    // 66.6 px in front: enough to stay in front, not enough to come back from under the chin
+    expect(wordSpot(W, H, 509, 595, 27, 1, 506, "front").at).toBe("front");
+    expect(wordSpot(W, H, 509, 595, 27, 1, 506, "chin").at).toBe("chin");
+    expect(wordSpot(W, H, 490, 595, 27, 1, 490, "chin").at).toBe("front");
+  });
+
+  test("a face drawn near 13 px per cm doesn't flicker between the chin and below the neck", () => {
+    // 1024×768: the lead's face at 13.2-13.7 px per cm, the words always under (measured)
+    const at = (cm: number, was?: "chin" | "neck") => wordSpot(323, 635, 277, 362, cm, 1, 277, was).at;
+    expect([at(13.2), at(12.8), at(12.8, "chin"), at(12.4, "chin")]).toEqual(["chin", "neck", "chin", "neck"]);
+    expect([at(13.2, "neck"), at(13.6, "neck")]).toEqual(["neck", "chin"]);
   });
 
   test("under the chin stays on the screen", () => {
-    expect(wordSpot(W, 700, 547, 628, 20.2, 1).y).toBe(700 - 14);
+    expect(wordSpot(W, 700, 547, 628, 27, 1).y).toBe(700 - 14);
+    // lips swung past the pane's edge still leave the words 3 cm
+    const s = wordSpot(W, H, 640, 600, 27, 1, 641);
+    expect([s.at, s.lo, s.hi]).toEqual(["chin", W - 8 - 81, W - 8]);
+    const l = wordSpot(W, H, -18, 600, 27, -1, -19);
+    expect([l.at, l.lo, l.hi]).toEqual(["chin", 8, 8 + 81]);
   });
+
 });

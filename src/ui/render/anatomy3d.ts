@@ -734,12 +734,18 @@ export class Anatomy3D {
     return [((v.x + 1) / 2) * this.w, ((1 - v.y) / 2) * this.h];
   }
 
-  /** CSS px per cm at a body point, across the screen */
+  /** CSS px per cm at a body point, across the screen: a cm in the screen's plane, so the head's
+   *  pose (a turn away, a nod) doesn't foreshorten it */
   pxPerCmAt(x: number, y: number, z: number): number {
-    const e = this.camera.matrixWorld.elements;
-    const [x0, y0] = this.project(x, y, z);
-    const [x1, y1] = this.project(x + e[0], y + e[1], z + e[2]);
-    return Math.hypot(x1 - x0, y1 - y0);
+    const m = this.beams.group.matrixWorld;
+    const p = this.v3.set(x, y, z).applyMatrix4(m);
+    const px = p.x, py = p.y, pz = p.z;
+    // the camera's right, a body cm long in the world
+    const e = this.camera.matrixWorld.elements, k = m.getMaxScaleOnAxis();
+    p.project(this.camera);
+    const x0 = p.x, y0 = p.y;
+    p.set(px + k * e[0], py + k * e[1], pz + k * e[2]).project(this.camera);
+    return Math.hypot(((p.x - x0) / 2) * this.w, ((p.y - y0) / 2) * this.h);
   }
 
   /** the top of the head on screen (CSS px) and the head's scale there (px per body cm) */

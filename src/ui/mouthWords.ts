@@ -1,7 +1,8 @@
 /**
  * Words at the mouth: the syllable being sung or the word being spoken, written just in front of
- * the lips as it sounds. When the next one starts, it shrinks, dims and flies up and away, so a
- * fast scat run leaves a short trail instead of a pile-up.
+ * the lips as it sounds (under the chin when there is no room in front). When the next one starts,
+ * it shrinks, dims and flies away from where it was (up and away in front, downwards under the
+ * chin), so a fast scat run leaves a short trail instead of a pile-up.
  */
 import { hfont, label, seg } from "./render/vector.ts";
 import type { OverlayFn } from "./components/AnatomyView.tsx";
@@ -16,7 +17,8 @@ export interface MouthWord {
 const FADE = 0.45;
 
 export interface Trail {
-  entries: { word: MouthWord; left: number | null }[];
+  /** `left`: when the word was sent off (null while it sounds); `spot`: where it was then */
+  entries: { word: MouthWord; left: number | null; spot?: WordSpot }[];
 }
 
 /**
@@ -27,50 +29,69 @@ export interface Trail {
 export function advanceTrail(t: Trail, word: MouthWord | null, clock: number): void {
   const e = t.entries;
   const top = e[e.length - 1];
-  if (top && word && top.word.key === word.key) top.left = null;
-  else {
+  if (top && word && top.word.key === word.key) {
+    top.left = null;
+    top.spot = undefined;
+  } else {
     if (top && top.left === null) top.left = clock;
     if (word) e.push({ word, left: null });
   }
   while (e.length && (e.length > 8 || (e[0].left !== null && clock - e[0].left > FADE))) e.shift();
 }
 
-/** where the words go: in front of the mouth, or under the chin */
+/** the words' full size (px) at a face drawn `cm` px per cm: 1.7 cm, but at least 26 px */
+const wordSize = (cm: number) => Math.max(26, Math.min(64, cm * 1.7));
+
+/** where the words go */
 export interface WordSpot {
-  /** "front": from x at the lips' height, flying up and away; "under": centred on x at y, falling
-   *  away downwards */
-  at: "front" | "under";
+  /** "front": from x at the lips' height, flying up and away; "chin" (under the chin) and "neck"
+   *  (below the neck): centred on x at y (moved within lo..hi to fit), falling away downwards */
+  at: "front" | "chin" | "neck";
   x: number;
   y: number;
-  /** the width a word may take at full size before it shrinks to fit (px) */
-  room: number;
+  /** the span a word may take (px): it shrinks to fit */
+  lo: number;
+  hi: number;
 }
 
 /**
  * Where the words at a mouth go, on a screen `w` × `h` with the lips at (`lx`, `ly`), `cm` px per
- * cm there, the face looking towards `side`, and the lips' outline reaching `edge` on that side:
- * in front of the lips (1.2 cm, and clear of their outline) when there is room, else under the
- * chin, a cm ahead of the lips, in front of the throat. A narrow pane the head fills has no room in
- * front, and nor does a head whose tracked pose swings its face to the pane's edge (the duet's
- * lead, turning and nodding with the singer in the video).
+ * cm there, the face looking towards `side`, and the lips' outline reaching `edge` on that side.
+ * In front of the lips (1.2 cm, and clear of their outline) when there are 60 px of room there.
+ * Without them (a narrow pane, or a head whose tracked pose swings its face to the pane's edge, as
+ * the duet's lead does turning and nodding with the singer in the video), they go under the chin,
+ * a cm ahead of the lips and reaching no more than a cm behind them, in front of the throat. A
+ * face drawn under 13 px per cm (a phone's three duet panes) has words taller than the 2 cm there:
+ * they go below the neck instead. `was` is the spot used last: leaving it takes a margin (75 px in
+ * front to come back from under, 12.5 px per cm to go below the neck, 13.5 to come back), so a
+ * head swaying at a limit doesn't flicker between spots.
  */
-export function wordSpot(w: number, h: number, lx: number, ly: number, cm: number, side: 1 | -1, edge = lx): WordSpot {
+export function wordSpot(w: number, h: number, lx: number, ly: number, cm: number, side: 1 | -1, edge = lx, was?: WordSpot["at"]): WordSpot {
   const reach = Math.max(0, side * (edge - lx));
   const x0 = lx + side * Math.max(cm * 1.2, reach + cm * 0.6);
   const ahead = side > 0 ? w - x0 - 14 : x0 - 14;
-  if (ahead >= 60) return { at: "front", x: x0, y: ly, room: ahead };
-  return { at: "under", x: lx + side * cm, y: Math.min(h - 14, ly + cm * 6.5), room: w - 16 };
+  if (ahead >= (was === undefined || was === "front" ? 60 : 75)) return side > 0 ? { at: "front", x: x0, y: ly, lo: x0, hi: x0 + ahead } : { at: "front", x: x0, y: ly, lo: x0 - ahead, hi: x0 };
+  // the words' 26 px floor is over 2 cm below 13 px per cm
+  if (cm < (was === "chin" ? 12.5 : was === "neck" ? 13.5 : 13)) return { at: "neck", x: lx, y: Math.min(h - 14, ly + cm * 18), lo: 8, hi: w - 8 };
+  // no further back than a cm behind the lips, but at least 3 cm wide when the lips leave the pane
+  const back = lx - side * cm;
+  const y = Math.min(h - 14, ly + cm * 6.5);
+  return side > 0
+    ? { at: "chin", x: lx + cm, y, lo: Math.max(8, Math.min(back, w - 8 - 3 * cm)), hi: w - 8 }
+    : { at: "chin", x: lx - cm, y, lo: 8, hi: Math.min(w - 8, Math.max(back, 8 + 3 * cm)) };
 }
 
 /**
  * An overlay writing `now()`'s word at the mouth in `color`; each call keeps its own trail.
  * `side` is where the face looks on screen: 1 writes to the right of the lips, −1 to the left (a
- * head turned to face left), so the word is always in the open space in front of the mouth.
+ * head turned to face left), so the word is in the open space in front of the mouth, or under the
+ * chin on that side (see wordSpot).
  */
 export function mouthWords(now: () => MouthWord | null, color: string, side: 1 | -1 = 1): OverlayFn {
   const t: Trail = { entries: [] };
   const trail = t.entries;
   let clock = 0;
+  let was: WordSpot["at"] | undefined;
   return (ctx, r, m, f, a, { w, h, dt }) => {
     clock += dt;
     advanceTrail(t, now(), clock);
@@ -78,24 +99,29 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
     const lips = r.handles(m, f, a).find((h) => h.id === "lips");
     if (!lips) return;
     const lx = r.X(lips.pos), ly = r.Y(lips.pos);
-    const spot = wordSpot(w, h, lx, ly, r.pxPerCm, side, r.mouthEdge?.(side));
-    const { room } = spot;
-    const base = Math.max(26, Math.min(64, r.pxPerCm * 1.7));
-    for (const { word: wd, left } of trail) {
+    const here = wordSpot(w, h, lx, ly, r.pxPerCm, side, r.mouthEdge?.(side), was);
+    was = here.at;
+    const base = wordSize(r.pxPerCm);
+    for (const entry of trail) {
+      const { word: wd, left } = entry;
+      // the sounding word follows the mouth; a word sent off flies from where it was
+      if (left !== null) entry.spot ??= here;
+      const spot = entry.spot ?? here;
       const age = left === null ? 0 : clock - left;
       const u = Math.min(1, age / FADE);
       const text = wd.text.toUpperCase();
       ctx.font = hfont(base, "m");
       const wide = ctx.measureText(text).width * 1.08;
+      const room = spot.hi - spot.lo;
       const size = (wide > room ? (base * room) / wide : base) * (1 - 0.55 * u);
       const alpha = left === null ? 1 : 0.75 * (1 - u) ** 1.5;
       const o = { size, color, weight: "m" as const, ls: 0.05, alpha, moving: left !== null };
-      if (spot.at === "front") label(ctx, text, spot.x + side * age * 240, ly + size * 0.36 - age * 200, { ...o, align: side > 0 ? "left" : "right" });
+      if (spot.at === "front") label(ctx, text, spot.x + side * age * 240, spot.y + size * 0.36 - age * 200, { ...o, align: side > 0 ? "left" : "right" });
       else {
         const half = (Math.min(wide, room) * (1 - 0.55 * u)) / 2;
-        label(ctx, text, Math.min(w - 8 - half, Math.max(8 + half, spot.x)), spot.y + age * 240, { ...o, align: "center" });
+        label(ctx, text, Math.min(spot.hi - half, Math.max(spot.lo + half, spot.x)), spot.y + age * 240, { ...o, align: "center" });
       }
     }
-    if (spot.at === "front" && trail[trail.length - 1].left === null) seg(ctx, lx + side * 10, ly, spot.x - side * 10, ly, color, 1, { dash: [2, 5], alpha: 0.7 });
+    if (here.at === "front" && trail[trail.length - 1].left === null) seg(ctx, lx + side * 10, ly, here.x - side * 10, ly, color, 1, { dash: [2, 5], alpha: 0.7 });
   };
 }
