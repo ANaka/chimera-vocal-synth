@@ -46,6 +46,20 @@ cargo run --release -p chimera-cli -- compare csd    # against a real singer (do
 bun tools/spectrogram.ts in.wav out.png
 ```
 
+A song of your own for the duet page (`?show=<id>`, a folder under the gitignored `public/shows/`):
+
+```sh
+bun tools/midi-to-melody.ts song.mid --track 1 --phrases                       # the phrases a lyric sheet is written against
+bun tools/midi-to-melody.ts song.mid --track 1 --sheet sheet.txt --out melody.json
+cargo run --release -p chimera-cli -- render notes melody.json voice male --tele voice.tele
+bun tools/show-video.ts <id> out.mp4                                            # frame-exact MP4 of the show
+```
+
+The melody file can carry the song's own voice (`"vibrato"`, and a `"source"` object such as
+`{"brightness": 0.7, "roughness": 0.3}`), and a show voice can carry a `"performance"`: a head pose
+and expression tracked from a video, which turns the 3D head (`src/show/performance.ts`). On a host
+whose Playwright browser is stale, set `CHIMERA_CHROME` to a Chrome executable for the browser tools.
+
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md): the acoustic model (FDTD airway, sources,

@@ -20,7 +20,8 @@ and the CLI) under a React UI. See the README.
   `crates/chimera-cli/`: `chimera render | compare csd | diagnose | calibrate`.
 - `src/wasm/`: the UI's facade over the engine. `src/worklet/`: the AudioWorklet. `src/ui/`: React
   and the canvas renderers.
-- `tests/`: bun tests on the wasm build. `tools/`: e2e, layout lint, spectrogram, speech judge.
+- `tests/`: bun tests on the wasm build. `tools/`: e2e, layout lint, spectrogram, speech judge,
+  MIDI + lyric sheet to a melody file (`midi-to-melody.ts`), a duet show to MP4 (`show-video.ts`).
 - `docs/`: architecture, the engine contract (`rust-engine.md`), the UI look, the singer judge,
   and the hill-climb rules.
 
