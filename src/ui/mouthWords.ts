@@ -61,18 +61,19 @@ export interface WordSpot {
  * Without them (a narrow pane, or a head whose tracked pose swings its face to the pane's edge, as
  * the duet's lead does turning and nodding with the singer in the video), they go under the chin,
  * a cm ahead of the lips and reaching no more than a cm behind them, in front of the throat. A
- * face drawn under 13 px per cm (a phone's three duet panes) has words taller than the 2 cm there:
- * they go below the neck instead. `was` is the spot used last: leaving it takes a margin (75 px in
- * front to come back from under, 12.5 px per cm to go below the neck, 13.5 to come back), so a
- * head swaying at a limit doesn't flicker between spots.
+ * face drawn under about 12 px per cm (a phone's or a tablet's three duet panes, 6.6-11 px per cm)
+ * has words taller than the room there: they go below the neck instead. `was` is the spot used
+ * last (none after a silence): leaving it takes a margin, so a head swaying at a limit doesn't
+ * flicker between spots. Words in front stay there down to 50 px of room and come back at 60;
+ * under the chin down to 11.8 px per cm, and back from below the neck at 12.3 (a laptop's turned
+ * duet face measures 12.8 and up).
  */
 export function wordSpot(w: number, h: number, lx: number, ly: number, cm: number, side: 1 | -1, edge = lx, was?: WordSpot["at"]): WordSpot {
   const reach = Math.max(0, side * (edge - lx));
   const x0 = lx + side * Math.max(cm * 1.2, reach + cm * 0.6);
   const ahead = side > 0 ? w - x0 - 14 : x0 - 14;
-  if (ahead >= (was === undefined || was === "front" ? 60 : 75)) return side > 0 ? { at: "front", x: x0, y: ly, lo: x0, hi: x0 + ahead } : { at: "front", x: x0, y: ly, lo: x0 - ahead, hi: x0 };
-  // the words' 26 px floor is over 2 cm below 13 px per cm
-  if (cm < (was === "chin" ? 12.5 : was === "neck" ? 13.5 : 13)) return { at: "neck", x: lx, y: Math.min(h - 14, ly + cm * 18), lo: 8, hi: w - 8 };
+  if (ahead >= (was === "front" ? 50 : 60)) return side > 0 ? { at: "front", x: x0, y: ly, lo: x0, hi: x0 + ahead } : { at: "front", x: x0, y: ly, lo: x0 - ahead, hi: x0 };
+  if (cm < (was === "neck" ? 12.3 : 11.8)) return { at: "neck", x: lx, y: Math.min(h - 14, ly + cm * 18), lo: 8, hi: w - 8 };
   // no further back than a cm behind the lips, but at least 3 cm wide when the lips leave the pane
   const back = lx - side * cm;
   const y = Math.min(h - 14, ly + cm * 6.5);
@@ -95,7 +96,10 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
   return (ctx, r, m, f, a, { w, h, dt }) => {
     clock += dt;
     advanceTrail(t, now(), clock);
-    if (!trail.length) return;
+    if (!trail.length) {
+      was = undefined;
+      return;
+    }
     const lips = r.handles(m, f, a).find((h) => h.id === "lips");
     if (!lips) return;
     const lx = r.X(lips.pos), ly = r.Y(lips.pos);

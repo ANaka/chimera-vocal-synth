@@ -118,11 +118,11 @@ describe("where the words at the mouth go", () => {
   });
 
   test("on a laptop's duet panes the turned face's words stay under the chin too", () => {
-    // 1280×720: 409 px panes, 17.6 px per cm at rest; the turn left 26 px in front of the lips, and
-    // the scale across the head's own axes fell to 12.9 px per cm, which sent them below the neck
-    const s = wordSpot(408.7, 635, 347.9, 420, 17.6, 1, 349);
+    // 1280×720: 409 px panes, 16.6-17.6 px per cm through the turn (see the 3D view's scale below);
+    // the turn left 26 px in front of the lips
+    const s = wordSpot(408.7, 635, 347.9, 420, 16.6, 1, 349);
     expect(s.at).toBe("chin");
-    expect(s.y).toBeCloseTo(420 + 6.5 * 17.6);
+    expect(s.y).toBeCloseTo(420 + 6.5 * 16.6);
   });
 
   test("on a phone's duet panes, where the words are taller than the room under the chin, they go below the neck", () => {
@@ -135,17 +135,20 @@ describe("where the words at the mouth go", () => {
   });
 
   test("a face swaying at the limit doesn't flicker between front and under", () => {
-    // 66.6 px in front: enough to stay in front, not enough to come back from under the chin
-    expect(wordSpot(W, H, 509, 595, 27, 1, 506, "front").at).toBe("front");
-    expect(wordSpot(W, H, 509, 595, 27, 1, 506, "chin").at).toBe("chin");
-    expect(wordSpot(W, H, 490, 595, 27, 1, 490, "chin").at).toBe("front");
+    // words in front stay there down to 50 px of room, and come back at 60
+    const at = (lx: number, was?: "front" | "chin") => wordSpot(W, H, lx, 595, 27, 1, lx, was).at;
+    // ahead = 622 - (lx + 32.4) - 14
+    expect([at(509), at(520), at(520, "front"), at(530, "front")]).toEqual(["front", "chin", "front", "chin"]);
+    expect([at(520, "chin"), at(515, "chin")]).toEqual(["chin", "front"]);
   });
 
-  test("a face drawn near 13 px per cm doesn't flicker between the chin and below the neck", () => {
-    // 1024×768: the lead's face at 13.2-13.7 px per cm, the words always under (measured)
-    const at = (cm: number, was?: "chin" | "neck") => wordSpot(323, 635, 277, 362, cm, 1, 277, was).at;
-    expect([at(13.2), at(12.8), at(12.8, "chin"), at(12.4, "chin")]).toEqual(["chin", "neck", "chin", "neck"]);
-    expect([at(13.2, "neck"), at(13.6, "neck")]).toEqual(["neck", "chin"]);
+  test("a laptop's turned duet face keeps its words under the chin; a tablet's go below the neck", () => {
+    // 1024×768: the lead's face measured 12.8-13.9 px per cm through its turn, after a seek too
+    // (12.5-13.5 thresholds sent it below the neck at 12.9 and held it there); a tablet's three
+    // duet panes measure 10.8-11.05 px per cm
+    const at = (cm: number, was?: "front" | "chin" | "neck") => wordSpot(323, 635, 270, 356, cm, 1, 270, was).at;
+    expect([at(12.8), at(12.8, "front"), at(12.0, "chin"), at(13.2, "neck")]).toEqual(["chin", "chin", "chin", "chin"]);
+    expect([at(11.05), at(11.7, "chin"), at(12.2, "neck"), at(12.3, "neck")]).toEqual(["neck", "neck", "neck", "chin"]);
   });
 
   test("under the chin stays on the screen", () => {
@@ -157,4 +160,27 @@ describe("where the words at the mouth go", () => {
     expect([l.at, l.lo, l.hi]).toEqual(["chin", 8, 8 + 81]);
   });
 
+});
+
+describe("the 3D view's scale at the lips", () => {
+  test("a turned head doesn't shrink it", async () => {
+    // it measured a cm along the camera's right in the head's own axes, so a turn foreshortened it
+    // (31 % at this pose; the duet's lead went 17.6 → 12.9 px per cm at 1280×720) and the words
+    // took the face for a phone's
+    const THREE = await import("three");
+    const { Anatomy3D } = await import("../src/ui/render/anatomy3d.ts");
+    const r = new Anatomy3D();
+    r.resize(622, 1080);
+    r.camera.position.set(30, 5, 40);
+    r.camera.lookAt(0, 0, 0);
+    r.camera.updateMatrixWorld(true);
+    const head = (r as unknown as { beams: { group: InstanceType<typeof THREE.Group> } }).beams.group;
+    head.updateMatrixWorld(true);
+    const rest = r.pxPerCmAt(8, -6, 0);
+    head.quaternion.setFromEuler(new THREE.Euler(0, 0.6, 0.2, "YXZ"));
+    head.updateMatrixWorld(true);
+    // only the lips' depth changes it (perspective): 8 % here
+    expect(r.pxPerCmAt(8, -6, 0) / rest).toBeGreaterThan(0.9);
+    r.dispose();
+  });
 });
