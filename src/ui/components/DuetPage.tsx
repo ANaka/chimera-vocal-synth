@@ -16,6 +16,11 @@
  * `performance` (a head pose and expression tracked from the song's video, on the audio's clock:
  * see src/show/performance.ts) turns, nods and tilts its head and moves its brows and eyelids in
  * place of the voice's own nods and sways; the mouth, tongue and airway stay the engine's.
+ *
+ * Capture mode, for tools/show-video.ts (`?show=<id>&capture`): once the show has loaded, the
+ * page's transport is on `window.__duet` (a {@link DuetHandle}), and the page shows only the heads
+ * (no title bar, transport bar or panel frames; the words at the mouth stay). `&capture=ui` keeps
+ * the page as it is and only exposes the transport. Without `capture` none of this happens.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnatomyView3D, type HeadFeed } from "./AnatomyView3D.tsx";
@@ -56,6 +61,11 @@ async function fetchOk(url: string): Promise<Response> {
   if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
   return r;
 }
+
+/** what capture mode puts on `window.__duet` */
+export type DuetHandle = { transport: Transport };
+const capture = new URLSearchParams(window.location.search).get("capture");
+const captureWin = window as unknown as { __duet?: DuetHandle };
 
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
@@ -102,10 +112,14 @@ export function DuetPage(props: { id: string }) {
       // a performance on another clock than the audio (the video's, say, with the audio a render
       // that starts the song elsewhere) plays out of step; past the audio's end is the sure sign
       performances.forEach((p, i) => p && p.end > transport.duration + 1 && console.warn(`duet: ${show.voices[i].performance} runs to ${p.end.toFixed(1)} s, past the audio's ${transport.duration.toFixed(1)} s: is it on the audio's clock?`));
-      if (live) setLoaded({ show, voices });
+      if (!live) return;
+      setLoaded({ show, voices });
+      if (capture !== null) captureWin.__duet = { transport };
     })().catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       live = false;
+      // never left pointing at a disposed transport (StrictMode mounts twice)
+      if (captureWin.__duet?.transport === transport) delete captureWin.__duet;
     };
   }, [base, transport]);
 
@@ -129,7 +143,7 @@ export function DuetPage(props: { id: string }) {
   const st = transport?.state ?? { playing: false, time: 0, duration: 0, epoch: 0 };
   const title = loaded?.show.title ?? "Loading…";
   return (
-    <div className="duet">
+    <div className={capture !== null && capture !== "ui" ? "duet capture" : "duet"}>
       <header className="duet-top">
         <span className="wordmark">Chimera</span>
         <span className="duet-title">{title}</span>

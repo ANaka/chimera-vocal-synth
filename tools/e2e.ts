@@ -12,6 +12,8 @@ mkdirSync(outDir, { recursive: true });
 
 const browser = await chromium.launch({
   headless: true,
+  // CHIMERA_CHROME: a browser to use in place of Playwright's own (as for layout-lint and show-video)
+  executablePath: process.env.CHIMERA_CHROME || undefined,
   args: ["--autoplay-policy=no-user-gesture-required", "--use-fake-ui-for-media-stream"],
 });
 const errors: string[] = [];
