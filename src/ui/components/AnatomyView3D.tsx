@@ -22,6 +22,7 @@ import { articulatorSlots, tractInfo, type InfoFn, type OverlayFn, type SlotsFn 
 import type { ViewFlags } from "../render/anatomy.ts";
 import type { HumanArtic } from "../../wasm/engine.ts";
 import type { TelemetryMessage } from "../../worklet/protocol.ts";
+import type { PerformancePose } from "../../show/performance.ts";
 
 /**
  * A head driven by something other than the live engine (the duet page's recordings): its own
@@ -31,7 +32,8 @@ import type { TelemetryMessage } from "../../worklet/protocol.ts";
 export interface HeadFeed {
   model: VoiceModel;
   view: ViewFlags;
-  frame(): { tele: TelemetryMessage | null; artic: HumanArtic; epoch: number };
+  /** `pose`: the head's pose and expression from a video (see Anatomy3D.pose), or none */
+  frame(): { tele: TelemetryMessage | null; artic: HumanArtic; epoch: number; pose?: PerformancePose | null };
   /** cap on the device pixel ratio (two heads on a phone draw half the pixels at 1.5) */
   maxDpr?: number;
   /** which way the head turns to show its face (see Anatomy3D.facing) */
@@ -183,6 +185,7 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
           r.resetMotion();
         }
         tele = fr.tele;
+        r.pose = fr.pose ?? null;
         a = tele ? VoiceModel.articFromArray(tele.t.artic) : fr.artic;
       } else {
         tele = engine.latest && sameBody(engine.latest.body, st.body) ? engine.latest : null;

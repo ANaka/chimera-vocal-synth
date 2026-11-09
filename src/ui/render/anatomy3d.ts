@@ -27,6 +27,7 @@ import { Beams, Poly } from "./beams3d.ts";
 import { bodyPoint, buildProfile, Gaze, jawAngle, wallX } from "./profile.ts";
 import { faceHandles, type FaceView, type ViewFlags } from "./anatomy.ts";
 import { Expression } from "./expression.ts";
+import type { PerformancePose } from "../../show/performance.ts";
 
 type Table = readonly (readonly [number, number])[];
 type V3 = [number, number, number];
@@ -36,6 +37,7 @@ const smooth = (a: number, b: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
 
 function interp(tab: Table, x: number): number {
   if (x <= tab[0][0]) return tab[0][1];
@@ -648,12 +650,18 @@ export class Anatomy3D {
   private readonly gaze = new Gaze();
   /** brows, lids, cheeks and the head's nods, from the voice (the view updates it) */
   face = new Expression();
+  /** a singer's pose and expression from a video (the duet page sets it each frame): by its weight
+   *  it takes the place of the face's nods and sways, turns the head (the face never does) and
+   *  moves the brows and lids; the mouth stays the engine's. Null: the face alone. */
+  pose: PerformancePose | null = null;
   /** the camera in the head's own frame (the head nods and sways under it) */
   private readonly eye = new THREE.Vector3();
   private readonly turn = new THREE.Quaternion();
   private readonly euler = new THREE.Euler();
   private strobe = 0;
   private readonly tmp = new Poly();
+  /** the lips' vermilion borders as last drawn, upper then lower (head frame, 29 points each) */
+  private readonly mouthRim = new Float32Array(2 * 29 * 3);
   private readonly particles: Particle[] = [];
   private echoes: Echo[] = [];
   private lastEcho = -1;
@@ -752,6 +760,15 @@ export class Anatomy3D {
       X: (p) => this.project(p.x, p.y, 0)[0],
       Y: (p) => this.project(p.x, p.y, 0)[1],
       pxPerCm: this.pxPerCmAt(lips.x, lips.y, 0),
+      mouthEdge: (side) => {
+        const R = this.mouthRim;
+        let e = side > 0 ? -Infinity : Infinity;
+        for (let i = 0; i < R.length; i += 3) {
+          const x = this.project(R[i], R[i + 1], R[i + 2])[0];
+          e = side > 0 ? Math.max(e, x) : Math.min(e, x);
+        }
+        return e;
+      },
     };
   }
 
@@ -891,13 +908,20 @@ export class Anatomy3D {
 
   /**
    * The head nods (chin up on high notes, down on the beat) and sways (on a long note, and with
-   * the vibrato) about the top of the neck. Everything is drawn in the head's frame, so this
-   * turns the beams' group; the camera's position in that frame is kept for what faces it.
+   * the vibrato) about the top of the neck, or turns, nods and tilts as the singer in a video did.
+   * Everything is drawn in the head's frame, so this turns the beams' group; the camera's position
+   * in that frame is kept for what faces it.
    */
   private headPose(rest: Rest, k: number): void {
     const g = this.beams.group;
     const pivot = this.v3.set(-2.4 * k, rest.head.y0 + 0.42 * (rest.condyle.y - rest.head.y0), 0);
-    this.turn.setFromEuler(this.euler.set(this.face.tilt, 0, this.face.nod));
+    // body axes: the tilt turns about x (forward; + leans to his right shoulder, the video's roll +
+    // to his left), the yaw about y (up; + swings the nose to −z, his left), the nod about z (+ chin
+    // up). The yaw is outermost, so a turned head still nods about its own ears; without it this is
+    // the face's own nod inside its tilt, as before. The video's pose goes in by its weight
+    const q = this.pose, w = q?.weight ?? 0;
+    const nod = lerp(this.face.nod, q?.pitch ?? 0, w), tilt = lerp(this.face.tilt, -(q?.roll ?? 0), w), yaw = (q?.yaw ?? 0) * w;
+    this.turn.setFromEuler(this.euler.set(tilt, yaw, nod, "YXZ"));
     g.quaternion.copy(this.turn);
     g.position.copy(pivot).sub(pivot.applyQuaternion(this.turn));
     g.updateMatrixWorld(true);
@@ -919,9 +943,12 @@ export class Anatomy3D {
       return [u, cross(n, u)];
     };
     const cam = this.eye;
+    // the brows and lids: the voice's, or the video's by its face weight (the video may not see them)
+    const q = this.pose, wf = q?.face ?? 0;
+    const brow = lerp(e.brow, q?.brow ?? 0, wf), lidShut = lerp(e.lid, q?.blink ?? 0, wf);
     // the iris shows less as the lids close
-    const seen = 1 - smooth(0.4, 0.9, e.lid);
-    const wide = Math.max(0, e.brow);
+    const seen = 1 - smooth(0.4, 0.9, lidShut);
+    const wide = Math.max(0, brow);
     for (const c of rest.eyes) {
       // a sphere's outline is the circle facing the camera
       const toCam = norm3([cam.x - c[0], cam.y - c[1], cam.z - c[2]]);
@@ -941,7 +968,7 @@ export class Anatomy3D {
         for (let i = 0; i <= 16; i++) {
           const sv = -1 + i / 8, al = out * sv * 0.95;
           const lo = lidAt(-0.36, sv, -1);
-          const be = upper ? lidAt(0.5 + 0.2 * wide, sv, 1) * (1 - e.lid) + (lo + 0.03) * e.lid : lo;
+          const be = upper ? lidAt(0.5 + 0.2 * wide, sv, 1) * (1 - lidShut) + (lo + 0.03) * lidShut : lo;
           L.p(c[0] + 1.04 * r * Math.cos(be) * Math.cos(al), c[1] + 1.04 * r * Math.sin(be), c[2] + 1.04 * r * Math.cos(be) * Math.sin(al));
         }
         L.end();
@@ -950,7 +977,7 @@ export class Anatomy3D {
       lid(false);
       // the brow above it: up with the pitch, knit (inner end down) on a low note, and on a long
       // high note with the eyes shut, the inner end up (the singer feeling it)
-      const lift = 0.3 * e.brow, knit = 0.28 * Math.max(0, -e.brow), feel = 0.22 * e.lid * wide;
+      const lift = 0.3 * brow, knit = 0.28 * Math.max(0, -brow), feel = 0.22 * lidShut * wide;
       for (let i = 0; i <= 12; i++) {
         const sv = -1 + i / 6, al = out * (0.15 + sv * 0.62), inner = (1 - sv) / 2;
         const be = 0.82 + 0.12 * (1 - sv * sv) - 0.06 * sv + lift + (feel - knit) * inner;
@@ -1029,6 +1056,7 @@ export class Anatomy3D {
         return Math.max(0, (upper ? 0.42 : 0.45) * s + bow * s);
       };
       B.poly(row(upper, border, -Wv, Wv, 28), V.pink, 1.3, { alpha: 0.95 });
+      this.mouthRim.set(P.a.subarray(0, 29 * 3), upper ? 0 : 29 * 3);
       B.poly(row(upper, (z) => 0.45 * border(z), -Wv, Wv, 28), V.pink, 1.0, { alpha: 0.45 });
     }
     // where the lips meet beyond the corners

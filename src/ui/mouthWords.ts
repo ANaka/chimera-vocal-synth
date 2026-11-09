@@ -51,7 +51,10 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
     const lips = r.handles(m, f, a).find((h) => h.id === "lips");
     if (!lips) return;
     const lx = r.X(lips.pos), ly = r.Y(lips.pos);
-    const x0 = lx + side * r.pxPerCm * 1.2;
+    // 1.2 cm in front of the lips' midline, and clear of their outline (a head turned towards the
+    // camera shows the mouth's near corner out past the midline)
+    const reach = r.mouthEdge ? Math.max(0, side * (r.mouthEdge(side) - lx)) : 0;
+    const x0 = lx + side * Math.max(r.pxPerCm * 1.2, reach + r.pxPerCm * 0.6);
     const ahead = side > 0 ? w - x0 - 14 : x0 - 14;
     // no room in front of the mouth (a narrow screen the head fills): the words go under the chin,
     // below the neck, and fall away downwards

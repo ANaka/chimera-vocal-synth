@@ -12,12 +12,16 @@
  *
  * Optional: `bpm` and `downbeat` (s, a bar's first beat) nod the heads on the beat; a voice's
  * `melody` (the melody file it was rendered from) writes its words at its mouth, and the show's
- * `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary as it should read.
+ * `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary as it should read. A voice's
+ * `performance` (a head pose and expression tracked from the song's video, on the audio's clock:
+ * see src/show/performance.ts) turns, nods and tilts its head and moves its brows and eyelids in
+ * place of the voice's own nods and sways; the mouth, tongue and airway stay the engine's.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnatomyView3D, type HeadFeed } from "./AnatomyView3D.tsx";
 import { Screen } from "./Screen.tsx";
 import { TeleTrack } from "../../show/tele.ts";
+import { Performance, restPose } from "../../show/performance.ts";
 import { Transport } from "../../show/transport.ts";
 import { getModel } from "../useModel.ts";
 import { VoiceModel } from "../analysis.ts";
@@ -36,12 +40,12 @@ interface ShowFile {
   bpm?: number;
   downbeat?: number;
   spell?: Record<string, string>;
-  voices: { name: string; tele: string; melody?: string }[];
+  voices: { name: string; tele: string; melody?: string; performance?: string }[];
 }
 
 interface Loaded {
   show: ShowFile;
-  voices: { name: string; track: TeleTrack; words: SungWords | null }[];
+  voices: { name: string; track: TeleTrack; words: SungWords | null; performance: Performance | null }[];
 }
 
 /** the heads as the face screen shows them by default, less the measurement labels */
@@ -77,8 +81,12 @@ export function DuetPage(props: { id: string }) {
       const show = (await (await fetchOk(base + "show.json")).json()) as ShowFile;
       if (!show.voices?.length || !show.audio) throw new Error("show.json needs audio and voices");
       const [audio, ...teles] = await Promise.all([fetchOk(base + show.audio).then((r) => r.arrayBuffer()), ...show.voices.map((v) => fetchOk(base + v.tele).then((r) => r.arrayBuffer()))]);
-      // the words: syllables as the CLI splits them (the pronouncing dictionary first, as it does)
-      const melodies = await Promise.all(show.voices.map((v) => (v.melody ? fetchOk(base + v.melody).then((r) => r.json() as Promise<Melody>) : null)));
+      // the words: syllables as the CLI splits them (the pronouncing dictionary first, as it does),
+      // fetched with the performances (a missing or damaged one is an error, as a missing melody is)
+      const [melodies, performances] = await Promise.all([
+        Promise.all(show.voices.map((v) => (v.melody ? fetchOk(base + v.melody).then((r) => r.json() as Promise<Melody>) : null))),
+        Promise.all(show.voices.map((v) => (v.performance ? fetchOk(base + v.performance).then(async (r) => new Performance(await r.json())) : null))),
+      ]);
       if (melodies.some(Boolean)) await g2p.load().catch(() => {});
       const words = melodies.map((m) => {
         if (!m) return null;
@@ -89,8 +97,11 @@ export function DuetPage(props: { id: string }) {
           return null;
         }
       });
-      const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]), words: words[i] }));
+      const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]), words: words[i], performance: performances[i] }));
       await transport.load(audio);
+      // a performance on another clock than the audio (the video's, say, with the audio a render
+      // that starts the song elsewhere) plays out of step; past the audio's end is the sure sign
+      performances.forEach((p, i) => p && p.end > transport.duration + 1 && console.warn(`duet: ${show.voices[i].performance} runs to ${p.end.toFixed(1)} s, past the audio's ${transport.duration.toFixed(1)} s: is it on the audio's clock?`));
       if (live) setLoaded({ show, voices });
     })().catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
@@ -124,7 +135,7 @@ export function DuetPage(props: { id: string }) {
         <span className="duet-title">{title}</span>
       </header>
       <main className="duet-heads" style={{ "--voices": loaded?.voices.length ?? 2 } as React.CSSProperties}>
-        {loaded && transport ? loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />) : <p className="duet-msg">Loading the song…</p>}
+        {loaded && transport ? loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} performance={v.performance} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />) : <p className="duet-msg">Loading the song…</p>}
       </main>
       <footer className="duet-bar">
         <button className="primary large" disabled={!loaded} onClick={() => (st.playing ? transport?.pause() : transport?.play())}>
@@ -150,8 +161,8 @@ export function DuetPage(props: { id: string }) {
 }
 
 /** one voice's head; the last of several turns to face the others */
-function Head(props: { name: string; track: TeleTrack; words: SungWords | null; show: ShowFile; transport: Transport; facing: 1 | -1 }) {
-  const { track, show, transport, words } = props;
+function Head(props: { name: string; track: TeleTrack; words: SungWords | null; performance: Performance | null; show: ShowFile; transport: Transport; facing: 1 | -1 }) {
+  const { track, show, transport, words, performance } = props;
   const feedRef = useRef<HeadFeed | null>(null);
   // the syllable at the mouth, written on the side the face looks to
   const overlayRef = useRef<OverlayFn | undefined>(undefined);
@@ -163,6 +174,7 @@ function Head(props: { name: string; track: TeleTrack; words: SungWords | null; 
       const s = Math.floor(((t - (show.downbeat ?? 0)) * show.bpm * 4) / 60);
       return s < 0 ? -1 : s % 16;
     };
+    const pose = restPose();
     feedRef.current = {
       model,
       view: VIEW,
@@ -172,9 +184,9 @@ function Head(props: { name: string; track: TeleTrack; words: SungWords | null; 
         const t = transport.time();
         const i = track.indexAt(t);
         const msg = track.message(i, beatStep(t));
-        // paused: the head keeps its shape, the voice and the face come to rest
-        if (!transport.isPlaying) return { tele: null, artic: VoiceModel.articFromArray(msg.t.artic), epoch: transport.epoch };
-        return { tele: msg, artic: VoiceModel.articFromArray(msg.t.artic), epoch: transport.epoch };
+        // paused: the head keeps its shape, the voice and the face come to rest; the video's pose
+        // at the playhead holds there
+        return { tele: transport.isPlaying ? msg : null, artic: VoiceModel.articFromArray(msg.t.artic), epoch: transport.epoch, pose: performance?.pose(t, pose) ?? null };
       },
     };
   }

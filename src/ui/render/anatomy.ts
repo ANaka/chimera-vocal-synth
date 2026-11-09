@@ -50,6 +50,9 @@ export interface FaceView {
   X(p: Vec): number;
   Y(p: Vec): number;
   readonly pxPerCm: number;
+  /** where the lips' outline reaches furthest on screen towards `side` (x, CSS px), if the view
+   *  knows: a 3D head turned towards the camera shows a corner of the mouth past the midline */
+  mouthEdge?(side: 1 | -1): number;
 }
 
 export interface ViewFlags {
