@@ -10,7 +10,7 @@ import { initEngine } from "./harness.ts";
 await initEngine();
 const { EnglishG2P, planPhrases, tokenizeIpa } = await import("../src/wasm/engine.ts");
 const { wordSpans } = await import("../src/ui/words.ts");
-const { advanceTrail } = await import("../src/ui/mouthWords.ts");
+const { advanceTrail, wordSpot } = await import("../src/ui/mouthWords.ts");
 const g2p = new EnglishG2P();
 g2p.setDictionaryText(gunzipSync(readFileSync(new URL("../public/data/cmudict.txt.gz", import.meta.url))).toString());
 const male = { female: 0, child: 0 };
@@ -68,5 +68,37 @@ describe("the trail at the mouth", () => {
     // gone once it has flown off
     advanceTrail(t, word("b"), 1);
     expect(t.entries.map((e) => e.word.key)).toEqual(["b"]);
+  });
+});
+
+describe("where the words at the mouth go", () => {
+  // a duet pane at 1080p (three heads side by side): 640 px wide, the lips' midline 509 px across
+  // at rest, 27 px per cm
+  const W = 640, H = 1080;
+
+  test("a face at rest has its words in front of the lips, clear of their outline", () => {
+    const s = wordSpot(W, H, 509, 595, 27, 1, 506);
+    expect(s.at).toBe("front");
+    expect(s.x).toBeCloseTo(509 + 1.2 * 27);
+    expect(s.room).toBeCloseTo(W - (509 + 1.2 * 27) - 14);
+    // a corner of the mouth turned out past the midline pushes them on
+    expect(wordSpot(W, H, 470, 595, 27, 1, 500).x).toBeCloseTo(500 + 0.6 * 27);
+  });
+
+  test("a face swung to the pane's edge has its words under the chin, not at the bottom of the pane", () => {
+    // the lead's head at 41.5 s in a show whose singer turns and nods (measured on the page): the
+    // words went to the bottom of the pane, 18 cm below the lips
+    const s = wordSpot(W, H, 547, 628, 20.2, 1, 549);
+    expect(s.at).toBe("under");
+    expect(s.x).toBeCloseTo(547 + 20.2);
+    expect(s.y).toBeCloseTo(628 + 6.5 * 20.2);
+    expect(s.room).toBe(W - 16);
+    // mirrored: a head facing left
+    const l = wordSpot(W, H, W - 547, 628, 20.2, -1, W - 549);
+    expect([l.at, l.x, l.y]).toEqual(["under", W - 547 - 20.2, 628 + 6.5 * 20.2]);
+  });
+
+  test("under the chin stays on the screen", () => {
+    expect(wordSpot(W, 700, 547, 628, 20.2, 1).y).toBe(700 - 14);
   });
 });

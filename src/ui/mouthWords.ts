@@ -35,6 +35,33 @@ export function advanceTrail(t: Trail, word: MouthWord | null, clock: number): v
   while (e.length && (e.length > 8 || (e[0].left !== null && clock - e[0].left > FADE))) e.shift();
 }
 
+/** where the words go: in front of the mouth, or under the chin */
+export interface WordSpot {
+  /** "front": from x at the lips' height, flying up and away; "under": centred on x at y, falling
+   *  away downwards */
+  at: "front" | "under";
+  x: number;
+  y: number;
+  /** the width a word may take at full size before it shrinks to fit (px) */
+  room: number;
+}
+
+/**
+ * Where the words at a mouth go, on a screen `w` × `h` with the lips at (`lx`, `ly`), `cm` px per
+ * cm there, the face looking towards `side`, and the lips' outline reaching `edge` on that side:
+ * in front of the lips (1.2 cm, and clear of their outline) when there is room, else under the
+ * chin, a cm ahead of the lips, in front of the throat. A narrow pane the head fills has no room in
+ * front, and nor does a head whose tracked pose swings its face to the pane's edge (the duet's
+ * lead, turning and nodding with the singer in the video).
+ */
+export function wordSpot(w: number, h: number, lx: number, ly: number, cm: number, side: 1 | -1, edge = lx): WordSpot {
+  const reach = Math.max(0, side * (edge - lx));
+  const x0 = lx + side * Math.max(cm * 1.2, reach + cm * 0.6);
+  const ahead = side > 0 ? w - x0 - 14 : x0 - 14;
+  if (ahead >= 60) return { at: "front", x: x0, y: ly, room: ahead };
+  return { at: "under", x: lx + side * cm, y: Math.min(h - 14, ly + cm * 6.5), room: w - 16 };
+}
+
 /**
  * An overlay writing `now()`'s word at the mouth in `color`; each call keeps its own trail.
  * `side` is where the face looks on screen: 1 writes to the right of the lips, −1 to the left (a
@@ -51,17 +78,9 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
     const lips = r.handles(m, f, a).find((h) => h.id === "lips");
     if (!lips) return;
     const lx = r.X(lips.pos), ly = r.Y(lips.pos);
-    // 1.2 cm in front of the lips' midline, and clear of their outline (a head turned towards the
-    // camera shows the mouth's near corner out past the midline)
-    const reach = r.mouthEdge ? Math.max(0, side * (r.mouthEdge(side) - lx)) : 0;
-    const x0 = lx + side * Math.max(r.pxPerCm * 1.2, reach + r.pxPerCm * 0.6);
-    const ahead = side > 0 ? w - x0 - 14 : x0 - 14;
-    // no room in front of the mouth (a narrow screen the head fills): the words go under the chin,
-    // below the neck, and fall away downwards
-    const below = ahead < 60;
-    const room = below ? w - 16 : ahead;
+    const spot = wordSpot(w, h, lx, ly, r.pxPerCm, side, r.mouthEdge?.(side));
+    const { room } = spot;
     const base = Math.max(26, Math.min(64, r.pxPerCm * 1.7));
-    const by = Math.min(h - 14, ly + r.pxPerCm * 18);
     for (const { word: wd, left } of trail) {
       const age = left === null ? 0 : clock - left;
       const u = Math.min(1, age / FADE);
@@ -71,11 +90,12 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
       const size = (wide > room ? (base * room) / wide : base) * (1 - 0.55 * u);
       const alpha = left === null ? 1 : 0.75 * (1 - u) ** 1.5;
       const o = { size, color, weight: "m" as const, ls: 0.05, alpha, moving: left !== null };
-      if (below) {
+      if (spot.at === "front") label(ctx, text, spot.x + side * age * 240, ly + size * 0.36 - age * 200, { ...o, align: side > 0 ? "left" : "right" });
+      else {
         const half = (Math.min(wide, room) * (1 - 0.55 * u)) / 2;
-        label(ctx, text, Math.min(w - 8 - half, Math.max(8 + half, lx)), by + age * 120, { ...o, align: "center" });
-      } else label(ctx, text, x0 + side * age * 240, ly + size * 0.36 - age * 200, { ...o, align: side > 0 ? "left" : "right" });
+        label(ctx, text, Math.min(w - 8 - half, Math.max(8 + half, spot.x)), spot.y + age * 240, { ...o, align: "center" });
+      }
     }
-    if (!below && trail[trail.length - 1].left === null) seg(ctx, lx + side * 10, ly, x0 - side * 10, ly, color, 1, { dash: [2, 5], alpha: 0.7 });
+    if (spot.at === "front" && trail[trail.length - 1].left === null) seg(ctx, lx + side * 10, ly, spot.x - side * 10, ly, color, 1, { dash: [2, 5], alpha: 0.7 });
   };
 }
